@@ -68,33 +68,32 @@ module Lex =
           Length: int
           Type: TokenType }
 
-    let tokenize (input: string) =
+    let tokenizeRep reporter (input: string) =
 
-        let emitError (input: string) (message: string) (offset: int) =
+        let emitError (input: string) (offset: int) (message: string) =
             let newLines =
                 List.ofSeq input.[0..offset]
                 |> List.indexed
                 |> List.filter (snd >> (=) '\n')
 
-            printfn
-                "%d:%d: %s"
-                (List.length newLines + 1)
+            sprintf "%d:%d: %s\n" (List.length newLines + 1)
                 (match List.tryLast newLines with
                  | None -> offset
-                 | Some ((last, _)) -> offset - last)
-                message
+                 | Some ((last, _)) -> offset - last) message
+            |> reporter
 
             let startOffset =
                 match List.tryLast newLines with
                 | None -> 0
-                | Some ((last, _)) -> last
+                | Some (last, _) -> last
 
             let endOffset =
                 match input.IndexOf(value = '\n', startIndex = startOffset) with
                 | -1 -> input.Length
                 | value -> value
 
-            printfn "%4d | %s" (newLines.Length + 1) input.[startOffset..endOffset]
+            sprintf "%4d | %s\n" (newLines.Length + 1) input.[startOffset..endOffset]
+            |> reporter
 
         let error = emitError input
 
@@ -107,7 +106,7 @@ module Lex =
 
         let rec readIdentifierRec chars input =
             match input with
-            | c :: rest when Char.IsLetterOrDigit c -> readIdentifierRec (chars + Char.ToString c) rest
+            | c :: rest when Char.IsLetterOrDigit c || c = '_' -> readIdentifierRec (chars + Char.ToString c) rest
             | _ -> (chars, input)
 
         let readIdentifier = readIdentifierRec ""
@@ -126,11 +125,13 @@ module Lex =
 
         let readChar = readCharRec ""
 
-        let rec readBlockComment input =
+        let rec readBlockComment offset input =
             match input with
             | '*' :: '/' :: rest -> rest
-            | [] -> input
-            | _ :: rest -> readBlockComment rest
+            | [] ->
+                error offset "Unterminated block comment"
+                input
+            | _ :: rest -> readBlockComment (offset + 1) rest
 
         let rec tokenizeFirst offset input =
             match input with
@@ -142,7 +143,7 @@ module Lex =
                   Length = length
                   Type = Literal num }
                 :: tokenizeFirst (offset + length) rest
-            | c :: _ when Char.IsLetter c ->
+            | c :: _ when Char.IsLetter c || c = '_' ->
                 let identifier, rest = input |> readIdentifier
                 let length = List.length input - List.length rest
 
@@ -169,17 +170,17 @@ module Lex =
             | [] -> []
             | ''' :: rest ->
                 let character, rest = rest |> readChar
-                let length = input.Length - rest.Length
+                let length = List.length input - List.length rest
 
                 { Offset = offset
                   Length = length
                   Type = Literal character }
                 :: tokenizeFirst (offset + length) rest
             | '/' :: '/' :: rest ->
-                let skipped = rest |> List.takeWhile ((<>) '/')
+                let skipped = rest |> List.skipWhile ((<>) '\n')
                 tokenizeFirst (offset + skipped.Length) skipped
             | '/' :: '*' :: rest ->
-                let skipped = readBlockComment rest
+                let skipped = readBlockComment offset rest
                 tokenizeFirst (offset + skipped.Length) skipped
             | '/' :: '=' :: rest ->
                 { Offset = offset
@@ -387,7 +388,11 @@ module Lex =
                   Type = Colon }
                 :: tokenizeFirst (offset + 1) rest
             | c :: rest ->
-                error (sprintf "Unexpected character '%c'" c) offset
+                sprintf "Unexpected character '%c'" c
+                |> error offset
+
                 tokenizeFirst (offset + 1) rest
 
         List.ofSeq input |> tokenizeFirst 0
+
+    let tokenize = tokenizeRep Console.Write
