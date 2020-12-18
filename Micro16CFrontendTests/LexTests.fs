@@ -205,6 +205,146 @@ let Operators () =
              Colon ]
 
 [<Fact>]
-let miscellaneous () =
+let Miscellaneous () =
     lexerOutput "$"
     |> should haveSubstring "Unexpected character '$'"
+
+[<Fact>]
+let ``Character literals`` () =
+    tokenize "'a'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = 'a' |> int16 |> Literal
+               Length = 3 } ]
+
+    lexerOutput "''"
+    |> should haveSubstring "Expected at least one character in character literal"
+
+    lexerOutput "'"
+    |> should haveSubstring "Unterminated character literal"
+
+    tokenize "'\\''"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = '\'' |> int16 |> Literal
+               Length = 4 } ]
+
+    tokenize "'\\\"'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = '"' |> int16 |> Literal
+               Length = 4 } ]
+
+    tokenize "'\\?'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = '?' |> int16 |> Literal
+               Length = 4 } ]
+
+    tokenize "'\\\\'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = '\\' |> int16 |> Literal
+               Length = 4 } ]
+
+    tokenize "'\\a'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = '\a' |> int16 |> Literal
+               Length = 4 } ]
+
+    tokenize "'\\b'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = '\b' |> int16 |> Literal
+               Length = 4 } ]
+
+    tokenize "'\\f'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = '\f' |> int16 |> Literal
+               Length = 4 } ]
+
+    tokenize "'\\n'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = '\n' |> int16 |> Literal
+               Length = 4 } ]
+
+    tokenize "'\\r'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = '\r' |> int16 |> Literal
+               Length = 4 } ]
+
+    tokenize "'\\t'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = '\t' |> int16 |> Literal
+               Length = 4 } ]
+
+    tokenize "'\\v'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = '\v' |> int16 |> Literal
+               Length = 4 } ]
+
+    lexerOutput "'\\$'"
+    |> should haveSubstring "Unknown escape character '$'"
+
+    tokenize "'\\x60'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = Literal 0x60s
+               Length = 6 } ]
+
+    lexerOutput "'\\x3434343434'"
+    |> should haveSubstring "Hex literal '\\x3434343434' does not fit into type int"
+
+
+    tokenize "'\\7'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = Literal 7s
+               Length = 4 } ]
+
+    tokenize "'\\07'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = Literal 7s
+               Length = 5 } ]
+
+    tokenize "'\\007'"
+    |> should
+        equal
+           [ { Offset = 0
+               Type = Literal 7s
+               Length = 6 } ]
+
+
+    lexerOutput "'\\0007'"
+    |> should haveSubstring "Invalid character literal"
+
+    lexerOutput "'\\8'"
+    |> should haveSubstring "Invalid octal character '8'"
+
+    lexerOutput "'\\08'"
+    |> should haveSubstring "Invalid octal character '8'"
+
+    lexerOutput "'\\008'"
+    |> should haveSubstring "Invalid octal character '8'"

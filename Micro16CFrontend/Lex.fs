@@ -168,7 +168,7 @@ module Lex =
                     Convert.ToInt16(s, 16)
                 with
                 | :? OverflowException ->
-                    sprintf "Hex literal %s does not fit into type int" s
+                    sprintf "Hex literal '\x%s' does not fit into type int" s
                     |> error offset
 
                     0s
@@ -183,25 +183,41 @@ module Lex =
                                 && List.forall Char.IsDigit rest ->
                 match rest with
                 | [ c; _; _ ]
+                | [ c; _ ]
+                | [ c ]
                 | [ _; c; _ ]
+                | [ _; c ]
                 | [ _; _; c ] when c >= '8' ->
-                    sprintf "Invalid octal character %c" c
+                    sprintf "Invalid octal character '%c'" c
                     |> error offset
 
                     0s
-                | _ -> Int16.Parse(rest |> Array.ofList |> String, NumberStyles.HexNumber)
+                | _ ->
+                    let s = rest |> Array.ofList |> String
+
+                    try
+                        Convert.ToInt16(s, 8)
+                    with :? OverflowException ->
+                        sprintf "Octal literal '\%s' does not fit into type int" s
+                        |> error offset
+
+                        0s
             | _ ->
                 "Invalid character literal" |> error offset
                 0s
 
-        let readChar offset input =
-            let chars = input |> List.takeWhile ((<>) '\'')
-
-            if List.length chars = List.length input then
+        let rec readCharRec backslash (chars: string) offset input =
+            match input with
+            | ''' :: rest when not backslash -> (parseCharContent offset (chars |> List.ofSeq), rest)
+            | '\\' as c :: rest -> readCharRec (not backslash) (chars + c.ToString()) (offset + 1) rest
+            | [] ->
                 sprintf "Unterminated character literal"
                 |> error offset
 
-            (parseCharContent offset chars, input |> List.skip (List.length chars))
+                (0s, [])
+            | c :: rest -> readCharRec false (chars + c.ToString()) (offset + 1) rest
+
+        let readChar = readCharRec false ""
 
         let rec readBlockComment offset input =
             match input with
@@ -469,6 +485,6 @@ module Lex =
 
                 tokenizeFirst (offset + 1) rest
 
-        List.ofSeq input |> tokenizeFirst 0
+        input |> List.ofSeq |> tokenizeFirst 0
 
     let tokenize = tokenizeRep Console.Write
