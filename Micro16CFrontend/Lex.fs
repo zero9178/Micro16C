@@ -1,6 +1,7 @@
 ﻿namespace Micro16CFrontend
 
 open System
+open System.Globalization
 
 module Lex =
 
@@ -49,8 +50,6 @@ module Lex =
         | Colon
         | QuestionMark
         | IntKeyword
-        | SignedKeyword
-        | UnsignedKeyword
         | RegisterKeyword
         | BreakKeyword
         | ContinueKeyword
@@ -79,7 +78,7 @@ module Lex =
             sprintf "%d:%d: %s\n" (List.length newLines + 1)
                 (match List.tryLast newLines with
                  | None -> offset
-                 | Some ((last, _)) -> offset - last) message
+                 | Some (last, _) -> offset - last) message
             |> reporter
 
             let startOffset =
@@ -92,38 +91,117 @@ module Lex =
                 | -1 -> input.Length
                 | value -> value
 
-            sprintf "%4d | %s\n" (newLines.Length + 1) input.[startOffset..endOffset]
+            sprintf "%4d | %s\n" (List.length newLines + 1) input.[startOffset..endOffset]
             |> reporter
 
         let error = emitError input
 
-        let rec readNumberRec chars input =
-            match input with
-            | c :: rest when Char.IsDigit c -> readNumberRec (chars + Char.ToString c) rest
-            | _ -> (chars |> int16, input)
+        let readNumber offset input =
+            let spelling = input |> Array.ofList |> String
 
-        let readNumber = readNumberRec ""
+            let conversion (fromBase: int) (str: string) = Convert.ToInt16(str, fromBase)
 
-        let rec readIdentifierRec chars input =
-            match input with
-            | c :: rest when Char.IsLetterOrDigit c || c = '_' -> readIdentifierRec (chars + Char.ToString c) rest
-            | _ -> (chars, input)
+            let (input, convert) =
+                match input with
+                | '0' :: 'x' :: rest
+                | '0' :: 'X' :: rest -> (rest, conversion 16)
+                | '0' :: rest -> (rest, conversion 8)
+                | _ -> (input, conversion 10)
 
-        let readIdentifier = readIdentifierRec ""
+            let numberChars = input |> List.takeWhile Char.IsDigit
 
-        let parseCharContent charContent =
+            let rest =
+                input |> List.skip (List.length numberChars)
+
+            let s = numberChars |> Array.ofList |> String
+
+            try
+                (convert s, rest)
+            with :? OverflowException ->
+                sprintf "Integer literal '%s' too large for type int" spelling
+                |> error offset
+
+                (0s, rest)
+
+        let readIdentifier input =
+            let identifiers =
+                input
+                |> List.takeWhile (fun c -> Char.IsLetterOrDigit c || c = '_')
+
+            (identifiers |> Array.ofList |> String, input |> List.skip (List.length identifiers))
+
+        let parseCharContent offset charContent =
             match charContent with
-            | c :: _ -> c |> int16
-            | [] -> 0 |> int16 //TODO: Error
-        //TODO: Escapes etc
+            | [ '\\' ] ->
+                "Expected escape character after '\\'"
+                |> error offset
 
-        let rec readCharRec chars input =
-            match input with
-            | ''' :: _
-            | [] -> (chars |> List.ofSeq |> parseCharContent, input)
-            | c :: rest -> rest |> readCharRec (chars + c.ToString())
+                0s
+            | [ c ] -> c |> int16
+            | [] ->
+                "Expected at least one character in character literal"
+                |> error offset
 
-        let readChar = readCharRec ""
+                0s
+            | [ '\\'; c ] when c <> 'x' && not (Char.IsDigit c) ->
+                match c with
+                | ''' -> '\'' |> int16
+                | '"' -> '"' |> int16
+                | '?' -> '?' |> int16
+                | '\\' -> '\\' |> int16
+                | 'a' -> '\a' |> int16
+                | 'b' -> '\b' |> int16
+                | 'f' -> '\f' |> int16
+                | 'n' -> '\n' |> int16
+                | 'r' -> '\r' |> int16
+                | 't' -> '\t' |> int16
+                | 'v' -> '\v' |> int16
+                | _ ->
+                    sprintf "Unknown escape character '%c'" c
+                    |> error offset
+
+                    0s
+            | '\\' :: 'x' :: hex ->
+                let s = hex |> Array.ofList |> String
+
+                try
+                    Convert.ToInt16(s, 16)
+                with
+                | :? OverflowException ->
+                    sprintf "Hex literal %s does not fit into type int" s
+                    |> error offset
+
+                    0s
+                | _ ->
+                    sprintf "Invalid hex literal '%s'" s
+                    |> error offset
+
+                    0s
+
+            | '\\' :: rest when List.length rest > 0
+                                && List.length rest <= 3
+                                && List.forall Char.IsDigit rest ->
+                match rest with
+                | [ c; _; _ ]
+                | [ _; c; _ ]
+                | [ _; _; c ] when c >= '8' ->
+                    sprintf "Invalid octal character %c" c
+                    |> error offset
+
+                    0s
+                | _ -> Int16.Parse(rest |> Array.ofList |> String, NumberStyles.HexNumber)
+            | _ ->
+                "Invalid character literal" |> error offset
+                0s
+
+        let readChar offset input =
+            let chars = input |> List.takeWhile ((<>) '\'')
+
+            if List.length chars = List.length input then
+                sprintf "Unterminated character literal"
+                |> error offset
+
+            (parseCharContent offset chars, input |> List.skip (List.length chars))
 
         let rec readBlockComment offset input =
             match input with
@@ -136,7 +214,7 @@ module Lex =
         let rec tokenizeFirst offset input =
             match input with
             | c :: _ when Char.IsDigit c ->
-                let num, rest = input |> readNumber
+                let num, rest = input |> readNumber offset
                 let length = List.length input - List.length rest
 
                 { Offset = offset
@@ -150,8 +228,6 @@ module Lex =
                 let tokenType =
                     match identifier with
                     | "int" -> IntKeyword
-                    | "signed" -> SignedKeyword
-                    | "unsigned" -> UnsignedKeyword
                     | "register" -> RegisterKeyword
                     | "break" -> BreakKeyword
                     | "continue" -> ContinueKeyword
@@ -169,7 +245,7 @@ module Lex =
             | c :: rest when Char.IsWhiteSpace c -> tokenizeFirst (offset + 1) rest
             | [] -> []
             | ''' :: rest ->
-                let character, rest = rest |> readChar
+                let character, rest = rest |> readChar offset
                 let length = List.length input - List.length rest
 
                 { Offset = offset

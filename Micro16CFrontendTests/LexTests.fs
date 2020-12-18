@@ -69,13 +69,11 @@ let ``Simple identifiers`` () =
 
 [<Fact>]
 let ``Recognizing keywords`` () =
-    tokenize "int signed unsigned register break continue do else for while goto"
+    tokenize "int register break continue do else for while goto"
     |> List.map (fun { Type = x } -> x)
     |> should
         equal
            [ IntKeyword
-             SignedKeyword
-             UnsignedKeyword
              RegisterKeyword
              BreakKeyword
              ContinueKeyword
@@ -95,3 +93,118 @@ let ``Block comment`` () =
 
     lexerOutput "/*4234$"
     |> should haveSubstring "Unterminated block comment"
+
+[<Fact>]
+let ``Line comment`` () =
+
+    lexerOutput "id\n
+    //4234$34353534§$$343§$§$\n
+    f"
+    |> should be EmptyString
+
+    let tokens =
+        tokenize "id\n
+    //4234$34353534§$$343§$§$\n
+    f"
+
+    tokens |> should haveLength 2
+
+    tokens
+    |> List.forall (fun { Type = x } ->
+        match x with
+        | Identifier _ -> true
+        | _ -> false)
+    |> Assert.True
+
+[<Fact>]
+let Integers () =
+    let tokens = tokenize "3434"
+    tokens |> should haveLength 1
+
+    tokens.[0].Type
+    |> should equal (Literal(int16 3434))
+
+    let tokens = tokenize "6521323"
+    tokens |> should haveLength 1
+
+    lexerOutput "6521323"
+    |> should haveSubstring "Integer literal '6521323' too large for type int"
+
+    let tokens = tokenize "0x3434"
+    tokens |> should haveLength 1
+
+    tokens.[0].Type
+    |> should equal (Literal(int16 0x3434))
+
+    lexerOutput "0x6521323"
+    |> should haveSubstring "Integer literal '0x6521323' too large for type int"
+
+    let tokens = tokenize "0X3434"
+    tokens |> should haveLength 1
+
+    tokens.[0].Type
+    |> should equal (Literal(int16 0X3434))
+
+    lexerOutput "0X6521323"
+    |> should haveSubstring "Integer literal '0X6521323' too large for type int"
+
+    let tokens = tokenize "03434"
+    tokens |> should haveLength 1
+
+    tokens.[0].Type
+    |> should equal (Literal(int16 1820))
+
+    lexerOutput "06521323"
+    |> should haveSubstring "Integer literal '06521323' too large for type int"
+
+[<Fact>]
+let Operators () =
+    tokenize "|| && == != <= >= += -= /= *= %= <<= >>= &= |= ^= << >> ++ -- ( ) { } ; - ~ ! + * / % & | ^ = < > ? :"
+    |> List.map (fun { Type = x } -> x)
+    |> should
+        equal
+           [ LogicOr
+             LogicAnd
+             Equal
+             NotEqual
+             LessThanOrEqual
+             GreaterThanOrEqual
+             PlusAssign
+             MinusAssign
+             DivideAssign
+             MultiplyAssign
+             ModuloAssign
+             ShiftLeftAssign
+             ShiftRightAssign
+             BitAndAssign
+             BitOrAssign
+             BitXorAssign
+             ShiftLeft
+             ShiftRight
+             Increment
+             Decrement
+             OpenParentheses
+             CloseParentheses
+             OpenBrace
+             CloseBrace
+             SemiColon
+             Minus
+             BitWiseNegation
+             LogicalNegation
+             Plus
+             Asterisk
+             Division
+             Percent
+             Ampersand
+             BitOr
+             BitXor
+             Assignment
+             LessThan
+             GreaterThan
+             QuestionMark
+             Colon ]
+
+[<Fact>]
+let miscellaneous () =
+    lexerOutput "$"
+    |> should haveSubstring "Unexpected character '$'"
