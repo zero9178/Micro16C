@@ -1,6 +1,6 @@
 ﻿open System
 
-open Micro16CFrontend
+open Micro16C.Frontend
 
 [<EntryPoint>]
 let main argv =

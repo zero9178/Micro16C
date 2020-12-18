@@ -7,6 +7,7 @@
 
     <ItemGroup>
         <Compile Include="Lex.fs" />
+        <Compile Include="Parse.fs"/>
     </ItemGroup>
 
 </Project>

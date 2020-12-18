@@ -4,7 +4,7 @@ open System
 open Xunit
 open FsUnit.Xunit
 
-open Micro16CFrontend.Lex
+open Micro16C.Frontend.Lex
 
 let lexerOutput (input: string) =
     let mutable s = ""

@@ -2,9 +2,9 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C", "Micro16C.fsproj", "{7F5D8FE7-7744-468E-AD9D-14E04FDA44C3}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16CFrontend", "Micro16CFrontend\Micro16CFrontend.fsproj", "{23D8E6FD-BC4C-4301-9BD0-3D28BCAF5F11}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Frontend", "Micro16C.Frontend\Micro16C.Frontend.fsproj", "{23D8E6FD-BC4C-4301-9BD0-3D28BCAF5F11}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16CFrontendTests", "Micro16CFrontendTests\Micro16CFrontendTests.fsproj", "{432C895D-DEB7-433F-B23A-744E332DCD14}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Frontend.Tests", "Micro16C.Frontend.Tests\Micro16C.Frontend.Tests.fsproj", "{432C895D-DEB7-433F-B23A-744E332DCD14}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
