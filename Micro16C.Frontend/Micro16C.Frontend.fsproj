@@ -6,8 +6,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="Lex.fs" />
+        <Compile Include="Lex.fs"/>
         <Compile Include="Parse.fs"/>
+        <Compile Include="Sema.fs"/>
     </ItemGroup>
 
 </Project>
