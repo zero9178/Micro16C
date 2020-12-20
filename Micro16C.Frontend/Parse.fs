@@ -6,15 +6,20 @@ open Micro16C.Frontend.Lex
 (*
 <TranslationUnit> ::= { <Statements> | <Declaration>}
 
-<Declaration> ::= <DeclarationSpecifiers> <Declarator> [ '=' <AssignmentExpression> ] { ',' <Declarator> [ '=' <AssignmentExpression> ] } ';'
+<Declaration> ::= {<DeclarationSpecifier>} <Declarator> [ '=' <AssignmentExpression> ] { ',' <Declarator> [ '=' <AssignmentExpression> ] } ';'
 
-<DeclarationSpecifiers> ::= 'int'
+<TypeSpecifier> ::= 'int'
+
+<StorageSpecifier> ::= 'register' '(' IDENTIFIER ')'
+
+<DeclarationSpecifiers> ::= <TypeSpecifier> [<StorageSpecifier>]
+                          | [<StorageSpecifier>] <TypeSpecifier>
 
 <Declarator> ::= {'*'} IDENTIFIER
 
 <AbstractDeclarator> ::= {'*'}
 
-<TypeName> ::= <DeclarationSpecifiers> [<AbstractDeclarator>]
+<TypeName> ::= <TypeSpecifier> [<AbstractDeclarator>]
 
 <Expression> ::= <AssignmentExpression> {',' <AssignmentExpression>}
 
@@ -190,7 +195,8 @@ and PrimaryExpression =
     | ExpressionPrimaryExpression of Expression option
 
 type Declaration =
-    { Declarators: (Declarator * AssignmentExpression option) list }
+    { DeclarationSpecifiers: Token option
+      Declarators: (Declarator * AssignmentExpression option) list }
 
 type CompoundItem =
     | StatementCompoundItem of Statement
@@ -240,12 +246,12 @@ let private parseBinaryMultiOperator subExprParse allowedTypes error (tokens: To
 
     let rec parseOptionalRhs (tokens: Token list) =
         match tokens with
-        | { Type = t } :: tokens as ts when List.contains t allowedTypes ->
+        | { Type = ty } as t :: tokens when List.contains ty allowedTypes ->
             let rhs, tokens = subExprParse error tokens
 
             let others, tokens = parseOptionalRhs tokens
 
-            ((List.head ts, rhs) :: others, tokens)
+            ((t, rhs) :: others, tokens)
         | _ -> ([], tokens)
 
     let optionalRhs, tokens = parseOptionalRhs tokens
@@ -439,8 +445,8 @@ and parseUnaryExpression error (tokens: Token list) =
 and parsePostFixExpression error (tokens: Token list) =
     let primary, tokens =
         match tokens with
-        | { Type = Identifier _ } :: tokens as t -> (t |> List.head |> IdentifierPrimaryExpression, tokens)
-        | { Type = Literal _ } :: tokens as t -> (t |> List.head |> LiteralPrimaryExpression, tokens)
+        | { Type = Identifier _ } as t :: tokens -> (IdentifierPrimaryExpression t, tokens)
+        | { Type = Literal _ } as t :: tokens -> (LiteralPrimaryExpression t, tokens)
         | { Type = OpenParentheses } :: tokens ->
             let expression, tokens = parseExpression error tokens
 
@@ -475,12 +481,54 @@ and parsePostFixExpression error (tokens: Token list) =
 
     parsePostFixExpressionSuffix (PrimaryPostFixExpression primary) tokens
 
-let parseDeclaration error (tokens: Token list) =
-    assert match List.head tokens with
-           | { Type = IntKeyword } -> true
-           | _ -> false
+let parseDeclarationSpecifiers error (tokens: Token list) =
+    match tokens with
+    | { Type = IntKeyword } :: { Type = t } :: tokens when t <> RegisterKeyword -> (None, tokens)
+    | { Type = IntKeyword } :: { Type = RegisterKeyword } :: tokens ->
+        let _, tokens =
+            expect OpenParentheses error tokens "Expected '(' after 'register'"
 
-    let tokens = tokens |> List.tail
+        let s, tokens =
+            match tokens with
+            | { Type = Identifier _ } as t :: tokens -> (Some t, tokens)
+            | t :: _ ->
+                error (ErrorTypeToken t) "Expected register name after '(' in 'register'"
+                (None, tokens)
+            | [] ->
+                error ErrorTypeEnd "Expected register name after '(' in 'register'"
+                (None, tokens)
+
+        let _, tokens =
+            expect OpenParentheses error tokens "Expected ')' to match ')'"
+
+        (s, tokens)
+    | { Type = RegisterKeyword } :: tokens ->
+        let _, tokens =
+            expect OpenParentheses error tokens "Expected '(' after 'register'"
+
+        let s, tokens =
+            match tokens with
+            | { Type = Identifier _ } as t :: tokens -> (Some t, tokens)
+            | t :: _ ->
+                error (ErrorTypeToken t) "Expected register name after '(' in 'register'"
+                (None, tokens)
+            | [] ->
+                error ErrorTypeEnd "Expected register name after '(' in 'register'"
+                (None, tokens)
+
+        let _, tokens =
+            expect OpenParentheses error tokens "Expected ')' to match ')'"
+
+        let _, tokens =
+            expect OpenParentheses error tokens "Expected 'int' in type specifiers"
+
+        (s, tokens)
+    | _ ->
+        match expect OpenParentheses error tokens "Expected 'int' in type specifiers" with
+        | (_, tokens) -> (None, tokens)
+
+let parseDeclaration error (tokens: Token list) =
+    let register, tokens = parseDeclarationSpecifiers error tokens
 
     let parseDeclarator tokens =
 
@@ -503,14 +551,14 @@ let parseDeclaration error (tokens: Token list) =
             |> error (ErrorTypeToken t)
 
             ({ PointerCount = pointerCount
-               Identifier = Some t },
+               Identifier = None },
              List.tail tokens)
-        | None as t ->
+        | None ->
             "Expected identifier in declaration"
             |> error ErrorTypeEnd
 
             ({ PointerCount = pointerCount
-               Identifier = t },
+               Identifier = None },
              [])
 
     let firstDeclarator, tokens = parseDeclarator tokens
@@ -544,7 +592,9 @@ let parseDeclaration error (tokens: Token list) =
     let _, tokens =
         expect SemiColon error tokens "Expected ';' after declaration"
 
-    ({ Declarators = (firstDeclarator, assignment) :: otherDeclarators }, tokens)
+    ({ DeclarationSpecifiers = register
+       Declarators = (firstDeclarator, assignment) :: otherDeclarators },
+     tokens)
 
 type private DeclOrExpr =
     | MaybeExpression of Expression option
@@ -586,7 +636,8 @@ let rec parseStatement error (tokens: Token list) =
 
         let first, tokens =
             match tokens with
-            | { Type = IntKeyword } :: tokens ->
+            | { Type = IntKeyword } :: _
+            | { Type = RegisterKeyword } :: _ ->
                 let decl, tokens = parseDeclaration error tokens
                 (Declaration decl, tokens)
             | { Type = SemiColon } :: tokens -> (MaybeExpression None, tokens)
@@ -659,7 +710,8 @@ let rec parseStatement error (tokens: Token list) =
 
 and parseCompoundItems error (tokens: Token list) =
     match tokens with
-    | { Type = IntKeyword } :: _ ->
+    | { Type = IntKeyword } :: _
+    | { Type = RegisterKeyword } :: _ ->
         let declaration, tokens = parseDeclaration error tokens
 
         let other, tokens = parseCompoundItems error tokens
