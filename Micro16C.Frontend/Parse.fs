@@ -1,8 +1,6 @@
 module Micro16C.Frontend.Parse
 
 open System
-open System.Data
-open System.Linq.Expressions
 open Micro16C.Frontend.Lex
 
 (*
@@ -201,13 +199,14 @@ type CompoundItem =
 and Statement =
     | WhileStatement of Expression * Statement
     | DoWhileStatement of Statement * Expression
-    | ForStatementDecl of Declaration * Expression option * Expression option
-    | ForStatement of Expression option * Expression option * Expression option
+    | ForStatementDecl of Declaration * Expression option * Expression option * Statement
+    | ForStatement of Expression option * Expression option * Expression option * Statement
     | BreakStatement
     | ContinueStatement
     | GotoStatement of string
     | LabelStatement of string * Statement
     | CompoundStatement of CompoundItem list
+    | ExpressionStatement of Expression option
 
 let private parseBinaryOperator subExprParse allowedType error (tokens: Token list) =
     let lhs, tokens = subExprParse error tokens
@@ -547,27 +546,159 @@ let parseDeclaration error (tokens: Token list) =
 
     ({ Declarators = (firstDeclarator, assignment) :: otherDeclarators }, tokens)
 
+type private DeclOrExpr =
+    | MaybeExpression of Expression option
+    | Declaration of Declaration
+
+let rec parseStatement error (tokens: Token list) =
+    match tokens with
+    | { Type = WhileKeyword } :: tokens ->
+        let _, tokens =
+            expect OpenParentheses error tokens "Expected '(' after 'while'"
+
+        let expression, tokens = parseExpression error tokens
+
+        let _, tokens =
+            expect CloseParentheses error tokens "Expected ')' to match '('"
+
+        let statement, tokens = parseStatement error tokens
+
+        (WhileStatement(expression, statement), tokens)
+    | { Type = DoKeyword } :: tokens ->
+        let statement, tokens = parseStatement error tokens
+
+        let _, tokens =
+            expect WhileKeyword error tokens "Expected 'while' to match 'do'"
+
+        let _, tokens =
+            expect OpenParentheses error tokens "Expected '(' after 'while'"
+
+        let expression, tokens = parseExpression error tokens
+
+        let _, tokens =
+            expect CloseParentheses error tokens "Expected ')' to match '('"
+
+        (DoWhileStatement(statement, expression), tokens)
+    | { Type = ForKeyword } :: tokens ->
+
+        let _, tokens =
+            expect OpenParentheses error tokens "Expected '(' after 'for'"
+
+        let first, tokens =
+            match tokens with
+            | { Type = IntKeyword } :: tokens ->
+                let decl, tokens = parseDeclaration error tokens
+                (Declaration decl, tokens)
+            | { Type = SemiColon } :: tokens -> (MaybeExpression None, tokens)
+            | _ ->
+                let expr, tokens = parseExpression error tokens
+                (MaybeExpression(Some expr), tokens)
+
+        let second, tokens =
+            match tokens with
+            | { Type = SemiColon } :: tokens -> (None, tokens)
+            | _ ->
+                let expr, tokens = parseExpression error tokens
+                (Some expr, tokens)
+
+        let third, tokens =
+            match tokens with
+            | { Type = CloseParentheses } :: tokens -> (None, tokens)
+            | _ ->
+                let expr, tokens = parseExpression error tokens
+                (Some expr, tokens)
+
+        let _, tokens =
+            expect CloseParentheses error tokens "Expected ')' to match '('"
+
+        let statement, tokens = parseStatement error tokens
+
+        match first with
+        | MaybeExpression maybeExpr -> (ForStatement(maybeExpr, second, third, statement), tokens)
+        | Declaration decl -> (ForStatementDecl(decl, second, third, statement), tokens)
+
+    | { Type = BreakKeyword } :: tokens ->
+        let _, tokens =
+            expect SemiColon error tokens "Expected ';' after 'break'"
+
+        (BreakStatement, tokens)
+
+    | { Type = ContinueKeyword } :: tokens ->
+        let _, tokens =
+            expect SemiColon error tokens "Expected ';' after 'continue'"
+
+        (ContinueStatement, tokens)
+
+    | { Type = GotoKeyword } :: tokens ->
+        let s, tokens =
+            match tokens with
+            | { Type = Identifier s } :: tokens -> (s, tokens)
+            | [] ->
+                error ErrorTypeEnd "Expected identifier after 'goto'"
+                ("", [])
+            | t :: _ ->
+                error (ErrorTypeToken t) "Expected identifier after 'goto'"
+                ("", tokens)
+
+        let _, tokens =
+            expect SemiColon error tokens "Expected ';' after identifier in 'goto'"
+
+        (GotoStatement s, tokens)
+
+    | { Type = Identifier s } :: { Type = Comma } :: tokens ->
+        let statement, tokens = parseStatement error tokens
+        (LabelStatement(s, statement), tokens)
+
+    | { Type = OpenBrace } :: tokens ->
+        let compoundItems, tokens = parseCompoundItems error tokens
+        (CompoundStatement compoundItems, tokens)
+    | { Type = SemiColon } :: tokens -> (ExpressionStatement None, tokens)
+    | _ ->
+        let expression, tokens = parseExpression error tokens
+        (ExpressionStatement(Some expression), tokens)
+
+and parseCompoundItems error (tokens: Token list) =
+    match tokens with
+    | { Type = IntKeyword } :: _ ->
+        let declaration, tokens = parseDeclaration error tokens
+
+        let other, tokens = parseCompoundItems error tokens
+
+        (DeclarationCompoundItem declaration :: other, tokens)
+    | { Type = WhileKeyword } :: _
+    | { Type = DoKeyword } :: _
+    | { Type = BreakKeyword } :: _
+    | { Type = ContinueKeyword } :: _
+    | { Type = GotoKeyword } :: _
+    | { Type = Identifier _ } :: _
+    | { Type = Literal _ } :: _
+    | { Type = OpenParentheses } :: _
+    | { Type = Increment } :: _
+    | { Type = Decrement } :: _
+    | { Type = Ampersand } :: _
+    | { Type = Asterisk } :: _
+    | { Type = Plus } :: _
+    | { Type = Minus } :: _
+    | { Type = LogicalNegation } :: _
+    | { Type = BitWiseNegation } :: _
+    | { Type = SizeOfKeyword } :: _
+    | { Type = OpenBrace } :: _
+    | { Type = SemiColon } :: _
+    | { Type = ForKeyword } :: _ ->
+        let statement, tokens = parseStatement error tokens
+
+        let other, tokens = parseCompoundItems error tokens
+
+        (StatementCompoundItem statement :: other, tokens)
+    | _ -> ([], tokens)
+
 let parseRep (reporter: string -> unit) (sourceObject: SourceObject) =
 
     let error location message =
         sourceObject.emitError location message
         |> reporter
 
-    let rec parseTranslationUnit (sourceObject: SourceObject) (tokens: Token list) =
-        match tokens with
-        | [] -> []
-        | { Type = IntKeyword } :: _ ->
-            let declaration, tokens = parseDeclaration error tokens
-
-            DeclarationCompoundItem declaration
-            :: parseTranslationUnit sourceObject tokens
-        | _ -> failwith ""
-    //            let statement, rest = parseStatement error tokens
-//
-//            StatementCompoundItem statement
-//            :: parseTranslationUnit sourceObject rest
-
-    parseTranslationUnit sourceObject sourceObject.Tokens
+    parseCompoundItems error sourceObject.Tokens
 
 
 let parse = parseRep Console.Error.Write

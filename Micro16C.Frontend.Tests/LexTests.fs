@@ -120,6 +120,12 @@ let ``Line comment`` () =
 
 [<Fact>]
 let Integers () =
+
+    let { Tokens = tokens } = tokenize "0"
+    tokens |> should haveLength 1
+
+    tokens.[0].Type |> should equal (Literal(int16 0))
+
     let { Tokens = tokens } = tokenize "3434"
     tokens |> should haveLength 1
 

@@ -1,7 +1,6 @@
 ﻿module Micro16C.Frontend.Lex
 
 open System
-open System.Globalization
 
 
 
@@ -122,21 +121,22 @@ let tokenizeRep reporter (input: string) =
         >> reporter
 
     let readNumber offset input =
-        let spelling = input |> Array.ofList |> String
-
-        let conversion (fromBase: int) (str: string) = Convert.ToInt16(str, fromBase)
-
-        let (input, convert) =
-            match input with
-            | '0' :: 'x' :: rest
-            | '0' :: 'X' :: rest -> (rest, conversion 16)
-            | '0' :: rest -> (rest, conversion 8)
-            | _ -> (input, conversion 10)
 
         let numberChars = input |> List.takeWhile Char.IsDigit
 
         let rest =
             input |> List.skip (List.length numberChars)
+
+        let spelling = numberChars |> Array.ofList |> String
+
+        let conversion (fromBase: int) (str: string) = Convert.ToInt16(str, fromBase)
+
+        let (numberChars, convert) =
+            match numberChars with
+            | '0' :: 'x' :: numberChars
+            | '0' :: 'X' :: numberChars -> (numberChars, conversion 16)
+            | '0' :: numberChars when List.length numberChars > 0 -> (numberChars, conversion 8)
+            | _ -> (numberChars, conversion 10)
 
         let s = numberChars |> Array.ofList |> String
 

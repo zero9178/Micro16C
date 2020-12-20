@@ -1,10 +1,16 @@
-﻿open System
-
-open Micro16C.Frontend
+﻿open Micro16C.Frontend
 
 [<EntryPoint>]
 let main argv =
-    Lex.tokenize "int i = 5 + 3;"
+    Lex.tokenize "int r0 = 5;
+    int r1 = 20;
+    int mod;
+    do
+    {
+        mod = r0 % r1;
+        r0 = r1;
+        r1 = mod;
+    } while(mod != 0);"
     |> Parse.parse
     |> printfn "%A"
 
