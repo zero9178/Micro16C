@@ -58,6 +58,7 @@ type TokenType =
     | ForKeyword
     | IfKeyword
     | WhileKeyword
+    | SizeOfKeyword
     | OpenSquareBracket
     | CloseSquareBracket
     | GotoKeyword
@@ -67,34 +68,58 @@ type Token =
       Length: int
       Type: TokenType }
 
-let tokenizeRep reporter (input: string) =
+type ErrorType =
+    | ErrorTypeOffset of int
+    | ErrorTypeToken of Token
+    | ErrorTypeEnd
 
-    let emitError (input: string) (offset: int) (message: string) =
-        let newLines =
-            List.ofSeq input.[0..offset]
-            |> List.indexed
-            |> List.filter (snd >> (=) '\n')
+type SourceObject =
+    { Source: string
+      Newlines: (int * int) list
+      Tokens: Token list }
 
-        sprintf "%d:%d: %s\n" (List.length newLines + 1)
-            (match List.tryLast newLines with
-             | None -> offset
-             | Some (last, _) -> offset - last) message
-        |> reporter
+    member this.emitError (offset: ErrorType) message =
+        let offset =
+            match offset with
+            | ErrorTypeOffset i -> i
+            | ErrorTypeToken token -> token.Offset
+            | ErrorTypeEnd -> String.length this.Source
 
-        let startOffset =
-            match List.tryLast newLines with
-            | None -> 0
-            | Some (last, _) -> last
+        let i =
+            match this.Newlines |> List.tryFind (snd >> (<) offset) with
+            | None -> (0, 0)
+            | Some i -> i
+
+        let prefix =
+            sprintf "%d:%d: %s\n" (fst i + 1) (offset - snd i + 1) message
 
         let endOffset =
-            match input.IndexOf(value = '\n', startIndex = startOffset) with
-            | -1 -> input.Length
+            match this.Source.IndexOf(value = '\n', startIndex = snd i) with
+            | -1 -> String.length this.Source
             | value -> value
 
-        sprintf "%4d | %s\n" (List.length newLines + 1) input.[startOffset..endOffset]
-        |> reporter
+        prefix
+        + sprintf "%4d | %s\n" (List.length this.Newlines + 1) this.Source.[(snd i)..endOffset]
 
-    let error = emitError input
+let createSourceObject (input: string) =
+    let newLines =
+        List.ofSeq input
+        |> List.indexed
+        |> List.filter (snd >> (=) '\n')
+        |> List.map fst
+        |> List.indexed
+
+    { Source = input
+      Newlines = newLines
+      Tokens = [] }
+
+let tokenizeRep reporter (input: string) =
+
+    let sourceObject = createSourceObject input
+
+    let error (offset: int) =
+        sourceObject.emitError (ErrorTypeOffset offset)
+        >> reporter
 
     let readNumber offset input =
         let spelling = input |> Array.ofList |> String
@@ -143,24 +168,6 @@ let tokenizeRep reporter (input: string) =
             |> error offset
 
             0s
-        | [ '\\'; c ] when c <> 'x' && not (Char.IsDigit c) ->
-            match c with
-            | ''' -> '\'' |> int16
-            | '"' -> '"' |> int16
-            | '?' -> '?' |> int16
-            | '\\' -> '\\' |> int16
-            | 'a' -> '\a' |> int16
-            | 'b' -> '\b' |> int16
-            | 'f' -> '\f' |> int16
-            | 'n' -> '\n' |> int16
-            | 'r' -> '\r' |> int16
-            | 't' -> '\t' |> int16
-            | 'v' -> '\v' |> int16
-            | _ ->
-                sprintf "Unknown escape character '%c'" c
-                |> error offset
-
-                0s
         | '\\' :: 'x' :: hex ->
             let s = hex |> Array.ofList |> String
 
@@ -202,6 +209,24 @@ let tokenizeRep reporter (input: string) =
                     |> error offset
 
                     0s
+        | [ '\\'; c ] ->
+            match c with
+            | ''' -> '\'' |> int16
+            | '"' -> '"' |> int16
+            | '?' -> '?' |> int16
+            | '\\' -> '\\' |> int16
+            | 'a' -> '\a' |> int16
+            | 'b' -> '\b' |> int16
+            | 'f' -> '\f' |> int16
+            | 'n' -> '\n' |> int16
+            | 'r' -> '\r' |> int16
+            | 't' -> '\t' |> int16
+            | 'v' -> '\v' |> int16
+            | _ ->
+                sprintf "Unknown escape character '%c'" c
+                |> error offset
+
+                0s
         | _ ->
             "Invalid character literal" |> error offset
             0s
@@ -252,6 +277,7 @@ let tokenizeRep reporter (input: string) =
                 | "for" -> ForKeyword
                 | "while" -> WhileKeyword
                 | "goto" -> GotoKeyword
+                | "sizeof" -> SizeOfKeyword
                 | _ -> Identifier identifier
 
             { Offset = offset
@@ -485,6 +511,7 @@ let tokenizeRep reporter (input: string) =
 
             tokenizeFirst (offset + 1) rest
 
-    input |> List.ofSeq |> tokenizeFirst 0
+    let tokens = input |> List.ofSeq |> tokenizeFirst 0
+    { sourceObject with Tokens = tokens }
 
-let tokenize = tokenizeRep Console.Write
+let tokenize = tokenizeRep Console.Error.Write

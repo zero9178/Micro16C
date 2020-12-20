@@ -1,4 +1,4 @@
-module Tests
+module LexTests
 
 open System
 open Xunit
@@ -13,7 +13,7 @@ let lexerOutput (input: string) =
 
 [<Fact>]
 let ``Simple identifiers`` () =
-    let tokens = tokenize "a"
+    let { Tokens = tokens } = tokenize "a"
     tokens |> should haveLength 1
 
     tokens
@@ -23,7 +23,7 @@ let ``Simple identifiers`` () =
                Length = 1
                Type = Identifier "a" } ]
 
-    let tokens = tokenize "a2323"
+    let { Tokens = tokens } = tokenize "a2323"
     tokens |> should haveLength 1
 
     tokens
@@ -33,7 +33,7 @@ let ``Simple identifiers`` () =
                Length = 5
                Type = Identifier "a2323" } ]
 
-    let tokens = tokenize "a34+343"
+    let { Tokens = tokens } = tokenize "a34+343"
     tokens |> should haveLength 3
 
     tokens
@@ -47,7 +47,7 @@ let ``Simple identifiers`` () =
                Length = 3
                Type = 343 |> int16 |> Literal } ]
 
-    let tokens = tokenize "a23_23"
+    let { Tokens = tokens } = tokenize "a23_23"
     tokens |> should haveLength 1
 
     tokens
@@ -57,7 +57,7 @@ let ``Simple identifiers`` () =
                Length = 6
                Type = Identifier "a23_23" } ]
 
-    let tokens = tokenize "_a2323"
+    let { Tokens = tokens } = tokenize "_a2323"
     tokens |> should haveLength 1
 
     tokens
@@ -70,6 +70,7 @@ let ``Simple identifiers`` () =
 [<Fact>]
 let ``Recognizing keywords`` () =
     tokenize "int register break continue do else for while goto"
+    |> fun { Tokens = tokens } -> tokens
     |> List.map (fun { Type = x } -> x)
     |> should
         equal
@@ -86,6 +87,7 @@ let ``Recognizing keywords`` () =
 [<Fact>]
 let ``Block comment`` () =
     tokenize "/*4234$34353534§$$343§$§$*/"
+    |> fun { Tokens = tokens } -> tokens
     |> should haveLength 0
 
     lexerOutput "/*4234$34353534§$$343§$§$*/"
@@ -102,7 +104,7 @@ let ``Line comment`` () =
     f"
     |> should be EmptyString
 
-    let tokens =
+    let { Tokens = tokens } =
         tokenize "id\n
     //4234$34353534§$$343§$§$\n
     f"
@@ -118,19 +120,19 @@ let ``Line comment`` () =
 
 [<Fact>]
 let Integers () =
-    let tokens = tokenize "3434"
+    let { Tokens = tokens } = tokenize "3434"
     tokens |> should haveLength 1
 
     tokens.[0].Type
     |> should equal (Literal(int16 3434))
 
-    let tokens = tokenize "6521323"
+    let { Tokens = tokens } = tokenize "6521323"
     tokens |> should haveLength 1
 
     lexerOutput "6521323"
     |> should haveSubstring "Integer literal '6521323' too large for type int"
 
-    let tokens = tokenize "0x3434"
+    let { Tokens = tokens } = tokenize "0x3434"
     tokens |> should haveLength 1
 
     tokens.[0].Type
@@ -139,7 +141,7 @@ let Integers () =
     lexerOutput "0x6521323"
     |> should haveSubstring "Integer literal '0x6521323' too large for type int"
 
-    let tokens = tokenize "0X3434"
+    let { Tokens = tokens } = tokenize "0X3434"
     tokens |> should haveLength 1
 
     tokens.[0].Type
@@ -148,7 +150,7 @@ let Integers () =
     lexerOutput "0X6521323"
     |> should haveSubstring "Integer literal '0X6521323' too large for type int"
 
-    let tokens = tokenize "03434"
+    let { Tokens = tokens } = tokenize "03434"
     tokens |> should haveLength 1
 
     tokens.[0].Type
@@ -160,6 +162,7 @@ let Integers () =
 [<Fact>]
 let Operators () =
     tokenize "|| && == != <= >= += -= /= *= %= <<= >>= &= |= ^= << >> ++ -- ( ) { } ; - ~ ! + * / % & | ^ = < > ? :"
+    |> fun { Tokens = tokens } -> tokens
     |> List.map (fun { Type = x } -> x)
     |> should
         equal
@@ -212,6 +215,7 @@ let Miscellaneous () =
 [<Fact>]
 let ``Character literals`` () =
     tokenize "'a'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -225,6 +229,7 @@ let ``Character literals`` () =
     |> should haveSubstring "Unterminated character literal"
 
     tokenize "'\\''"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -232,6 +237,7 @@ let ``Character literals`` () =
                Length = 4 } ]
 
     tokenize "'\\\"'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -239,6 +245,7 @@ let ``Character literals`` () =
                Length = 4 } ]
 
     tokenize "'\\?'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -246,6 +253,7 @@ let ``Character literals`` () =
                Length = 4 } ]
 
     tokenize "'\\\\'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -253,6 +261,7 @@ let ``Character literals`` () =
                Length = 4 } ]
 
     tokenize "'\\a'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -260,6 +269,7 @@ let ``Character literals`` () =
                Length = 4 } ]
 
     tokenize "'\\b'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -267,6 +277,7 @@ let ``Character literals`` () =
                Length = 4 } ]
 
     tokenize "'\\f'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -274,6 +285,7 @@ let ``Character literals`` () =
                Length = 4 } ]
 
     tokenize "'\\n'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -281,6 +293,7 @@ let ``Character literals`` () =
                Length = 4 } ]
 
     tokenize "'\\r'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -288,6 +301,7 @@ let ``Character literals`` () =
                Length = 4 } ]
 
     tokenize "'\\t'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -295,6 +309,7 @@ let ``Character literals`` () =
                Length = 4 } ]
 
     tokenize "'\\v'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -305,6 +320,7 @@ let ``Character literals`` () =
     |> should haveSubstring "Unknown escape character '$'"
 
     tokenize "'\\x60'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -316,6 +332,7 @@ let ``Character literals`` () =
 
 
     tokenize "'\\7'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -323,6 +340,7 @@ let ``Character literals`` () =
                Length = 4 } ]
 
     tokenize "'\\07'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
@@ -330,6 +348,7 @@ let ``Character literals`` () =
                Length = 5 } ]
 
     tokenize "'\\007'"
+    |> fun { Tokens = tokens } -> tokens
     |> should
         equal
            [ { Offset = 0
