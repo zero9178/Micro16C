@@ -122,21 +122,27 @@ let tokenizeRep reporter (input: string) =
 
     let readNumber offset input =
 
-        let numberChars = input |> List.takeWhile Char.IsDigit
-
-        let rest =
-            input |> List.skip (List.length numberChars)
-
-        let spelling = numberChars |> Array.ofList |> String
-
         let conversion (fromBase: int) (str: string) = Convert.ToInt16(str, fromBase)
 
-        let (numberChars, convert) =
-            match numberChars with
+        let (numberChars, convert, skip) =
+            match input with
             | '0' :: 'x' :: numberChars
-            | '0' :: 'X' :: numberChars -> (numberChars, conversion 16)
-            | '0' :: numberChars when List.length numberChars > 0 -> (numberChars, conversion 8)
-            | _ -> (numberChars, conversion 10)
+            | '0' :: 'X' :: numberChars -> (numberChars, conversion 16, 2)
+            | '0' :: numberChars when List.length numberChars > 0 -> (numberChars, conversion 8, 1)
+            | _ -> (input, conversion 10, 0)
+
+        let numberChars =
+            numberChars |> List.takeWhile Char.IsDigit
+
+        let rest =
+            input
+            |> List.skip (List.length numberChars + skip)
+
+        let spelling =
+            input
+            |> List.take (List.length numberChars + skip)
+            |> Array.ofList
+            |> String
 
         let s = numberChars |> Array.ofList |> String
 

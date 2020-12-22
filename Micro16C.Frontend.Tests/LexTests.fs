@@ -121,6 +121,12 @@ let ``Line comment`` () =
 [<Fact>]
 let Integers () =
 
+    let { Tokens = tokens } = tokenize "0x3434"
+    tokens |> should haveLength 1
+
+    tokens.[0].Type
+    |> should equal (Literal(int16 0x3434))
+    
     let { Tokens = tokens } = tokenize "0"
     tokens |> should haveLength 1
 
@@ -137,12 +143,6 @@ let Integers () =
 
     lexerOutput "6521323"
     |> should haveSubstring "Integer literal '6521323' too large for type int"
-
-    let { Tokens = tokens } = tokenize "0x3434"
-    tokens |> should haveLength 1
-
-    tokens.[0].Type
-    |> should equal (Literal(int16 0x3434))
 
     lexerOutput "0x6521323"
     |> should haveSubstring "Integer literal '0x6521323' too large for type int"
