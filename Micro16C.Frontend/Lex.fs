@@ -112,13 +112,13 @@ let createSourceObject (input: string) =
       Newlines = newLines
       Tokens = [] }
 
-let tokenizeRep reporter (input: string) =
+let tokenize (input: string) =
 
     let sourceObject = createSourceObject input
 
-    let error (offset: int) =
-        sourceObject.emitError (ErrorTypeOffset offset)
-        >> reporter
+    let error (offset: int) (message: string) =
+        sourceObject.emitError (ErrorTypeOffset offset) message
+        |> Error
 
     let readNumber offset input =
 
@@ -147,12 +147,11 @@ let tokenizeRep reporter (input: string) =
         let s = numberChars |> Array.ofList |> String
 
         try
-            (convert s, rest)
+            (convert s |> Ok, rest)
         with :? OverflowException ->
-            sprintf "Integer literal '%s' too large for type int" spelling
-            |> error offset
-
-            (0s, rest)
+            (sprintf "Integer literal '%s' too large for type int" spelling
+             |> error offset,
+             rest)
 
     let readIdentifier input =
         let identifiers =
@@ -166,30 +165,22 @@ let tokenizeRep reporter (input: string) =
         | [ '\\' ] ->
             "Expected escape character after '\\'"
             |> error offset
-
-            0s
-        | [ c ] -> c |> int16
+        | [ c ] -> c |> int16 |> Ok
         | [] ->
             "Expected at least one character in character literal"
             |> error offset
-
-            0s
         | '\\' :: 'x' :: hex ->
             let s = hex |> Array.ofList |> String
 
             try
-                Convert.ToInt16(s, 16)
+                Convert.ToInt16(s, 16) |> Ok
             with
             | :? OverflowException ->
                 sprintf "Hex literal '\x%s' does not fit into type int" s
                 |> error offset
-
-                0s
             | _ ->
                 sprintf "Invalid hex literal '%s'" s
                 |> error offset
-
-                0s
 
         | '\\' :: rest when List.length rest > 0
                             && List.length rest <= 3
@@ -203,71 +194,78 @@ let tokenizeRep reporter (input: string) =
             | [ _; _; c ] when c >= '8' ->
                 sprintf "Invalid octal character '%c'" c
                 |> error offset
-
-                0s
             | _ ->
                 let s = rest |> Array.ofList |> String
 
                 try
-                    Convert.ToInt16(s, 8)
+                    Convert.ToInt16(s, 8) |> Ok
                 with :? OverflowException ->
                     sprintf "Octal literal '\%s' does not fit into type int" s
                     |> error offset
-
-                    0s
         | [ '\\'; c ] ->
             match c with
-            | ''' -> '\'' |> int16
-            | '"' -> '"' |> int16
-            | '?' -> '?' |> int16
-            | '\\' -> '\\' |> int16
-            | 'a' -> '\a' |> int16
-            | 'b' -> '\b' |> int16
-            | 'f' -> '\f' |> int16
-            | 'n' -> '\n' |> int16
-            | 'r' -> '\r' |> int16
-            | 't' -> '\t' |> int16
-            | 'v' -> '\v' |> int16
+            | ''' -> '\'' |> int16 |> Ok
+            | '"' -> '"' |> int16 |> Ok
+            | '?' -> '?' |> int16 |> Ok
+            | '\\' -> '\\' |> int16 |> Ok
+            | 'a' -> '\a' |> int16 |> Ok
+            | 'b' -> '\b' |> int16 |> Ok
+            | 'f' -> '\f' |> int16 |> Ok
+            | 'n' -> '\n' |> int16 |> Ok
+            | 'r' -> '\r' |> int16 |> Ok
+            | 't' -> '\t' |> int16 |> Ok
+            | 'v' -> '\v' |> int16 |> Ok
             | _ ->
                 sprintf "Unknown escape character '%c'" c
                 |> error offset
-
-                0s
-        | _ ->
-            "Invalid character literal" |> error offset
-            0s
+        | _ -> "Invalid character literal" |> error offset
 
     let rec readCharRec backslash (chars: string) offset input =
         match input with
         | ''' :: rest when not backslash -> (parseCharContent offset (chars |> List.ofSeq), rest)
         | '\\' as c :: rest -> readCharRec (not backslash) (chars + c.ToString()) (offset + 1) rest
         | [] ->
-            sprintf "Unterminated character literal"
-            |> error offset
-
-            (0s, [])
+            (sprintf "Unterminated character literal"
+             |> error offset,
+             [])
         | c :: rest -> readCharRec false (chars + c.ToString()) (offset + 1) rest
 
     let readChar = readCharRec false ""
 
     let rec readBlockComment offset input =
         match input with
-        | '*' :: '/' :: rest -> rest
-        | [] ->
-            error offset "Unterminated block comment"
-            input
+        | '*' :: '/' :: rest -> (Ok(), rest)
+        | [] -> (error offset "Unterminated block comment", input)
         | _ :: rest -> readBlockComment (offset + 1) rest
 
     let rec tokenizeFirst offset input =
+
+        let inline comb (lhs: obj) (rhs: Result<Token list, string>) =
+            let lhs =
+                match lhs with
+                | :? Result<Token, string> as lhs -> lhs
+                | :? Token as lhs -> Ok lhs
+                | _ -> failwith "Internal compiler error"
+
+            match (lhs, rhs) with
+            | (Ok lhs, Ok rhs) -> lhs :: rhs |> Ok
+            | (Error s, Ok _)
+            | (Ok _, Error s) -> Error s
+            | (Error s1, Error s2) -> s1 + s2 |> Error
+
         match input with
         | c :: _ when Char.IsDigit c ->
             let num, rest = input |> readNumber offset
             let length = List.length input - List.length rest
 
-            { Offset = offset
-              Length = length
-              Type = Literal num }
-            :: tokenizeFirst (offset + length) rest
+            let num =
+                num
+                |> Result.map (fun num ->
+                    { Offset = offset
+                      Length = length
+                      Type = Literal num })
+
+            comb num (tokenizeFirst (offset + length) rest)
         | c :: _ when Char.IsLetter c || c = '_' ->
             let identifier, rest = input |> readIdentifier
             let length = List.length input - List.length rest
@@ -286,238 +284,297 @@ let tokenizeRep reporter (input: string) =
                 | "sizeof" -> SizeOfKeyword
                 | _ -> Identifier identifier
 
-            { Offset = offset
-              Length = length
-              Type = tokenType }
-            :: tokenizeFirst (offset + length) rest
+            comb
+                { Offset = offset
+                  Length = length
+                  Type = tokenType }
+                (tokenizeFirst (offset + length) rest)
         | c :: rest when Char.IsWhiteSpace c -> tokenizeFirst (offset + 1) rest
-        | [] -> []
+        | [] -> Ok []
         | ''' :: rest ->
             let character, rest = rest |> readChar offset
             let length = List.length input - List.length rest
 
-            { Offset = offset
-              Length = length
-              Type = Literal character }
-            :: tokenizeFirst (offset + length) rest
+            let character =
+                character
+                |> Result.map (fun c ->
+                    { Offset = offset
+                      Length = length
+                      Type = Literal c })
+
+            comb character (tokenizeFirst (offset + length) rest)
         | '/' :: '/' :: rest ->
             let skipped = rest |> List.skipWhile ((<>) '\n')
             tokenizeFirst (offset + skipped.Length) skipped
         | '/' :: '*' :: rest ->
-            let skipped = readBlockComment offset rest
-            tokenizeFirst (offset + skipped.Length) skipped
+            let (error, skipped) = readBlockComment offset rest
+
+            match error with
+            | Ok _ -> tokenizeFirst (offset + skipped.Length) skipped
+            | Error s1 ->
+                match tokenizeFirst (offset + skipped.Length) skipped with
+                | Ok _ -> Error s1
+                | Error s2 -> s1 + s2 |> Error
         | '/' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = DivideAssign }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = DivideAssign }
+                (tokenizeFirst (offset + 2) rest)
         | '|' :: '|' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = LogicOr }
-            :: tokenizeFirst (offset + 2) rest
+
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = LogicOr }
+                (tokenizeFirst (offset + 2) rest)
         | '&' :: '&' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = LogicAnd }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = LogicAnd }
+                (tokenizeFirst (offset + 2) rest)
         | '=' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = Equal }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = Equal }
+                (tokenizeFirst (offset + 2) rest)
         | '!' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = NotEqual }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = NotEqual }
+                (tokenizeFirst (offset + 2) rest)
         | '<' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = LessThanOrEqual }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = LessThanOrEqual }
+                (tokenizeFirst (offset + 2) rest)
         | '>' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = GreaterThanOrEqual }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = GreaterThanOrEqual }
+                (tokenizeFirst (offset + 2) rest)
         | '+' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = PlusAssign }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = PlusAssign }
+                (tokenizeFirst (offset + 2) rest)
         | '-' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = MinusAssign }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = MinusAssign }
+                (tokenizeFirst (offset + 2) rest)
         | '/' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = DivideAssign }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = DivideAssign }
+                (tokenizeFirst (offset + 2) rest)
         | '*' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = MultiplyAssign }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = MultiplyAssign }
+                (tokenizeFirst (offset + 2) rest)
         | '%' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = ModuloAssign }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = ModuloAssign }
+                (tokenizeFirst (offset + 2) rest)
         | '<' :: '<' :: '=' :: rest ->
-            { Offset = offset
-              Length = 3
-              Type = ShiftLeftAssign }
-            :: tokenizeFirst (offset + 3) rest
+            comb
+                { Offset = offset
+                  Length = 3
+                  Type = ShiftLeftAssign }
+                (tokenizeFirst (offset + 3) rest)
         | '>' :: '>' :: '=' :: rest ->
-            { Offset = offset
-              Length = 3
-              Type = ShiftRightAssign }
-            :: tokenizeFirst (offset + 3) rest
+            comb
+                { Offset = offset
+                  Length = 3
+                  Type = ShiftRightAssign }
+                (tokenizeFirst (offset + 3) rest)
         | '&' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = BitAndAssign }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = BitAndAssign }
+                (tokenizeFirst (offset + 2) rest)
         | '|' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = BitOrAssign }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = BitOrAssign }
+                (tokenizeFirst (offset + 2) rest)
         | '^' :: '=' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = BitXorAssign }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = BitXorAssign }
+                (tokenizeFirst (offset + 2) rest)
         | '<' :: '<' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = ShiftLeft }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = ShiftLeft }
+                (tokenizeFirst (offset + 2) rest)
         | '>' :: '>' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = ShiftRight }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = ShiftRight }
+                (tokenizeFirst (offset + 2) rest)
         | '+' :: '+' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = Increment }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = Increment }
+                (tokenizeFirst (offset + 2) rest)
         | '-' :: '-' :: rest ->
-            { Offset = offset
-              Length = 2
-              Type = Decrement }
-            :: tokenizeFirst (offset + 2) rest
+            comb
+                { Offset = offset
+                  Length = 2
+                  Type = Decrement }
+                (tokenizeFirst (offset + 2) rest)
         | '(' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = OpenParentheses }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = OpenParentheses }
+                (tokenizeFirst (offset + 1) rest)
         | ')' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = CloseParentheses }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = CloseParentheses }
+                (tokenizeFirst (offset + 1) rest)
         | '{' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = OpenBrace }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = OpenBrace }
+                (tokenizeFirst (offset + 1) rest)
         | '}' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = CloseBrace }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = CloseBrace }
+                (tokenizeFirst (offset + 1) rest)
         | ';' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = SemiColon }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = SemiColon }
+                (tokenizeFirst (offset + 1) rest)
         | '-' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = Minus }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = Minus }
+                (tokenizeFirst (offset + 1) rest)
         | '~' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = BitWiseNegation }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = BitWiseNegation }
+                (tokenizeFirst (offset + 1) rest)
         | '!' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = LogicalNegation }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = LogicalNegation }
+                (tokenizeFirst (offset + 1) rest)
         | '+' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = Plus }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = Plus }
+                (tokenizeFirst (offset + 1) rest)
         | '*' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = Asterisk }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = Asterisk }
+                (tokenizeFirst (offset + 1) rest)
         | '/' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = Division }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = Division }
+                (tokenizeFirst (offset + 1) rest)
         | '%' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = Percent }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = Percent }
+                (tokenizeFirst (offset + 1) rest)
         | '&' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = Ampersand }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = Ampersand }
+                (tokenizeFirst (offset + 1) rest)
         | '|' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = BitOr }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = BitOr }
+                (tokenizeFirst (offset + 1) rest)
         | '^' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = BitXor }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = BitXor }
+                (tokenizeFirst (offset + 1) rest)
         | '=' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = Assignment }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = Assignment }
+                (tokenizeFirst (offset + 1) rest)
         | '<' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = LessThan }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = LessThan }
+                (tokenizeFirst (offset + 1) rest)
         | '>' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = GreaterThan }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = GreaterThan }
+                (tokenizeFirst (offset + 1) rest)
         | '?' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = QuestionMark }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = QuestionMark }
+                (tokenizeFirst (offset + 1) rest)
         | ':' :: rest ->
-            { Offset = offset
-              Length = 1
-              Type = Colon }
-            :: tokenizeFirst (offset + 1) rest
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = Colon }
+                (tokenizeFirst (offset + 1) rest)
         | c :: rest ->
-            sprintf "Unexpected character '%c'" c
-            |> error offset
+            let err =
+                sprintf "Unexpected character '%c'" c
+                |> error offset
 
-            tokenizeFirst (offset + 1) rest
+            match (err, tokenizeFirst (offset + 1) rest) with
+            | Error s1, Error s2 -> s1 + s2 |> Error
+            | Ok _, Error s
+            | Error s, Ok _ -> Error s
+            | _ -> failwith "Not possible"
 
-    let tokens = input |> List.ofSeq |> tokenizeFirst 0
-    { sourceObject with Tokens = tokens }
 
-let tokenize = tokenizeRep Console.Error.Write
+    input
+    |> List.ofSeq
+    |> tokenizeFirst 0
+    |> Result.map (fun tokens -> { sourceObject with Tokens = tokens })

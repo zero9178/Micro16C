@@ -6,14 +6,19 @@ open FsUnit.Xunit
 
 open Micro16C.Frontend.Lex
 
-let lexerOutput (input: string) =
-    let mutable s = ""
-    tokenizeRep (fun x -> s <- s + x) input |> ignore
-    s
+let private lexerOutput (input: string) =
+    match tokenize input with
+    | Ok _ -> ""
+    | Error s -> s
+
+let private lexer (input: string) =
+    match tokenize input with
+    | Ok { Tokens = tokens } -> tokens
+    | Error s -> failwith s
 
 [<Fact>]
 let ``Simple identifiers`` () =
-    let { Tokens = tokens } = tokenize "a"
+    let tokens = lexer "a"
     tokens |> should haveLength 1
 
     tokens
@@ -23,7 +28,7 @@ let ``Simple identifiers`` () =
                Length = 1
                Type = Identifier "a" } ]
 
-    let { Tokens = tokens } = tokenize "a2323"
+    let tokens = lexer "a2323"
     tokens |> should haveLength 1
 
     tokens
@@ -33,7 +38,7 @@ let ``Simple identifiers`` () =
                Length = 5
                Type = Identifier "a2323" } ]
 
-    let { Tokens = tokens } = tokenize "a34+343"
+    let tokens = lexer "a34+343"
     tokens |> should haveLength 3
 
     tokens
@@ -47,7 +52,7 @@ let ``Simple identifiers`` () =
                Length = 3
                Type = 343 |> int16 |> Literal } ]
 
-    let { Tokens = tokens } = tokenize "a23_23"
+    let tokens = lexer "a23_23"
     tokens |> should haveLength 1
 
     tokens
@@ -57,7 +62,7 @@ let ``Simple identifiers`` () =
                Length = 6
                Type = Identifier "a23_23" } ]
 
-    let { Tokens = tokens } = tokenize "_a2323"
+    let tokens = lexer "_a2323"
     tokens |> should haveLength 1
 
     tokens
@@ -69,8 +74,7 @@ let ``Simple identifiers`` () =
 
 [<Fact>]
 let ``Recognizing keywords`` () =
-    tokenize "int register break continue do else for while goto"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "int register break continue do else for while goto"
     |> List.map (fun { Type = x } -> x)
     |> should
         equal
@@ -86,8 +90,7 @@ let ``Recognizing keywords`` () =
 
 [<Fact>]
 let ``Block comment`` () =
-    tokenize "/*4234$34353534§$$343§$§$*/"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "/*4234$34353534§$$343§$§$*/"
     |> should haveLength 0
 
     lexerOutput "/*4234$34353534§$$343§$§$*/"
@@ -104,8 +107,8 @@ let ``Line comment`` () =
     f"
     |> should be EmptyString
 
-    let { Tokens = tokens } =
-        tokenize "id\n
+    let tokens =
+        lexer "id\n
     //4234$34353534§$$343§$§$\n
     f"
 
@@ -121,25 +124,22 @@ let ``Line comment`` () =
 [<Fact>]
 let Integers () =
 
-    let { Tokens = tokens } = tokenize "0x3434"
+    let tokens = lexer "0x3434"
     tokens |> should haveLength 1
 
     tokens.[0].Type
     |> should equal (Literal(int16 0x3434))
-    
-    let { Tokens = tokens } = tokenize "0"
+
+    let tokens = lexer "0"
     tokens |> should haveLength 1
 
     tokens.[0].Type |> should equal (Literal(int16 0))
 
-    let { Tokens = tokens } = tokenize "3434"
+    let tokens = lexer "3434"
     tokens |> should haveLength 1
 
     tokens.[0].Type
     |> should equal (Literal(int16 3434))
-
-    let { Tokens = tokens } = tokenize "6521323"
-    tokens |> should haveLength 1
 
     lexerOutput "6521323"
     |> should haveSubstring "Integer literal '6521323' too large for type int"
@@ -147,7 +147,7 @@ let Integers () =
     lexerOutput "0x6521323"
     |> should haveSubstring "Integer literal '0x6521323' too large for type int"
 
-    let { Tokens = tokens } = tokenize "0X3434"
+    let tokens = lexer "0X3434"
     tokens |> should haveLength 1
 
     tokens.[0].Type
@@ -156,7 +156,7 @@ let Integers () =
     lexerOutput "0X6521323"
     |> should haveSubstring "Integer literal '0X6521323' too large for type int"
 
-    let { Tokens = tokens } = tokenize "03434"
+    let tokens = lexer "03434"
     tokens |> should haveLength 1
 
     tokens.[0].Type
@@ -167,8 +167,7 @@ let Integers () =
 
 [<Fact>]
 let Operators () =
-    tokenize "|| && == != <= >= += -= /= *= %= <<= >>= &= |= ^= << >> ++ -- ( ) { } ; - ~ ! + * / % & | ^ = < > ? :"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "|| && == != <= >= += -= /= *= %= <<= >>= &= |= ^= << >> ++ -- ( ) { } ; - ~ ! + * / % & | ^ = < > ? :"
     |> List.map (fun { Type = x } -> x)
     |> should
         equal
@@ -220,8 +219,7 @@ let Miscellaneous () =
 
 [<Fact>]
 let ``Character literals`` () =
-    tokenize "'a'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'a'"
     |> should
         equal
            [ { Offset = 0
@@ -234,88 +232,77 @@ let ``Character literals`` () =
     lexerOutput "'"
     |> should haveSubstring "Unterminated character literal"
 
-    tokenize "'\\''"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\''"
     |> should
         equal
            [ { Offset = 0
                Type = '\'' |> int16 |> Literal
                Length = 4 } ]
 
-    tokenize "'\\\"'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\\"'"
     |> should
         equal
            [ { Offset = 0
                Type = '"' |> int16 |> Literal
                Length = 4 } ]
 
-    tokenize "'\\?'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\?'"
     |> should
         equal
            [ { Offset = 0
                Type = '?' |> int16 |> Literal
                Length = 4 } ]
 
-    tokenize "'\\\\'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\\\'"
     |> should
         equal
            [ { Offset = 0
                Type = '\\' |> int16 |> Literal
                Length = 4 } ]
 
-    tokenize "'\\a'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\a'"
     |> should
         equal
            [ { Offset = 0
                Type = '\a' |> int16 |> Literal
                Length = 4 } ]
 
-    tokenize "'\\b'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\b'"
     |> should
         equal
            [ { Offset = 0
                Type = '\b' |> int16 |> Literal
                Length = 4 } ]
 
-    tokenize "'\\f'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\f'"
     |> should
         equal
            [ { Offset = 0
                Type = '\f' |> int16 |> Literal
                Length = 4 } ]
 
-    tokenize "'\\n'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\n'"
     |> should
         equal
            [ { Offset = 0
                Type = '\n' |> int16 |> Literal
                Length = 4 } ]
 
-    tokenize "'\\r'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\r'"
     |> should
         equal
            [ { Offset = 0
                Type = '\r' |> int16 |> Literal
                Length = 4 } ]
 
-    tokenize "'\\t'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\t'"
     |> should
         equal
            [ { Offset = 0
                Type = '\t' |> int16 |> Literal
                Length = 4 } ]
 
-    tokenize "'\\v'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\v'"
     |> should
         equal
            [ { Offset = 0
@@ -325,8 +312,7 @@ let ``Character literals`` () =
     lexerOutput "'\\$'"
     |> should haveSubstring "Unknown escape character '$'"
 
-    tokenize "'\\x60'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\x60'"
     |> should
         equal
            [ { Offset = 0
@@ -337,24 +323,21 @@ let ``Character literals`` () =
     |> should haveSubstring "Hex literal '\\x3434343434' does not fit into type int"
 
 
-    tokenize "'\\7'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\7'"
     |> should
         equal
            [ { Offset = 0
                Type = Literal 7s
                Length = 4 } ]
 
-    tokenize "'\\07'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\07'"
     |> should
         equal
            [ { Offset = 0
                Type = Literal 7s
                Length = 5 } ]
 
-    tokenize "'\\007'"
-    |> fun { Tokens = tokens } -> tokens
+    lexer "'\\007'"
     |> should
         equal
            [ { Offset = 0

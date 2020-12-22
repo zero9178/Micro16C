@@ -11,7 +11,7 @@ let main argv =
         r0 = r1;
         r1 = mod;
     } while(mod != 0);"
-    |> Parse.parse
+    |> Result.map Parse.parse
     |> printfn "%A"
 
     0
