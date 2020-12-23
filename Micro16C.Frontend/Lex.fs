@@ -85,20 +85,21 @@ type SourceObject =
             | ErrorTypeEnd -> String.length this.Source
 
         let i =
-            match this.Newlines |> List.tryFind (snd >> (<) offset) with
-            | None -> (0, 0)
+            match this.Newlines
+                  |> List.tryFindBack (snd >> (>) offset) with
+            | None -> (-1, -1)
             | Some i -> i
 
         let prefix =
             sprintf "%d:%d: %s\n" (fst i + 1) (offset - snd i + 1) message
 
         let endOffset =
-            match this.Source.IndexOf(value = '\n', startIndex = snd i) with
+            match this.Source.IndexOf(value = '\n', startIndex = snd i + 1) with
             | -1 -> String.length this.Source
             | value -> value
 
         prefix
-        + sprintf "%4d | %s\n" (List.length this.Newlines + 1) this.Source.[(snd i)..endOffset]
+        + sprintf "%4d | %s\n" (List.length this.Newlines + 1) this.Source.[(snd i + 1)..endOffset]
 
 let createSourceObject (input: string) =
     let newLines =
@@ -128,7 +129,7 @@ let tokenize (input: string) =
             match input with
             | '0' :: 'x' :: numberChars
             | '0' :: 'X' :: numberChars -> (numberChars, conversion 16, 2)
-            | '0' :: numberChars when List.length numberChars > 0 -> (numberChars, conversion 8, 1)
+            | '0' :: c :: numberChars when Char.IsDigit c -> (c :: numberChars, conversion 8, 1)
             | _ -> (input, conversion 10, 0)
 
         let numberChars =

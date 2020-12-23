@@ -124,6 +124,8 @@ let ``Line comment`` () =
 [<Fact>]
 let Integers () =
 
+    lexerOutput "0" |> should be EmptyString
+
     let tokens = lexer "0x3434"
     tokens |> should haveLength 1
 

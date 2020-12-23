@@ -114,7 +114,7 @@ open Micro16C.Frontend.Lex
 
 type Declarator =
     { PointerCount: int
-      Identifier: Token option }
+      Identifier: Token }
 
 type TypeName = { PointerCount: int }
 
@@ -192,7 +192,7 @@ and PostFixExpression =
 and PrimaryExpression =
     | IdentifierPrimaryExpression of Token
     | LiteralPrimaryExpression of Token
-    | ExpressionPrimaryExpression of Expression option
+    | ExpressionPrimaryExpression of Expression
 
 type Declaration =
     { DeclarationSpecifiers: Token option
@@ -214,32 +214,120 @@ and Statement =
     | CompoundStatement of CompoundItem list
     | ExpressionStatement of Expression option
 
-let private parseBinaryOperator subExprParse allowedType error (tokens: Token list) =
+let private createExpression assignment optionalAssignments =
+    { AssignmentExpression = assignment
+      OptionalAssignmentExpressions = optionalAssignments }
+
+let private createAssignmentExpression conditional optionalConditional =
+    { ConditionalExpression = conditional
+      OptionalConditionalExpressions = optionalConditional }
+
+let private createConditionalExpression logicalExpression optionalTernary =
+    { LogicalOrExpression = logicalExpression
+      OptionalTernary = optionalTernary }
+
+let private createLogicalOrExpression logicalAnd optionalLogicalAnd =
+    { LogicalAndExpression = logicalAnd
+      OptionalLogicalAndExpressions = optionalLogicalAnd }
+
+let private createLogicalAndExpression inclusiveOr optionalInclusiveOr =
+    { InclusiveOrExpression = inclusiveOr
+      OptionalInclusiveOrExpressions = optionalInclusiveOr }
+
+let private createInclusiveOrExpression exclusiveOr optionalExclusiveOr =
+    { ExclusiveOrExpression = exclusiveOr
+      OptionalExclusiveOrExpressions = optionalExclusiveOr }
+
+let private createExclusiveOrExpression andExpression optionalAnd =
+    { AndExpression = andExpression
+      OptionalAndExpressions = optionalAnd }
+
+let private createAndExpression equality optionalEquality =
+    { EqualityExpression = equality
+      OptionalEqualityExpressions = optionalEquality }
+
+let private createEqualityExpression relational optionalRelational =
+    { RelationalExpression = relational
+      OptionalRelationalExpressions = optionalRelational }
+
+let private createRelationalExpression shift optionalShift =
+    { ShiftExpression = shift
+      OptionalShiftExpressions = optionalShift }
+
+let private createShiftExpression additive optionalAdditive =
+    { AdditiveExpression = additive
+      OptionalAdditiveExpressions = optionalAdditive }
+
+let private createAdditiveExpression multiplicative optionalMultiplicative =
+    { MultiplicativeExpression = multiplicative
+      OptionalMultiplicativeExpressions = optionalMultiplicative }
+
+let private createMultiplicativeExpression unary optionalUnary =
+    { UnaryExpression = unary
+      OptionalUnaryExpressions = optionalUnary }
+
+let private createDeclaration declarationSpecifiers declarators =
+    { DeclarationSpecifiers = declarationSpecifiers
+      Declarators = declarators }
+
+let private comb2 (successComb: 'a -> 'b -> 'c) (x: Result<'a, string>) (y: Result<'b, string>) =
+    match (x, y) with
+    | (Ok x, Ok y) -> successComb x y |> Ok
+    | (Error s, Ok _)
+    | (Ok _, Error s) -> Error s
+    | (Error s1, Error s2) -> s1 + s2 |> Error
+
+let private comb3 (successComb: 'a -> 'b -> 'c -> 'd)
+                  (x: Result<'a, string>)
+                  (y: Result<'b, string>)
+                  (z: Result<'c, string>)
+                  =
+    match (x, y, z) with
+    | (Ok x, Ok y, Ok z) -> successComb x y z |> Ok
+    | (Error s, Ok _, Ok _)
+    | (Ok _, Error s, Ok _) -> Error s
+    | (Ok _, Ok _, Error s) -> Error s
+    | (Error s1, Error s2, Ok _) -> s1 + s2 |> Error
+    | (Error s1, Ok _, Error s2) -> s1 + s2 |> Error
+    | (Ok _, Error s1, Error s2) -> s1 + s2 |> Error
+    | (Error s1, Error s2, Error s3) -> s1 + s2 + s3 |> Error
+
+let private pack2 x y = (x, y)
+
+let private comb4 (successComb: 'a -> 'b -> 'c -> 'd -> 'e)
+                  (x: Result<'a, string>)
+                  (y: Result<'b, string>)
+                  (z: Result<'c, string>)
+                  (w: Result<'d, string>)
+                  =
+    let temp1 = comb2 pack2 x y
+    let temp2 = comb2 pack2 z w
+    comb2 (fun (x, y) (z, w) -> successComb x y z w) temp1 temp2
+
+let private prependResult x y = comb2 (fun x y -> x :: y) x y
+
+let inline private parseBinaryOperator subExprParse allowedType error tokens =
     let lhs, tokens = subExprParse error tokens
 
-    let rec parseOptionalRhs (tokens: Token list) =
+    let rec parseOptionalRhs tokens =
         match tokens with
         | { Type = t } :: tokens when t = allowedType ->
             let rhs, tokens = subExprParse error tokens
 
             let others, tokens = parseOptionalRhs tokens
 
-            (rhs :: others, tokens)
-        | _ -> ([], tokens)
+            (prependResult rhs others, tokens)
+        | _ -> ([] |> Ok, tokens)
 
     let optionalRhs, tokens = parseOptionalRhs tokens
 
     (lhs, optionalRhs, tokens)
 
-let private expect tokenType error (tokens: Token list) message =
+let private expect tokenType error (tokens: Token list) message: Result<Token, string> * Token list =
     match List.tryHead tokens with
-    | Some { Type = t } when t = tokenType -> (Some(List.head tokens), List.tail tokens)
-    | Some t ->
-        message |> error (ErrorTypeToken t)
-        (None, tokens)
-    | None ->
-        message |> error ErrorTypeEnd
-        (None, tokens)
+    | Some { Type = t } when t = tokenType -> (List.head tokens |> Ok, List.tail tokens)
+    | Some t -> (message |> error (ErrorTypeToken t) |> Error, tokens)
+    | None -> (message |> error ErrorTypeEnd |> Error, tokens)
 
 let private parseBinaryMultiOperator subExprParse allowedTypes error (tokens: Token list) =
     let lhs, tokens = subExprParse error tokens
@@ -251,8 +339,8 @@ let private parseBinaryMultiOperator subExprParse allowedTypes error (tokens: To
 
             let others, tokens = parseOptionalRhs tokens
 
-            ((t, rhs) :: others, tokens)
-        | _ -> ([], tokens)
+            (comb2 (fun rhs others -> ((t, rhs) :: others)) rhs others, tokens)
+        | _ -> ([] |> Ok, tokens)
 
     let optionalRhs, tokens = parseOptionalRhs tokens
 
@@ -263,9 +351,7 @@ let rec parseExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
         parseBinaryOperator parseAssignmentExpression Comma error tokens
 
-    ({ AssignmentExpression = lhs
-       OptionalAssignmentExpressions = rhs },
-     tokens)
+    (comb2 createExpression lhs rhs, tokens)
 
 and parseAssignmentExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
@@ -285,9 +371,7 @@ and parseAssignmentExpression error (tokens: Token list) =
             error
             tokens
 
-    ({ ConditionalExpression = lhs
-       OptionalConditionalExpressions = rhs },
-     tokens)
+    (comb2 createAssignmentExpression lhs rhs, tokens)
 
 and parseConditionalExpression error (tokens: Token list) =
     let logicalOrExpression, tokens = parseLogicalOrExpression error tokens
@@ -297,68 +381,53 @@ and parseConditionalExpression error (tokens: Token list) =
         let expression, tokens = parseExpression error tokens
 
         match expect Colon error tokens "Expected ':' to match '?'" with
-        | (Some _, tokens) ->
+        | (Ok _, tokens) ->
             let conditionalExpression, tokens = parseConditionalExpression error tokens
 
-            ({ LogicalOrExpression = logicalOrExpression
-               OptionalTernary = Some(expression, conditionalExpression) },
-             tokens)
-        | (_, tokens) ->
-            ({ LogicalOrExpression = logicalOrExpression
-               OptionalTernary = None },
-             tokens)
-    | _ ->
-        ({ LogicalOrExpression = logicalOrExpression
-           OptionalTernary = None },
-         tokens)
+            let optionalTernary =
+                comb2 pack2 expression conditionalExpression
+                |> Result.map Some
+
+            (comb2 createConditionalExpression logicalOrExpression optionalTernary, tokens)
+        | (error1, tokens) ->
+            (comb3 (fun _ -> createConditionalExpression) error1 logicalOrExpression (Ok None), tokens)
+    | _ -> (comb2 createConditionalExpression logicalOrExpression (Ok None), tokens)
 
 and parseLogicalOrExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
         parseBinaryOperator parseLogicalAndExpression LogicOr error tokens
 
-    ({ LogicalAndExpression = lhs
-       OptionalLogicalAndExpressions = rhs },
-     tokens)
+    (comb2 createLogicalOrExpression lhs rhs, tokens)
 
 and parseLogicalAndExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
         parseBinaryOperator parseInclusiveOrExpression LogicAnd error tokens
 
-    ({ InclusiveOrExpression = lhs
-       OptionalInclusiveOrExpressions = rhs },
-     tokens)
+    (comb2 createLogicalAndExpression lhs rhs, tokens)
 
 and parseInclusiveOrExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
         parseBinaryOperator parseExclusiveOrExpression BitOr error tokens
 
-    ({ ExclusiveOrExpression = lhs
-       OptionalExclusiveOrExpressions = rhs },
-     tokens)
+    (comb2 createInclusiveOrExpression lhs rhs, tokens)
 
 and parseExclusiveOrExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
         parseBinaryOperator parseAndExpression BitXor error tokens
 
-    ({ AndExpression = lhs
-       OptionalAndExpressions = rhs },
-     tokens)
+    (comb2 createExclusiveOrExpression lhs rhs, tokens)
 
 and parseAndExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
         parseBinaryOperator parseEqualityExpression Ampersand error tokens
 
-    ({ EqualityExpression = lhs
-       OptionalEqualityExpressions = rhs },
-     tokens)
+    (comb2 createAndExpression lhs rhs, tokens)
 
 and parseEqualityExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
         parseBinaryMultiOperator parseRelationalExpression [ Equal; NotEqual ] error tokens
 
-    ({ RelationalExpression = lhs
-       OptionalRelationalExpressions = rhs },
-     tokens)
+    (comb2 createEqualityExpression lhs rhs, tokens)
 
 and parseRelationalExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
@@ -371,60 +440,52 @@ and parseRelationalExpression error (tokens: Token list) =
             error
             tokens
 
-    ({ ShiftExpression = lhs
-       OptionalShiftExpressions = rhs },
-     tokens)
+    (comb2 createRelationalExpression lhs rhs, tokens)
 
 and parseShiftExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
         parseBinaryMultiOperator parseAdditiveExpression [ ShiftRight; ShiftLeft ] error tokens
 
-    ({ AdditiveExpression = lhs
-       OptionalAdditiveExpressions = rhs },
-     tokens)
+    (comb2 createShiftExpression lhs rhs, tokens)
 
 and parseAdditiveExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
         parseBinaryMultiOperator parseMultiplicativeExpression [ Plus; Minus ] error tokens
 
-    ({ MultiplicativeExpression = lhs
-       OptionalMultiplicativeExpressions = rhs },
-     tokens)
+    (comb2 createAdditiveExpression lhs rhs, tokens)
 
 and parseMultiplicativeExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
         parseBinaryMultiOperator parseUnaryExpression [ Asterisk; Division; Percent ] error tokens
 
-    ({ UnaryExpression = lhs
-       OptionalUnaryExpressions = rhs },
-     tokens)
+    (comb2 createMultiplicativeExpression lhs rhs, tokens)
 
 and parseUnaryExpression error (tokens: Token list) =
     match tokens with
     | { Type = Increment } :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (IncrementUnaryExpression unary, tokens)
+        (unary |> Result.map IncrementUnaryExpression, tokens)
     | { Type = Decrement } :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (DecrementUnaryExpression unary, tokens)
+        (unary |> Result.map DecrementUnaryExpression, tokens)
     | { Type = Ampersand } :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (AddressOfUnaryExpression unary, tokens)
+        (unary |> Result.map AddressOfUnaryExpression, tokens)
     | { Type = Asterisk } :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (DereferenceUnaryExpression unary, tokens)
+        (unary |> Result.map DereferenceUnaryExpression, tokens)
     | { Type = Plus } :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (PlusUnaryExpression unary, tokens)
+        (unary |> Result.map PlusUnaryExpression, tokens)
     | { Type = Minus } :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (MinusUnaryExpression unary, tokens)
+        (unary |> Result.map MinusUnaryExpression, tokens)
     | { Type = BitWiseNegation } :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (BitwiseNegateUnaryExpression unary, tokens)
+        (unary |> Result.map BitwiseNegateUnaryExpression, tokens)
     | { Type = LogicalNegation } :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (LogicalNegateUnaryExpression unary, tokens)
+        (unary |> Result.map LogicalNegateUnaryExpression, tokens)
     | { Type = SizeOfKeyword } :: { Type = OpenParentheses } :: { Type = IntKeyword } :: tokens ->
         let pointerCount =
             tokens
@@ -434,36 +495,39 @@ and parseUnaryExpression error (tokens: Token list) =
             |> List.length
 
         let tokens = tokens |> List.skip pointerCount
-        (SizeOfTypeUnaryExpression { PointerCount = pointerCount }, tokens)
+
+        (SizeOfTypeUnaryExpression { PointerCount = pointerCount }
+         |> Ok,
+         tokens)
     | { Type = SizeOfKeyword } :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (SizeOfUnaryExpression unary, tokens)
+        (unary |> Result.map SizeOfUnaryExpression, tokens)
     | _ ->
         let postFix, tokens = parsePostFixExpression error tokens
-        (PostFixUnaryExpression postFix, tokens)
+        (postFix |> Result.map PostFixUnaryExpression, tokens)
 
 and parsePostFixExpression error (tokens: Token list) =
     let primary, tokens =
         match tokens with
-        | { Type = Identifier _ } as t :: tokens -> (IdentifierPrimaryExpression t, tokens)
-        | { Type = Literal _ } as t :: tokens -> (LiteralPrimaryExpression t, tokens)
+        | { Type = Identifier _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = Literal _ } as t :: tokens -> (LiteralPrimaryExpression t |> Ok, tokens)
         | { Type = OpenParentheses } :: tokens ->
             let expression, tokens = parseExpression error tokens
 
-            let _, tokens =
+            let error, tokens =
                 expect CloseParentheses error tokens "Expected ')' to match '('"
 
-            (ExpressionPrimaryExpression(Some expression), tokens)
+            (comb2 (fun _ -> ExpressionPrimaryExpression) error expression, tokens)
         | [] ->
-            "Expected Identifier, Literal or '('"
-            |> error ErrorTypeEnd
-
-            (ExpressionPrimaryExpression None, tokens)
+            ("Expected Identifier, Literal or '('"
+             |> error ErrorTypeEnd
+             |> Error,
+             tokens)
         | t :: _ ->
-            "Expected Identifier, Literal or '('"
-            |> error (ErrorTypeToken t)
-
-            (ExpressionPrimaryExpression None, tokens)
+            ("Expected Identifier, Literal or '('"
+             |> error (ErrorTypeToken t)
+             |> Error,
+             tokens)
 
     let rec parsePostFixExpressionSuffix prev (tokens: Token list) =
 
@@ -471,61 +535,72 @@ and parsePostFixExpression error (tokens: Token list) =
         | { Type = OpenSquareBracket } :: tokens ->
             let expression, tokens = parseExpression error tokens
 
-            let _, tokens =
+            let error1, tokens =
                 expect CloseSquareBracket error tokens "Expected ']' to match '['"
 
-            parsePostFixExpressionSuffix (SubscriptPostFixExpression(prev, expression)) tokens
-        | { Type = Increment } :: tokens -> parsePostFixExpressionSuffix (IncrementPostFixExpression prev) tokens
-        | { Type = Decrement } :: tokens -> parsePostFixExpressionSuffix (DecrementPostFixExpression prev) tokens
+            parsePostFixExpressionSuffix
+                (comb3 (fun _ x y -> SubscriptPostFixExpression(x, y)) error1 prev expression)
+                tokens
+        | { Type = Increment } :: tokens ->
+            parsePostFixExpressionSuffix (prev |> Result.map IncrementPostFixExpression) tokens
+        | { Type = Decrement } :: tokens ->
+            parsePostFixExpressionSuffix (prev |> Result.map DecrementPostFixExpression) tokens
         | _ -> (prev, tokens)
 
-    parsePostFixExpressionSuffix (PrimaryPostFixExpression primary) tokens
+    parsePostFixExpressionSuffix (primary |> Result.map PrimaryPostFixExpression) tokens
 
 let parseDeclarationSpecifiers error (tokens: Token list) =
     match tokens with
-    | { Type = IntKeyword } :: { Type = t } :: tokens when t <> RegisterKeyword -> (None, tokens)
+    | { Type = IntKeyword } :: ({ Type = t } as head) :: tokens when t <> RegisterKeyword ->
+        (None |> Ok, head :: tokens)
     | { Type = IntKeyword } :: { Type = RegisterKeyword } :: tokens ->
-        let _, tokens =
+        let error1, tokens =
             expect OpenParentheses error tokens "Expected '(' after 'register'"
 
         let s, tokens =
             match tokens with
-            | { Type = Identifier _ } as t :: tokens -> (Some t, tokens)
+            | { Type = Identifier _ } as t :: tokens -> (Ok t, tokens)
             | t :: _ ->
-                error (ErrorTypeToken t) "Expected register name after '(' in 'register'"
-                (None, tokens)
+                (error (ErrorTypeToken t) "Expected register name after '(' in 'register'"
+                 |> Error,
+                 tokens)
             | [] ->
-                error ErrorTypeEnd "Expected register name after '(' in 'register'"
-                (None, tokens)
+                (error ErrorTypeEnd "Expected register name after '(' in 'register'"
+                 |> Error,
+                 tokens)
 
-        let _, tokens =
-            expect OpenParentheses error tokens "Expected ')' to match ')'"
+        let error2, tokens =
+            expect CloseParentheses error tokens "Expected ')' to match ')'"
 
-        (s, tokens)
+        (comb3 (fun _ _ -> Some) error1 error2 s, tokens)
     | { Type = RegisterKeyword } :: tokens ->
-        let _, tokens =
+        let error1, tokens =
             expect OpenParentheses error tokens "Expected '(' after 'register'"
 
         let s, tokens =
             match tokens with
-            | { Type = Identifier _ } as t :: tokens -> (Some t, tokens)
+            | { Type = Identifier _ } as t :: tokens -> (Ok t, tokens)
             | t :: _ ->
-                error (ErrorTypeToken t) "Expected register name after '(' in 'register'"
-                (None, tokens)
+                (error (ErrorTypeToken t) "Expected register name after '(' in 'register'"
+                 |> Error,
+                 tokens)
             | [] ->
-                error ErrorTypeEnd "Expected register name after '(' in 'register'"
-                (None, tokens)
+                (error ErrorTypeEnd "Expected register name after '(' in 'register'"
+                 |> Error,
+                 tokens)
 
-        let _, tokens =
-            expect OpenParentheses error tokens "Expected ')' to match ')'"
+        let error2, tokens =
+            expect CloseParentheses error tokens "Expected ')' to match ')'"
 
-        let _, tokens =
-            expect OpenParentheses error tokens "Expected 'int' in type specifiers"
+        let error3, tokens =
+            expect IntKeyword error tokens "Expected 'int' in type specifiers"
 
-        (s, tokens)
+        (comb4 (fun _ _ _ -> Some) error1 error2 error3 s, tokens)
     | _ ->
-        match expect OpenParentheses error tokens "Expected 'int' in type specifiers" with
-        | (_, tokens) -> (None, tokens)
+        let error, tokens =
+            expect IntKeyword error tokens "Expected 'int' in type specifiers"
+
+        (error |> Result.map Some, tokens)
 
 let parseDeclaration error (tokens: Token list) =
     let register, tokens = parseDeclarationSpecifiers error tokens
@@ -542,23 +617,20 @@ let parseDeclaration error (tokens: Token list) =
         let tokens = tokens |> List.skip pointerCount
 
         match List.tryHead tokens with
-        | Some { Type = Identifier _ } as t ->
+        | Some ({ Type = Identifier _ } as t) ->
             ({ PointerCount = pointerCount
-               Identifier = t },
+               Identifier = t }
+             |> Ok,
              List.tail tokens)
         | Some t ->
-            "Expected identifier in declaration"
-            |> error (ErrorTypeToken t)
-
-            ({ PointerCount = pointerCount
-               Identifier = None },
+            ("Expected identifier in declaration"
+             |> error (ErrorTypeToken t)
+             |> Error,
              List.tail tokens)
         | None ->
-            "Expected identifier in declaration"
-            |> error ErrorTypeEnd
-
-            ({ PointerCount = pointerCount
-               Identifier = None },
+            ("Expected identifier in declaration"
+             |> error ErrorTypeEnd
+             |> Error,
              [])
 
     let firstDeclarator, tokens = parseDeclarator tokens
@@ -567,8 +639,8 @@ let parseDeclaration error (tokens: Token list) =
         match tokens with
         | { Type = Assignment } :: tokens ->
             let assignment, tokens = parseAssignmentExpression error tokens
-            (Some assignment, tokens)
-        | _ -> (None, tokens)
+            (assignment |> Result.map Some, tokens)
+        | _ -> (None |> Ok, tokens)
 
     let rec parseDeclarators error (tokens: Token list) =
         match tokens with
@@ -579,22 +651,26 @@ let parseDeclaration error (tokens: Token list) =
                 match tokens with
                 | { Type = Assignment } :: tokens ->
                     let assignment, tokens = parseAssignmentExpression error tokens
-                    (Some assignment, tokens)
-                | _ -> (None, tokens)
+                    (assignment |> Result.map Some, tokens)
+                | _ -> (None |> Ok, tokens)
 
             let otherDeclarators, rest = parseDeclarators error tokens
-            ((declarator, assignment) :: otherDeclarators, rest)
-        | rest -> ([], rest)
+
+            (comb3 (fun x y z -> (x, y) :: z) declarator assignment otherDeclarators, rest)
+        | rest -> ([] |> Ok, rest)
 
 
     let otherDeclarators, tokens = parseDeclarators error tokens
 
-    let _, tokens =
+    let error1, tokens =
         expect SemiColon error tokens "Expected ';' after declaration"
 
-    ({ DeclarationSpecifiers = register
-       Declarators = (firstDeclarator, assignment) :: otherDeclarators },
-     tokens)
+    match error1 with
+    | Error s -> (Error s, tokens)
+    | Ok _ ->
+        (comb4 (fun x y z w -> createDeclaration x ((y, w) :: z)) register firstDeclarator otherDeclarators assignment,
+         tokens)
+
 
 type private DeclOrExpr =
     | MaybeExpression of Expression option
@@ -603,35 +679,39 @@ type private DeclOrExpr =
 let rec parseStatement error (tokens: Token list) =
     match tokens with
     | { Type = WhileKeyword } :: tokens ->
-        let _, tokens =
+        let error1, tokens =
             expect OpenParentheses error tokens "Expected '(' after 'while'"
 
         let expression, tokens = parseExpression error tokens
 
-        let _, tokens =
+        let error2, tokens =
             expect CloseParentheses error tokens "Expected ')' to match '('"
 
         let statement, tokens = parseStatement error tokens
 
-        (WhileStatement(expression, statement), tokens)
+        (comb4 (fun _ _ x y -> WhileStatement(x, y)) error1 error2 expression statement, tokens)
     | { Type = DoKeyword } :: tokens ->
         let statement, tokens = parseStatement error tokens
 
-        let _, tokens =
+        let error1, tokens =
             expect WhileKeyword error tokens "Expected 'while' to match 'do'"
 
-        let _, tokens =
+        let error2, tokens =
             expect OpenParentheses error tokens "Expected '(' after 'while'"
 
         let expression, tokens = parseExpression error tokens
 
-        let _, tokens =
+        let error3, tokens =
             expect CloseParentheses error tokens "Expected ')' to match '('"
 
-        (DoWhileStatement(statement, expression), tokens)
+        let error123 =
+            comb3 (fun _ _ _ -> ()) error1 error2 error3
+
+        (comb3 (fun _ statement expression -> DoWhileStatement(statement, expression)) error123 statement expression,
+         tokens)
     | { Type = ForKeyword } :: tokens ->
 
-        let _, tokens =
+        let error1, tokens =
             expect OpenParentheses error tokens "Expected '(' after 'for'"
 
         let first, tokens =
@@ -639,74 +719,92 @@ let rec parseStatement error (tokens: Token list) =
             | { Type = IntKeyword } :: _
             | { Type = RegisterKeyword } :: _ ->
                 let decl, tokens = parseDeclaration error tokens
-                (Declaration decl, tokens)
-            | { Type = SemiColon } :: tokens -> (MaybeExpression None, tokens)
+                (decl |> Result.map Declaration, tokens)
+            | { Type = SemiColon } :: tokens -> (MaybeExpression None |> Ok, tokens)
             | _ ->
                 let expr, tokens = parseExpression error tokens
-                (MaybeExpression(Some expr), tokens)
+                (expr |> Result.map (Some >> MaybeExpression), tokens)
 
         let second, tokens =
             match tokens with
-            | { Type = SemiColon } :: tokens -> (None, tokens)
+            | { Type = SemiColon } :: tokens -> (None |> Ok, tokens)
             | _ ->
                 let expr, tokens = parseExpression error tokens
-                (Some expr, tokens)
+                (expr |> Result.map Some, tokens)
 
         let third, tokens =
             match tokens with
-            | { Type = CloseParentheses } :: tokens -> (None, tokens)
+            | { Type = CloseParentheses } :: tokens -> (None |> Ok, tokens)
             | _ ->
                 let expr, tokens = parseExpression error tokens
-                (Some expr, tokens)
+                (expr |> Result.map Some, tokens)
 
-        let _, tokens =
+        let error2, tokens =
             expect CloseParentheses error tokens "Expected ')' to match '('"
 
         let statement, tokens = parseStatement error tokens
 
-        match first with
-        | MaybeExpression maybeExpr -> (ForStatement(maybeExpr, second, third, statement), tokens)
-        | Declaration decl -> (ForStatementDecl(decl, second, third, statement), tokens)
+        match (error1, error2) with
+        | (Error s1, Error s2) -> (s1 + s2 |> Error, tokens)
+        | (Error s, Ok _) -> (Error s, tokens)
+        | (Ok _, Error s) -> (Error s, tokens)
+        | _ ->
+            (comb4 (fun first second third statement ->
+                match first with
+                | MaybeExpression maybeExpr -> ForStatement(maybeExpr, second, third, statement)
+                | Declaration decl -> ForStatementDecl(decl, second, third, statement)) first second third statement,
+             tokens)
 
     | { Type = BreakKeyword } :: tokens ->
-        let _, tokens =
-            expect SemiColon error tokens "Expected ';' after 'break'"
-
-        (BreakStatement, tokens)
+        match expect SemiColon error tokens "Expected ';' after 'break'" with
+        | (Error s, tokens) -> (Error s, tokens)
+        | (Ok _, tokens) -> (Ok BreakStatement, tokens)
 
     | { Type = ContinueKeyword } :: tokens ->
-        let _, tokens =
-            expect SemiColon error tokens "Expected ';' after 'continue'"
-
-        (ContinueStatement, tokens)
+        match expect SemiColon error tokens "Expected ';' after 'continue'" with
+        | (Error s, tokens) -> (Error s, tokens)
+        | (Ok _, tokens) -> (Ok ContinueStatement, tokens)
 
     | { Type = GotoKeyword } :: tokens ->
         let s, tokens =
             match tokens with
-            | { Type = Identifier s } :: tokens -> (s, tokens)
+            | { Type = Identifier s } :: tokens -> (s |> Ok, tokens)
             | [] ->
-                error ErrorTypeEnd "Expected identifier after 'goto'"
-                ("", [])
+                (error ErrorTypeEnd "Expected identifier after 'goto'"
+                 |> Error,
+                 [])
             | t :: _ ->
-                error (ErrorTypeToken t) "Expected identifier after 'goto'"
-                ("", tokens)
+                (error (ErrorTypeToken t) "Expected identifier after 'goto'"
+                 |> Error,
+                 tokens)
 
-        let _, tokens =
+        let error1, tokens =
             expect SemiColon error tokens "Expected ';' after identifier in 'goto'"
 
-        (GotoStatement s, tokens)
+        (comb2 (fun _ -> GotoStatement) error1 s, tokens)
 
     | { Type = Identifier s } :: { Type = Comma } :: tokens ->
         let statement, tokens = parseStatement error tokens
-        (LabelStatement(s, statement), tokens)
+
+        (statement
+         |> Result.map (fun statement -> LabelStatement(s, statement)),
+         tokens)
 
     | { Type = OpenBrace } :: tokens ->
         let compoundItems, tokens = parseCompoundItems error tokens
-        (CompoundStatement compoundItems, tokens)
-    | { Type = SemiColon } :: tokens -> (ExpressionStatement None, tokens)
+
+        let error1, tokens =
+            expect CloseBrace error tokens "Expected '}' to match '{'"
+
+        (comb2 (fun _ -> CompoundStatement) error1 compoundItems, tokens)
+    | { Type = SemiColon } :: tokens -> (ExpressionStatement None |> Ok, tokens)
     | _ ->
         let expression, tokens = parseExpression error tokens
-        (ExpressionStatement(Some expression), tokens)
+
+        let error1, tokens =
+            expect SemiColon error tokens "Expected ';' after expression statement"
+
+        (comb2 (fun _ -> Some >> ExpressionStatement) error1 expression, tokens)
 
 and parseCompoundItems error (tokens: Token list) =
     match tokens with
@@ -716,7 +814,7 @@ and parseCompoundItems error (tokens: Token list) =
 
         let other, tokens = parseCompoundItems error tokens
 
-        (DeclarationCompoundItem declaration :: other, tokens)
+        (prependResult (declaration |> Result.map DeclarationCompoundItem) other, tokens)
     | { Type = WhileKeyword } :: _
     | { Type = DoKeyword } :: _
     | { Type = BreakKeyword } :: _
@@ -741,16 +839,12 @@ and parseCompoundItems error (tokens: Token list) =
 
         let other, tokens = parseCompoundItems error tokens
 
-        (StatementCompoundItem statement :: other, tokens)
-    | _ -> ([], tokens)
+        (prependResult (statement |> Result.map StatementCompoundItem) other, tokens)
+    | _ -> ([] |> Ok, tokens)
 
-let parseRep (reporter: string -> unit) (sourceObject: SourceObject) =
+let parse (sourceObject: SourceObject) =
 
-    let error location message =
-        sourceObject.emitError location message
-        |> reporter
+    let error location message = sourceObject.emitError location message
 
     parseCompoundItems error sourceObject.Tokens
-
-
-let parse = parseRep Console.Error.Write
+    |> fst
