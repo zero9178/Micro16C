@@ -65,10 +65,11 @@ type Expression =
     | ConstantExpression of Constant
     | ReferenceExpression of Reference
     | ConversionExpression of Conversion
+    | ConditionalExpression of Conditional
+    | AssignmentExpression of Assignment
 
 and Binary =
     { Type: Type
-      ValueKind: ValueKind
       Left: Expression
       Right: Expression
       Kind: BinaryOperator }
@@ -92,6 +93,30 @@ and Reference =
       Declaration: Declaration }
 
 and Conversion = { Type: Type; Expression: Expression }
+
+and Conditional =
+    { Type: Type
+      Condition: Expression
+      TrueBranch: Expression
+      FalseBranch: Expression }
+
+and AssignmentKind =
+    | Normal
+    | PlusAssign
+    | MinusAssign
+    | DivideAssign
+    | MultiplyAssign
+    | ModuloAssign
+    | ShiftLeftAssign
+    | ShiftRightAssign
+    | BitAndAssign
+    | BitOrAssign
+    | BitXorAssign
+
+and Assignment =
+    { LValue: Expression
+      Expression: Expression
+      Kind: AssignmentKind }
 
 and While =
     { Expression: Expression
@@ -136,7 +161,7 @@ and CompoundItem =
     | CompoundItemDeclaration of Declaration list
 
 module Expression =
-    let getType (expr: Expression) =
+    let rec getType (expr: Expression) =
         match expr with
         | BinaryExpression expr -> expr.Type
         | UnaryExpression expr -> expr.Type
@@ -145,16 +170,24 @@ module Expression =
         | ConstantExpression expr -> expr.Type
         | ReferenceExpression expr -> expr.Type
         | ConversionExpression expr -> expr.Type
+        | ConditionalExpression expr -> expr.Type
+        | AssignmentExpression expr -> getType expr.LValue
 
     let valueKind (expr: Expression) =
         match expr with
-        | BinaryExpression expr -> expr.ValueKind
-        | UnaryExpression expr -> expr.ValueKind
-        | SizeofExpression _ -> RValue
-        | CommaExpression _ -> RValue
-        | ConstantExpression _ -> RValue
+        | UnaryExpression { Kind = PreIncrement }
+        | UnaryExpression { Kind = PreDecrement }
+        | UnaryExpression { Kind = Dereference }
+        | BinaryExpression { Kind = SubScript }
         | ReferenceExpression _ -> LValue
-        | ConversionExpression _ -> RValue
+        | UnaryExpression _
+        | BinaryExpression _
+        | SizeofExpression _
+        | CommaExpression _
+        | ConstantExpression _
+        | ConversionExpression _
+        | ConditionalExpression _
+        | AssignmentExpression _ -> RValue
 
 let private (|Type|) (expression: Expression) = Expression.getType expression
 
@@ -189,12 +222,77 @@ let rec visitExpression (context: Context) (expression: Parse.Expression): Resul
 and visitAssignmentExpression (context: Context) (expression: Parse.AssignmentExpression): Result<Expression, string> =
     match expression.OptionalConditionalExpressions with
     | [] -> visitConditionalExpression context expression.ConditionalExpression
-    | list -> failwith "TODO"
+    | list ->
+
+        // Turn assignments from being stored as: expr (token * expr) (token * expr) into (expr * token) (expr * token) expr
+        let lastExpr, list =
+            list
+            |> List.fold (fun (lastExpr, result) (token, expr) -> (expr, (lastExpr, token) :: result))
+                   (expression.ConditionalExpression, [])
+
+        let expression =
+            visitConditionalExpression context lastExpr
+            |> Result.map lvalueConversion
+
+        list
+        |> List.rev
+        |> List.fold (fun rhs (lhs, token) ->
+            let lhs = visitConditionalExpression context lhs
+
+            let op =
+                match token with
+                | { Type = TokenType.Assignment } -> Normal
+                | { Type = TokenType.PlusAssign } -> PlusAssign
+                | { Type = TokenType.MinusAssign } -> MinusAssign
+                | { Type = TokenType.DivideAssign } -> DivideAssign
+                | { Type = TokenType.MultiplyAssign } -> MultiplyAssign
+                | { Type = TokenType.ModuloAssign } -> ModuloAssign
+                | { Type = TokenType.ShiftLeftAssign } -> ShiftLeftAssign
+                | { Type = TokenType.ShiftRightAssign } -> ShiftRightAssign
+                | { Type = TokenType.BitAndAssign } -> BitAndAssign
+                | { Type = TokenType.BitOrAssign } -> BitOrAssign
+                | { Type = TokenType.BitXorAssign } -> BitXorAssign
+                | _ -> failwith "Internal Compiler Error: Invalid Token Type"
+
+            match lhs with
+            | (Ok (ValueKind RValue)) ->
+                "Cannot assign to a temporary value"
+                |> context.SourceObject.emitError (ErrorTypeToken token)
+                |> Error
+            | _ ->
+                comb2 (fun lhs rhs ->
+                    AssignmentExpression
+                        { LValue = lhs
+                          Expression = rhs
+                          Kind = op }) lhs rhs) expression
 
 and visitConditionalExpression (context: Context) (expression: Parse.ConditionalExpression): Result<Expression, string> =
     match expression.OptionalTernary with
     | None -> visitLogicalOrExpression context expression.LogicalOrExpression
-    | Some ternary -> failwith "TODO"
+    | Some (trueBranch, falseBranch) ->
+        let condition =
+            visitLogicalOrExpression context expression.LogicalOrExpression
+            |> Result.map lvalueConversion
+
+        let trueBranch =
+            visitExpression context trueBranch
+            |> Result.map lvalueConversion
+
+        let falseBranch =
+            visitConditionalExpression context falseBranch
+            |> Result.map lvalueConversion
+
+        comb3 (fun x y z ->
+            let resultType =
+                match (y, z) with
+                | (_, Type (PointerType _ as resultType))
+                | (Type resultType, _) -> resultType
+
+            ConditionalExpression
+                { Condition = x
+                  TrueBranch = y
+                  FalseBranch = z
+                  Type = resultType }) condition trueBranch falseBranch
 
 and visitLogicalOrExpression (context: Context) (expression: Parse.LogicalOrExpression): Result<Expression, string> =
     match expression.OptionalLogicalAndExpressions with
@@ -215,8 +313,7 @@ and visitLogicalOrExpression (context: Context) (expression: Parse.LogicalOrExpr
                     { Type = intType
                       Left = lhs
                       Right = rhs
-                      Kind = LogicOr
-                      ValueKind = RValue }) lhs rhs) expression
+                      Kind = LogicOr }) lhs rhs) expression
 
 and visitLogicalAndExpression (context: Context) (expression: Parse.LogicalAndExpression): Result<Expression, string> =
     match expression.OptionalInclusiveOrExpressions with
@@ -237,8 +334,7 @@ and visitLogicalAndExpression (context: Context) (expression: Parse.LogicalAndEx
                     { Type = intType
                       Left = lhs
                       Right = rhs
-                      Kind = LogicAnd
-                      ValueKind = RValue }) lhs rhs) expression
+                      Kind = LogicAnd }) lhs rhs) expression
 
 and visitInclusiveOrExpression (context: Context) (expression: Parse.InclusiveOrExpression): Result<Expression, string> =
     match expression.OptionalExclusiveOrExpressions with
@@ -263,8 +359,7 @@ and visitInclusiveOrExpression (context: Context) (expression: Parse.InclusiveOr
                         { Type = Expression.getType lhs
                           Left = lhs
                           Right = rhs
-                          Kind = BitOr
-                          ValueKind = RValue }) lhs rhs
+                          Kind = BitOr }) lhs rhs
             | (Ok _, Ok _) ->
                 "Bit-or only supported on integer types"
                 |> context.SourceObject.emitError (ErrorTypeToken token)
@@ -293,8 +388,7 @@ and visitExclusiveOrExpression (context: Context) (expression: Parse.ExclusiveOr
                         { Type = Expression.getType lhs
                           Left = lhs
                           Right = rhs
-                          Kind = BitXor
-                          ValueKind = RValue }) lhs rhs
+                          Kind = BitXor }) lhs rhs
             | (Ok _, Ok _) ->
                 "Bit-xor only supported on integer types"
                 |> context.SourceObject.emitError (ErrorTypeToken token)
@@ -323,8 +417,7 @@ and visitAndExpression (context: Context) (expression: Parse.AndExpression): Res
                         { Type = Expression.getType lhs
                           Left = lhs
                           Right = rhs
-                          Kind = BitAnd
-                          ValueKind = RValue }) lhs rhs
+                          Kind = BitAnd }) lhs rhs
             | (Ok _, Ok _) ->
                 "Bit-and only supported on integer types"
                 |> context.SourceObject.emitError (ErrorTypeToken token)
@@ -355,8 +448,7 @@ and visitEqualityExpression (context: Context) (expression: Parse.EqualityExpres
                     { Type = intType
                       Left = lhs
                       Right = rhs
-                      Kind = op
-                      ValueKind = RValue }) lhs rhs) expression
+                      Kind = op }) lhs rhs) expression
 
 and visitRelationalExpression (context: Context) (expression: Parse.RelationalExpression): Result<Expression, string> =
     match expression.OptionalShiftExpressions with
@@ -385,8 +477,7 @@ and visitRelationalExpression (context: Context) (expression: Parse.RelationalEx
                     { Type = intType
                       Left = lhs
                       Right = rhs
-                      Kind = op
-                      ValueKind = RValue }) lhs rhs) expression
+                      Kind = op }) lhs rhs) expression
 
 and visitShiftExpression (context: Context) (expression: Parse.ShiftExpression): Result<Expression, string> =
     match expression.OptionalAdditiveExpressions with
@@ -418,8 +509,7 @@ and visitShiftExpression (context: Context) (expression: Parse.ShiftExpression):
                         { Type = Expression.getType lhs
                           Left = lhs
                           Right = rhs
-                          Kind = op
-                          ValueKind = RValue }) lhs rhs
+                          Kind = op }) lhs rhs
             | (Ok _, Ok _) ->
                 let opName =
                     match op with
@@ -468,8 +558,7 @@ and visitAdditiveExpression (context: Context) (expression: Parse.AdditiveExpres
                     { Type = resultType
                       Left = lhs
                       Right = rhs
-                      Kind = op
-                      ValueKind = RValue }
+                      Kind = op }
                 |> Ok
             | (Ok lhs, Ok rhs, _) ->
                 let opName =
@@ -519,8 +608,7 @@ and visitMultiplicativeExpression (context: Context)
                         { Type = Expression.getType lhs
                           Left = lhs
                           Right = rhs
-                          Kind = op
-                          ValueKind = RValue }) lhs rhs
+                          Kind = op }) lhs rhs
             | (Ok _, Ok _) ->
                 let opName, typeName =
                     match op with
@@ -716,8 +804,7 @@ and visitPostFixExpression (context: Context) (expression: Parse.PostFixExpressi
                 { Left = lhs
                   Right = rhs
                   Kind = SubScript
-                  Type = elementType
-                  ValueKind = LValue }
+                  Type = elementType }
             |> Ok
         | (Error s1, Error s2) -> s1 + s2 |> Error
         | (Error s, Ok _)
