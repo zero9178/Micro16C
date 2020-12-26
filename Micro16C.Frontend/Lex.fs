@@ -67,6 +67,18 @@ type Token =
       Length: int
       Type: TokenType }
 
+module Token =
+
+    let identifier token =
+        match token.Type with
+        | Identifier s -> s
+        | _ -> failwith "Internal Compiler Error: Token is not an identifier"
+
+    let value token =
+        match token.Type with
+        | Literal value -> value
+        | _ -> failwith "Internal Compiler Error: Token is not a literal"
+
 type ErrorType =
     | ErrorTypeOffset of int
     | ErrorTypeToken of Token
@@ -123,17 +135,66 @@ let tokenize (input: string) =
 
     let readNumber offset input =
 
-        let conversion (fromBase: int) (str: string) = Convert.ToInt16(str, fromBase)
-
-        let (numberChars, convert, skip) =
+        let (numberChars, numBase, skip) =
             match input with
             | '0' :: 'x' :: numberChars
-            | '0' :: 'X' :: numberChars -> (numberChars, conversion 16, 2)
-            | '0' :: c :: numberChars when Char.IsDigit c -> (c :: numberChars, conversion 8, 1)
-            | _ -> (input, conversion 10, 0)
+            | '0' :: 'X' :: numberChars -> (numberChars, 16, 2)
+            | '0' :: c :: numberChars when c >= '0' && c < '8' -> (c :: numberChars, 8, 1)
+            | _ -> (input, 10, 0)
+
+        let set =
+            match numBase with
+            | 8 ->
+                Set
+                    ([ '0'
+                       '1'
+                       '2'
+                       '3'
+                       '4'
+                       '5'
+                       '6'
+                       '7' ])
+            | 10 ->
+                Set
+                    ([ '0'
+                       '1'
+                       '2'
+                       '3'
+                       '4'
+                       '5'
+                       '6'
+                       '7'
+                       '8'
+                       '9' ])
+            | 16 ->
+                Set
+                    ([ '0'
+                       '1'
+                       '2'
+                       '3'
+                       '4'
+                       '5'
+                       '6'
+                       '7'
+                       '8'
+                       '9'
+                       'a'
+                       'A'
+                       'b'
+                       'B'
+                       'c'
+                       'C'
+                       'd'
+                       'D'
+                       'e'
+                       'E'
+                       'f'
+                       'F' ])
+            | _ -> failwithf "Internal Compiler Error: Invalid base %d" numBase
 
         let numberChars =
-            numberChars |> List.takeWhile Char.IsDigit
+            numberChars
+            |> List.takeWhile (fun c -> Set.contains c set)
 
         let rest =
             input
@@ -147,12 +208,20 @@ let tokenize (input: string) =
 
         let s = numberChars |> Array.ofList |> String
 
-        try
-            (convert s |> Ok, rest)
-        with :? OverflowException ->
-            (sprintf "Integer literal '%s' too large for type int" spelling
+        let conversion (fromBase: int) (str: string) = Convert.ToInt16(str, fromBase)
+
+        match numberChars with
+        | [] ->
+            (sprintf "Expected octal digits after integer literal with leading 0"
              |> error offset,
              rest)
+        | _ ->
+            try
+                (conversion numBase s |> Ok, rest)
+            with :? OverflowException ->
+                (sprintf "Integer literal '%s' too large for type int" spelling
+                 |> error offset,
+                 rest)
 
     let readIdentifier input =
         let identifiers =

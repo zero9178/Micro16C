@@ -13,6 +13,7 @@ let main argv =
     } while(mod != 0);
     register(R2) int r2 = r1;"
     |> Result.bind Parse.parse
-    |> printfn "%A"
+    |> Result.bind Sema.analyse
+    |> printf "%A"
 
     0

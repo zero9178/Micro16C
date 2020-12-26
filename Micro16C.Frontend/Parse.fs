@@ -1,7 +1,7 @@
 module Micro16C.Frontend.Parse
 
-open System
 open Micro16C.Frontend.Lex
+open Micro16C.Frontend.ErrorHandling
 
 (*
 <TranslationUnit> ::= { <Statements> | <Declaration>}
@@ -172,22 +172,22 @@ and MultiplicativeExpression =
 
 and UnaryExpression =
     | PostFixUnaryExpression of PostFixExpression
-    | IncrementUnaryExpression of UnaryExpression
-    | DecrementUnaryExpression of UnaryExpression
-    | AddressOfUnaryExpression of UnaryExpression
-    | DereferenceUnaryExpression of UnaryExpression
-    | PlusUnaryExpression of UnaryExpression
-    | MinusUnaryExpression of UnaryExpression
-    | BitwiseNegateUnaryExpression of UnaryExpression
-    | LogicalNegateUnaryExpression of UnaryExpression
+    | IncrementUnaryExpression of UnaryExpression * Token
+    | DecrementUnaryExpression of UnaryExpression * Token
+    | AddressOfUnaryExpression of UnaryExpression * Token
+    | DereferenceUnaryExpression of UnaryExpression * Token
+    | PlusUnaryExpression of UnaryExpression * Token
+    | MinusUnaryExpression of UnaryExpression * Token
+    | BitwiseNegateUnaryExpression of UnaryExpression * Token
+    | LogicalNegateUnaryExpression of UnaryExpression * Token
     | SizeOfUnaryExpression of UnaryExpression
     | SizeOfTypeUnaryExpression of TypeName
 
 and PostFixExpression =
     | PrimaryPostFixExpression of PrimaryExpression
-    | SubscriptPostFixExpression of PostFixExpression * Expression
-    | IncrementPostFixExpression of PostFixExpression
-    | DecrementPostFixExpression of PostFixExpression
+    | SubscriptPostFixExpression of PostFixExpression * Token * Expression
+    | IncrementPostFixExpression of PostFixExpression * Token
+    | DecrementPostFixExpression of PostFixExpression * Token
 
 and PrimaryExpression =
     | IdentifierPrimaryExpression of Token
@@ -269,42 +269,6 @@ let private createMultiplicativeExpression unary optionalUnary =
 let private createDeclaration declarationSpecifiers declarators =
     { DeclarationSpecifiers = declarationSpecifiers
       Declarators = declarators }
-
-let private comb2 (successComb: 'a -> 'b -> 'c) (x: Result<'a, string>) (y: Result<'b, string>) =
-    match (x, y) with
-    | (Ok x, Ok y) -> successComb x y |> Ok
-    | (Error s, Ok _)
-    | (Ok _, Error s) -> Error s
-    | (Error s1, Error s2) -> s1 + s2 |> Error
-
-let private comb3 (successComb: 'a -> 'b -> 'c -> 'd)
-                  (x: Result<'a, string>)
-                  (y: Result<'b, string>)
-                  (z: Result<'c, string>)
-                  =
-    match (x, y, z) with
-    | (Ok x, Ok y, Ok z) -> successComb x y z |> Ok
-    | (Error s, Ok _, Ok _)
-    | (Ok _, Error s, Ok _) -> Error s
-    | (Ok _, Ok _, Error s) -> Error s
-    | (Error s1, Error s2, Ok _) -> s1 + s2 |> Error
-    | (Error s1, Ok _, Error s2) -> s1 + s2 |> Error
-    | (Ok _, Error s1, Error s2) -> s1 + s2 |> Error
-    | (Error s1, Error s2, Error s3) -> s1 + s2 + s3 |> Error
-
-let private pack2 x y = (x, y)
-
-let private comb4 (successComb: 'a -> 'b -> 'c -> 'd -> 'e)
-                  (x: Result<'a, string>)
-                  (y: Result<'b, string>)
-                  (z: Result<'c, string>)
-                  (w: Result<'d, string>)
-                  =
-    let temp1 = comb2 pack2 x y
-    let temp2 = comb2 pack2 z w
-    comb2 (fun (x, y) (z, w) -> successComb x y z w) temp1 temp2
-
-let private prependResult x y = comb2 (fun x y -> x :: y) x y
 
 let inline private parseBinaryOperator subExprParse allowedType error tokens =
     let lhs, tokens = subExprParse error tokens
@@ -462,30 +426,54 @@ and parseMultiplicativeExpression error (tokens: Token list) =
 
 and parseUnaryExpression error (tokens: Token list) =
     match tokens with
-    | { Type = Increment } :: tokens ->
+    | { Type = Increment } as token :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (unary |> Result.map IncrementUnaryExpression, tokens)
-    | { Type = Decrement } :: tokens ->
+
+        (unary
+         |> Result.map (fun x -> IncrementUnaryExpression(x, token)),
+         tokens)
+    | { Type = Decrement } as token :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (unary |> Result.map DecrementUnaryExpression, tokens)
-    | { Type = Ampersand } :: tokens ->
+
+        (unary
+         |> Result.map (fun x -> DecrementUnaryExpression(x, token)),
+         tokens)
+    | { Type = Ampersand } as token :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (unary |> Result.map AddressOfUnaryExpression, tokens)
-    | { Type = Asterisk } :: tokens ->
+
+        (unary
+         |> Result.map (fun x -> AddressOfUnaryExpression(x, token)),
+         tokens)
+    | { Type = Asterisk } as token :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (unary |> Result.map DereferenceUnaryExpression, tokens)
-    | { Type = Plus } :: tokens ->
+
+        (unary
+         |> Result.map (fun x -> DereferenceUnaryExpression(x, token)),
+         tokens)
+    | { Type = Plus } as token :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (unary |> Result.map PlusUnaryExpression, tokens)
-    | { Type = Minus } :: tokens ->
+
+        (unary
+         |> Result.map (fun x -> PlusUnaryExpression(x, token)),
+         tokens)
+    | { Type = Minus } as token :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (unary |> Result.map MinusUnaryExpression, tokens)
-    | { Type = BitWiseNegation } :: tokens ->
+
+        (unary
+         |> Result.map (fun x -> MinusUnaryExpression(x, token)),
+         tokens)
+    | { Type = BitWiseNegation } as token :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (unary |> Result.map BitwiseNegateUnaryExpression, tokens)
-    | { Type = LogicalNegation } :: tokens ->
+
+        (unary
+         |> Result.map (fun x -> BitwiseNegateUnaryExpression(x, token)),
+         tokens)
+    | { Type = LogicalNegation } as token :: tokens ->
         let unary, tokens = parseUnaryExpression error tokens
-        (unary |> Result.map LogicalNegateUnaryExpression, tokens)
+
+        (unary
+         |> Result.map (fun x -> LogicalNegateUnaryExpression(x, token)),
+         tokens)
     | { Type = SizeOfKeyword } :: { Type = OpenParentheses } :: { Type = IntKeyword } :: tokens ->
         let pointerCount =
             tokens
@@ -539,12 +527,18 @@ and parsePostFixExpression error (tokens: Token list) =
                 expect CloseSquareBracket error tokens "Expected ']' to match '['"
 
             parsePostFixExpressionSuffix
-                (comb3 (fun _ x y -> SubscriptPostFixExpression(x, y)) error1 prev expression)
+                (comb3 (fun x y z -> SubscriptPostFixExpression(x, y, z)) prev error1 expression)
                 tokens
-        | { Type = Increment } :: tokens ->
-            parsePostFixExpressionSuffix (prev |> Result.map IncrementPostFixExpression) tokens
-        | { Type = Decrement } :: tokens ->
-            parsePostFixExpressionSuffix (prev |> Result.map DecrementPostFixExpression) tokens
+        | { Type = Increment } as token :: tokens ->
+            parsePostFixExpressionSuffix
+                (prev
+                 |> Result.map (fun x -> IncrementPostFixExpression(x, token)))
+                tokens
+        | { Type = Decrement } as token :: tokens ->
+            parsePostFixExpressionSuffix
+                (prev
+                 |> Result.map (fun x -> DecrementPostFixExpression(x, token)))
+                tokens
         | _ -> (prev, tokens)
 
     parsePostFixExpressionSuffix (primary |> Result.map PrimaryPostFixExpression) tokens
@@ -846,5 +840,6 @@ let parse (sourceObject: SourceObject) =
 
     let error location message = sourceObject.emitError location message
 
-    parseCompoundItems error sourceObject.Tokens
-    |> fst
+    (parseCompoundItems error sourceObject.Tokens
+     |> fst
+     |> Result.map (pack2 { sourceObject with Tokens = [] }))
