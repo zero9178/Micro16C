@@ -149,6 +149,8 @@ and Statement =
     | ContinueStatement of LoopStatement option ref
     | CompoundStatement of CompoundItem list
     | ExpressionStatement of Expression option
+    | LabelStatement of string * Statement
+    | GotoStatement of string
 
 and Declaration =
     { Type: Type
@@ -954,7 +956,12 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
 
             forLoop := ForLoop forObj |> Some
             ForStatement forObj) initial condition iteration statement
-    | _ -> failwith "TODO"
+    | Parse.LabelStatement (name, statement) ->
+        let statement = visitStatement context statement
+
+        statement
+        |> Result.map (pack2 name >> LabelStatement)
+    | Parse.GotoStatement name -> GotoStatement name |> Ok
 
 and visitDeclaration (context: Context) (declaration: Parse.Declaration) =
     let aType = intType
