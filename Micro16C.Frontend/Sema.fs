@@ -11,10 +11,15 @@ and Primitive = | IntType
 
 and Pointer = { ElementType: Type }
 
-let createInt () = IntType |> PrimitiveType
+let intType = IntType |> PrimitiveType
 
 let createPointer elementType =
     { ElementType = elementType } |> PointerType
+
+let rec typeToString aType =
+    match aType with
+    | PrimitiveType IntType -> "int"
+    | PointerType { ElementType = elementType } -> typeToString elementType + "*"
 
 type BinaryOperator =
     | Plus
@@ -194,54 +199,339 @@ and visitConditionalExpression (context: Context) (expression: Parse.Conditional
 and visitLogicalOrExpression (context: Context) (expression: Parse.LogicalOrExpression): Result<Expression, string> =
     match expression.OptionalLogicalAndExpressions with
     | [] -> visitLogicalAndExpression context expression.LogicalAndExpression
-    | list -> failwith "TODO"
+    | list ->
+        let expression =
+            visitLogicalAndExpression context expression.LogicalAndExpression
+            |> Result.map lvalueConversion
+
+        list
+        |> List.fold (fun lhs rhs ->
+            let rhs =
+                visitLogicalAndExpression context rhs
+                |> Result.map lvalueConversion
+
+            comb2 (fun lhs rhs ->
+                BinaryExpression
+                    { Type = intType
+                      Left = lhs
+                      Right = rhs
+                      Kind = LogicOr
+                      ValueKind = RValue }) lhs rhs) expression
 
 and visitLogicalAndExpression (context: Context) (expression: Parse.LogicalAndExpression): Result<Expression, string> =
     match expression.OptionalInclusiveOrExpressions with
     | [] -> visitInclusiveOrExpression context expression.InclusiveOrExpression
-    | list -> failwith "TODO"
+    | list ->
+        let expression =
+            visitInclusiveOrExpression context expression.InclusiveOrExpression
+            |> Result.map lvalueConversion
+
+        list
+        |> List.fold (fun lhs rhs ->
+            let rhs =
+                visitInclusiveOrExpression context rhs
+                |> Result.map lvalueConversion
+
+            comb2 (fun lhs rhs ->
+                BinaryExpression
+                    { Type = intType
+                      Left = lhs
+                      Right = rhs
+                      Kind = LogicAnd
+                      ValueKind = RValue }) lhs rhs) expression
 
 and visitInclusiveOrExpression (context: Context) (expression: Parse.InclusiveOrExpression): Result<Expression, string> =
     match expression.OptionalExclusiveOrExpressions with
     | [] -> visitExclusiveOrExpression context expression.ExclusiveOrExpression
-    | list -> failwith "TODO"
+    | list ->
+        let expression =
+            visitExclusiveOrExpression context expression.ExclusiveOrExpression
+            |> Result.map lvalueConversion
+
+        list
+        |> List.fold (fun lhs (token, rhs) ->
+            let rhs =
+                visitExclusiveOrExpression context rhs
+                |> Result.map lvalueConversion
+
+            match (lhs, rhs) with
+            | (Error _, _)
+            | (_, Error _)
+            | (Ok (Type (PrimitiveType _)), Ok (Type (PrimitiveType _))) ->
+                comb2 (fun lhs rhs ->
+                    BinaryExpression
+                        { Type = Expression.getType lhs
+                          Left = lhs
+                          Right = rhs
+                          Kind = BitOr
+                          ValueKind = RValue }) lhs rhs
+            | (Ok _, Ok _) ->
+                "Bit-or only supported on integer types"
+                |> context.SourceObject.emitError (ErrorTypeToken token)
+                |> Error) expression
 
 and visitExclusiveOrExpression (context: Context) (expression: Parse.ExclusiveOrExpression): Result<Expression, string> =
     match expression.OptionalAndExpressions with
     | [] -> visitAndExpression context expression.AndExpression
-    | list -> failwith "TODO"
+    | list ->
+        let expression =
+            visitAndExpression context expression.AndExpression
+            |> Result.map lvalueConversion
+
+        list
+        |> List.fold (fun lhs (token, rhs) ->
+            let rhs =
+                visitAndExpression context rhs
+                |> Result.map lvalueConversion
+
+            match (lhs, rhs) with
+            | (Error _, _)
+            | (_, Error _)
+            | (Ok (Type (PrimitiveType _)), Ok (Type (PrimitiveType _))) ->
+                comb2 (fun lhs rhs ->
+                    BinaryExpression
+                        { Type = Expression.getType lhs
+                          Left = lhs
+                          Right = rhs
+                          Kind = BitXor
+                          ValueKind = RValue }) lhs rhs
+            | (Ok _, Ok _) ->
+                "Bit-xor only supported on integer types"
+                |> context.SourceObject.emitError (ErrorTypeToken token)
+                |> Error) expression
 
 and visitAndExpression (context: Context) (expression: Parse.AndExpression): Result<Expression, string> =
     match expression.OptionalEqualityExpressions with
     | [] -> visitEqualityExpression context expression.EqualityExpression
-    | list -> failwith "TODO"
+    | list ->
+        let expression =
+            visitEqualityExpression context expression.EqualityExpression
+            |> Result.map lvalueConversion
+
+        list
+        |> List.fold (fun lhs (token, rhs) ->
+            let rhs =
+                visitEqualityExpression context rhs
+                |> Result.map lvalueConversion
+
+            match (lhs, rhs) with
+            | (Error _, _)
+            | (_, Error _)
+            | (Ok (Type (PrimitiveType _)), Ok (Type (PrimitiveType _))) ->
+                comb2 (fun lhs rhs ->
+                    BinaryExpression
+                        { Type = Expression.getType lhs
+                          Left = lhs
+                          Right = rhs
+                          Kind = BitAnd
+                          ValueKind = RValue }) lhs rhs
+            | (Ok _, Ok _) ->
+                "Bit-and only supported on integer types"
+                |> context.SourceObject.emitError (ErrorTypeToken token)
+                |> Error) expression
 
 and visitEqualityExpression (context: Context) (expression: Parse.EqualityExpression): Result<Expression, string> =
     match expression.OptionalRelationalExpressions with
     | [] -> visitRelationalExpression context expression.RelationalExpression
-    | list -> failwith "TODO"
+    | list ->
+        let expression =
+            visitRelationalExpression context expression.RelationalExpression
+            |> Result.map lvalueConversion
+
+        list
+        |> List.fold (fun lhs (token, rhs) ->
+            let rhs =
+                visitRelationalExpression context rhs
+                |> Result.map lvalueConversion
+
+            let op =
+                match token with
+                | { Type = TokenType.Equal } -> NotEqual
+                | { Type = TokenType.NotEqual } -> Equal
+                | _ -> failwith "Internal Compiler Error: Invalid Token Type"
+
+            comb2 (fun lhs rhs ->
+                BinaryExpression
+                    { Type = intType
+                      Left = lhs
+                      Right = rhs
+                      Kind = op
+                      ValueKind = RValue }) lhs rhs) expression
 
 and visitRelationalExpression (context: Context) (expression: Parse.RelationalExpression): Result<Expression, string> =
     match expression.OptionalShiftExpressions with
     | [] -> visitShiftExpression context expression.ShiftExpression
-    | list -> failwith "TODO"
+    | list ->
+        let expression =
+            visitShiftExpression context expression.ShiftExpression
+            |> Result.map lvalueConversion
+
+        list
+        |> List.fold (fun lhs (token, rhs) ->
+            let rhs =
+                visitShiftExpression context rhs
+                |> Result.map lvalueConversion
+
+            let op =
+                match token with
+                | { Type = TokenType.GreaterThan } -> GreaterThan
+                | { Type = TokenType.LessThan } -> LessThan
+                | { Type = TokenType.GreaterThanOrEqual } -> GreaterThanOrEqual
+                | { Type = TokenType.LessThanOrEqual } -> LessThanOrEqual
+                | _ -> failwith "Internal Compiler Error: Invalid Token Type"
+
+            comb2 (fun lhs rhs ->
+                BinaryExpression
+                    { Type = intType
+                      Left = lhs
+                      Right = rhs
+                      Kind = op
+                      ValueKind = RValue }) lhs rhs) expression
 
 and visitShiftExpression (context: Context) (expression: Parse.ShiftExpression): Result<Expression, string> =
     match expression.OptionalAdditiveExpressions with
     | [] -> visitAdditiveExpression context expression.AdditiveExpression
-    | list -> failwith "TODO"
+    | list ->
+        let expression =
+            visitAdditiveExpression context expression.AdditiveExpression
+            |> Result.map lvalueConversion
+
+        list
+        |> List.fold (fun lhs (token, rhs) ->
+            let rhs =
+                visitAdditiveExpression context rhs
+                |> Result.map lvalueConversion
+
+            let op =
+                match token with
+                | { Type = TokenType.ShiftLeft } -> ShiftLeft
+                | { Type = TokenType.ShiftRight } -> ShiftRight
+                | _ -> failwith "Internal Compiler Error: Invalid Token Type"
+
+            match (lhs, rhs) with
+            | (Error _, _)
+            | (_, Error _)
+            | (Ok (Type (PrimitiveType _)), Ok (Type (PrimitiveType _))) ->
+                comb2 (fun lhs rhs ->
+
+                    BinaryExpression
+                        { Type = Expression.getType lhs
+                          Left = lhs
+                          Right = rhs
+                          Kind = op
+                          ValueKind = RValue }) lhs rhs
+            | (Ok _, Ok _) ->
+                let opName =
+                    match op with
+                    | ShiftLeft -> "Left shift"
+                    | ShiftRight -> "Right shift"
+                    | _ -> ""
+
+                sprintf "%s only supported on integer types" opName
+                |> context.SourceObject.emitError (ErrorTypeToken token)
+                |> Error) expression
 
 and visitAdditiveExpression (context: Context) (expression: Parse.AdditiveExpression): Result<Expression, string> =
     match expression.OptionalMultiplicativeExpressions with
     | [] -> visitMultiplicativeExpression context expression.MultiplicativeExpression
-    | list -> failwith "TODO"
+    | list ->
+        let expression =
+            visitMultiplicativeExpression context expression.MultiplicativeExpression
+            |> Result.map lvalueConversion
+
+        list
+        |> List.fold (fun lhs (token, rhs) ->
+            let rhs =
+                visitMultiplicativeExpression context rhs
+                |> Result.map lvalueConversion
+
+            let op =
+                match token with
+                | { Type = TokenType.Plus } -> Plus
+                | { Type = TokenType.Minus } -> BinaryOperator.Minus
+                | _ -> failwith "Internal Compiler Error: Invalid Token Type"
+
+            match (lhs, rhs, op) with
+            | (Error s, Ok _, _)
+            | (Ok _, Error s, _) -> s |> Error
+            | (Error s1, Error s2, _) -> s1 + s2 |> Error
+            | (Ok (Type ((PointerType _) as resultType) as lhs), Ok (Type (PrimitiveType IntType) as rhs), _)
+            | (Ok (Type ((PointerType _) as resultType) as lhs), Ok (Type (PointerType _) as rhs), BinaryOperator.Minus)
+            | (Ok (Type (PrimitiveType IntType) as lhs), Ok (Type ((PointerType _) as resultType) as rhs), Plus)
+            | (Ok (Type ((PrimitiveType _) as resultType) as lhs), Ok (Type (PrimitiveType _) as rhs), _) ->
+                let resultType =
+                    match (lhs, rhs) with
+                    | (Type (PointerType _), Type (PointerType _)) -> intType
+                    | _ -> resultType
+
+                BinaryExpression
+                    { Type = resultType
+                      Left = lhs
+                      Right = rhs
+                      Kind = op
+                      ValueKind = RValue }
+                |> Ok
+            | (Ok lhs, Ok rhs, _) ->
+                let opName =
+                    match op with
+                    | Plus -> "Addition"
+                    | BinaryOperator.Minus -> "Subtraction"
+                    | _ -> ""
+
+                sprintf
+                    "%s not allowed on operators of type %s and %s"
+                    opName
+                    (lhs |> Expression.getType |> typeToString)
+                    (rhs |> Expression.getType |> typeToString)
+                |> context.SourceObject.emitError (ErrorTypeToken token)
+                |> Error) expression
 
 and visitMultiplicativeExpression (context: Context)
                                   (expression: Parse.MultiplicativeExpression)
                                   : Result<Expression, string> =
     match expression.OptionalUnaryExpressions with
     | [] -> visitUnaryExpression context expression.UnaryExpression
-    | list -> failwith "TODO"
+    | list ->
+        let expression =
+            visitUnaryExpression context expression.UnaryExpression
+            |> Result.map lvalueConversion
+
+        list
+        |> List.fold (fun lhs (token, rhs) ->
+            let rhs =
+                visitUnaryExpression context rhs
+                |> Result.map lvalueConversion
+
+            let op =
+                match token with
+                | { Type = TokenType.Division } -> Division
+                | { Type = Asterisk } -> Multiply
+                | { Type = Percent } -> Modulo
+                | _ -> failwith "Internal Compiler Error: Invalid Token Type"
+
+            match (lhs, rhs) with
+            | (Error _, _)
+            | (_, Error _)
+            | (Ok (Type (PrimitiveType _)), Ok (Type (PrimitiveType _))) ->
+                comb2 (fun lhs rhs ->
+
+                    BinaryExpression
+                        { Type = Expression.getType lhs
+                          Left = lhs
+                          Right = rhs
+                          Kind = op
+                          ValueKind = RValue }) lhs rhs
+            | (Ok _, Ok _) ->
+                let opName, typeName =
+                    match op with
+                    | Division -> "Division", "arithmetic"
+                    | Multiply -> "Multiply", "arithmetic"
+                    | Modulo -> "Modulo", "integer"
+                    | _ -> "", ""
+
+                sprintf "%s only supported on %s types" opName typeName
+                |> context.SourceObject.emitError (ErrorTypeToken token)
+                |> Error) expression
 
 and visitUnaryExpression (context: Context) (expression: Parse.UnaryExpression): Result<Expression, string> =
     match expression with
@@ -352,7 +642,7 @@ and visitUnaryExpression (context: Context) (expression: Parse.UnaryExpression):
         match expression with
         | Ok expression ->
             UnaryExpression
-                { Type = createInt ()
+                { Type = intType
                   Kind = LogicalNegate
                   Expression = expression
                   ValueKind = RValue }
@@ -360,7 +650,7 @@ and visitUnaryExpression (context: Context) (expression: Parse.UnaryExpression):
         | Error _ as s -> s
     | Parse.SizeOfUnaryExpression _
     | Parse.SizeOfTypeUnaryExpression _ ->
-        ConstantExpression { Type = createInt (); Value = 1s }
+        ConstantExpression { Type = intType; Value = 1s }
         |> Ok
 
 and visitPostFixExpression (context: Context) (expression: Parse.PostFixExpression): Result<Expression, string> =
@@ -439,7 +729,7 @@ and visitPrimaryExpression (context: Context) (expression: Parse.PrimaryExpressi
     | Parse.LiteralPrimaryExpression token ->
         ConstantExpression
             { Value = token |> Token.value
-              Type = createInt () }
+              Type = intType }
         |> Ok
     | Parse.IdentifierPrimaryExpression token ->
         let rec findIdentifier list =
@@ -580,7 +870,7 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
     | _ -> failwith "TODO"
 
 and visitDeclaration (context: Context) (declaration: Parse.Declaration) =
-    let aType = createInt ()
+    let aType = intType
 
     declaration.Declarators
     |> List.fold (fun (list, context) (declarator, maybeAssignment) ->

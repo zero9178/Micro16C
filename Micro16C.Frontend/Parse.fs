@@ -140,15 +140,15 @@ and LogicalAndExpression =
 
 and InclusiveOrExpression =
     { ExclusiveOrExpression: ExclusiveOrExpression
-      OptionalExclusiveOrExpressions: ExclusiveOrExpression list }
+      OptionalExclusiveOrExpressions: (Token * ExclusiveOrExpression) list }
 
 and ExclusiveOrExpression =
     { AndExpression: AndExpression
-      OptionalAndExpressions: AndExpression list }
+      OptionalAndExpressions: (Token * AndExpression) list }
 
 and AndExpression =
     { EqualityExpression: EqualityExpression
-      OptionalEqualityExpressions: EqualityExpression list }
+      OptionalEqualityExpressions: (Token * EqualityExpression) list }
 
 and EqualityExpression =
     { RelationalExpression: RelationalExpression
@@ -371,19 +371,19 @@ and parseLogicalAndExpression error (tokens: Token list) =
 
 and parseInclusiveOrExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
-        parseBinaryOperator parseExclusiveOrExpression BitOr error tokens
+        parseBinaryMultiOperator parseExclusiveOrExpression [ BitOr ] error tokens
 
     (comb2 createInclusiveOrExpression lhs rhs, tokens)
 
 and parseExclusiveOrExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
-        parseBinaryOperator parseAndExpression BitXor error tokens
+        parseBinaryMultiOperator parseAndExpression [ BitXor ] error tokens
 
     (comb2 createExclusiveOrExpression lhs rhs, tokens)
 
 and parseAndExpression error (tokens: Token list) =
     let lhs, rhs, tokens =
-        parseBinaryOperator parseEqualityExpression Ampersand error tokens
+        parseBinaryMultiOperator parseEqualityExpression [ Ampersand ] error tokens
 
     (comb2 createAndExpression lhs rhs, tokens)
 
