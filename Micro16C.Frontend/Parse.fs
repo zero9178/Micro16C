@@ -207,8 +207,8 @@ and Statement =
     | DoWhileStatement of Statement * Expression
     | ForStatementDecl of Declaration * Expression option * Expression option * Statement
     | ForStatement of Expression option * Expression option * Expression option * Statement
-    | BreakStatement
-    | ContinueStatement
+    | BreakStatement of Token
+    | ContinueStatement of Token
     | GotoStatement of string
     | LabelStatement of string * Statement
     | CompoundStatement of CompoundItem list
@@ -749,15 +749,15 @@ let rec parseStatement error (tokens: Token list) =
                 | Declaration decl -> ForStatementDecl(decl, second, third, statement)) first second third statement,
              tokens)
 
-    | { Type = BreakKeyword } :: tokens ->
+    | { Type = BreakKeyword } as token :: tokens ->
         match expect SemiColon error tokens "Expected ';' after 'break'" with
         | (Error s, tokens) -> (Error s, tokens)
-        | (Ok _, tokens) -> (Ok BreakStatement, tokens)
+        | (Ok _, tokens) -> (BreakStatement token |> Ok, tokens)
 
-    | { Type = ContinueKeyword } :: tokens ->
+    | { Type = ContinueKeyword } as token :: tokens ->
         match expect SemiColon error tokens "Expected ';' after 'continue'" with
         | (Error s, tokens) -> (Error s, tokens)
-        | (Ok _, tokens) -> (Ok ContinueStatement, tokens)
+        | (Ok _, tokens) -> (ContinueStatement token |> Ok, tokens)
 
     | { Type = GotoKeyword } :: tokens ->
         let s, tokens =

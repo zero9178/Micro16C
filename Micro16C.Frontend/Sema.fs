@@ -96,10 +96,15 @@ and DoWhile =
     { Statement: Statement
       Expression: Expression }
 
+and ForInitial =
+    | ForInitialExpression of Expression option
+    | ForInitialDeclaration of Declaration list
+
 and For =
-    { Initial: Expression option
+    { Initial: ForInitial
       Condition: Expression option
-      Iteration: Expression option }
+      Iteration: Expression option
+      Statement: Statement }
 
 and LoopStatement =
     | WhileLoop of While
@@ -110,8 +115,8 @@ and Statement =
     | WhileStatement of While
     | DoWhileStatement of DoWhile
     | ForStatement of For
-    | BreakStatement of LoopStatement
-    | ContinueStatement of LoopStatement
+    | BreakStatement of LoopStatement option ref
+    | ContinueStatement of LoopStatement option ref
     | CompoundStatement of CompoundItem list
     | ExpressionStatement of Expression option
 
@@ -161,6 +166,7 @@ let private lvalueConversion expression =
 
 type Context =
     { Scopes: Map<string, Declaration> list
+      Loops: LoopStatement option ref list
       SourceObject: SourceObject }
 
 let rec visitExpression (context: Context) (expression: Parse.Expression): Result<Expression, string> =
@@ -455,22 +461,125 @@ and visitPrimaryExpression (context: Context) (expression: Parse.PrimaryExpressi
             ReferenceExpression { Declaration = decl; Type = decl.Type }
             |> Ok
 
-
-let rec visitStatement (context: Context) (statement: Parse.Statement) =
-    match statement with
-    | Parse.ExpressionStatement None -> (ExpressionStatement None |> Ok, context)
-    | Parse.ExpressionStatement (Some expression) ->
-        (visitExpression context expression
-         |> Result.map (Some >> ExpressionStatement),
-         context)
-    | _ -> //TODO:
-        (ExpressionStatement None |> Ok, context)
-
 let private applyDeclarator aType (declarator: Parse.Declarator) =
     [ 0 .. (declarator.PointerCount - 1) ]
     |> List.fold (fun aType _ -> createPointer aType) aType
 
-let visitDeclaration (context: Context) (declaration: Parse.Declaration) =
+let rec visitStatement (context: Context) (statement: Parse.Statement) =
+    match statement with
+    | Parse.ExpressionStatement None -> ExpressionStatement None |> Ok
+    | Parse.ExpressionStatement (Some expression) ->
+        visitExpression context expression
+        |> Result.map (Some >> ExpressionStatement)
+    | Parse.WhileStatement (expression, statement) ->
+        let whileLoop = ref None
+
+        let context =
+            { context with
+                  Loops = whileLoop :: context.Loops }
+
+        let condition = visitExpression context expression
+        let statement = visitStatement context statement
+
+        comb2 (fun x y ->
+            let whileObj = { While.Expression = x; Statement = y }
+            whileLoop := WhileLoop whileObj |> Some
+            WhileStatement whileObj) condition statement
+    | Parse.DoWhileStatement (statement, expression) ->
+        let doWhileLoop = ref None
+
+        let context =
+            { context with
+                  Loops = doWhileLoop :: context.Loops }
+
+        let statement = visitStatement context statement
+        let condition = visitExpression context expression
+
+        comb2 (fun x y ->
+            let doWhileObj =
+                { DoWhile.Expression = x
+                  Statement = y }
+
+            doWhileLoop := DoWhileLoop doWhileObj |> Some
+            DoWhileStatement doWhileObj) condition statement
+    | Parse.CompoundStatement list ->
+        let context =
+            { context with
+                  Scopes = [ Map([]) ] @ context.Scopes }
+
+        visitCompoundStatement context list
+        |> fst
+        |> Result.map CompoundStatement
+    | Parse.ContinueStatement token ->
+        match context.Loops with
+        | [] ->
+            "Cannot use 'continue' outside of a loop"
+            |> context.SourceObject.emitError (ErrorTypeToken token)
+            |> Error
+        | loop :: _ -> ContinueStatement loop |> Ok
+    | Parse.BreakStatement token ->
+        match context.Loops with
+        | [] ->
+            "Cannot use 'break' outside of a loop"
+            |> context.SourceObject.emitError (ErrorTypeToken token)
+            |> Error
+        | loop :: _ -> BreakStatement loop |> Ok
+    | Parse.ForStatementDecl (_, condition, iteration, statement)
+    | Parse.ForStatement (_, condition, iteration, statement) ->
+
+        let oRtoRo optionResult =
+            match optionResult with
+            | None -> None |> Ok
+            | Some (Ok value) -> Some value |> Ok
+            | Some (Error s) -> Error s
+
+        let initial, context =
+            match statement with
+            | Parse.ForStatementDecl (initial, _, _, _) ->
+                let context =
+                    { context with
+                          Scopes = Map([]) :: context.Scopes }
+
+                let initial, context = visitDeclaration context initial
+                (initial |> Result.map ForInitialDeclaration, context)
+            | Parse.ForStatement (initial, _, _, _) ->
+                (initial
+                 |> Option.map (visitExpression context)
+                 |> oRtoRo
+                 |> Result.map ForInitialExpression,
+                 context)
+            | _ -> failwith "Internal Compiler Error: Expected only for loop variants"
+
+        let condition =
+            condition
+            |> Option.map (visitExpression context)
+            |> oRtoRo
+
+        let iteration =
+            iteration
+            |> Option.map (visitExpression context)
+            |> oRtoRo
+
+        let forLoop = ref None
+
+        let context =
+            { context with
+                  Loops = forLoop :: context.Loops }
+
+        let statement = visitStatement context statement
+
+        comb4 (fun x y z w ->
+            let forObj =
+                { Initial = x
+                  Condition = y
+                  Iteration = z
+                  Statement = w }
+
+            forLoop := ForLoop forObj |> Some
+            ForStatement forObj) initial condition iteration statement
+    | _ -> failwith "TODO"
+
+and visitDeclaration (context: Context) (declaration: Parse.Declaration) =
     let aType = createInt ()
 
     declaration.Declarators
@@ -523,16 +632,16 @@ let visitDeclaration (context: Context) (declaration: Parse.Declaration) =
         (prependResult element list, context)) ([] |> Ok, context)
     |> fun (x, y) -> (x |> Result.map List.rev, y)
 
-let visitCompoundItem (context: Context) (compoundItem: Parse.CompoundItem) =
+and visitCompoundItem (context: Context) (compoundItem: Parse.CompoundItem) =
     match compoundItem with
     | Parse.StatementCompoundItem statement ->
-        let statement, context = visitStatement context statement
+        let statement = visitStatement context statement
         (statement |> Result.map CompoundItemStatement, context)
     | Parse.DeclarationCompoundItem declaration ->
         let declaration, context = visitDeclaration context declaration
         (declaration |> Result.map CompoundItemDeclaration, context)
 
-let visitTranslationUnit (context: Context) (translationUnit: Parse.CompoundItem list) =
+and visitCompoundStatement (context: Context) (translationUnit: Parse.CompoundItem list) =
     List.fold (fun (list, context) x ->
         let item, context = visitCompoundItem context x
         (prependResult item list, context)) ([] |> Ok, context) translationUnit
@@ -541,7 +650,8 @@ let visitTranslationUnit (context: Context) (translationUnit: Parse.CompoundItem
 let analyse (sourceObject, translationUnit) =
     let context =
         { Scopes = [ Map([]) ]
-          SourceObject = sourceObject }
+          SourceObject = sourceObject
+          Loops = [] }
 
-    visitTranslationUnit context translationUnit
+    visitCompoundStatement context translationUnit
     |> fst
