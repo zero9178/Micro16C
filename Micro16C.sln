@@ -6,6 +6,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Frontend", "Micro1
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Frontend.Tests", "Micro16C.Frontend.Tests\Micro16C.Frontend.Tests.fsproj", "{432C895D-DEB7-433F-B23A-744E332DCD14}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Backend", "Micro16C.Backend\Micro16C.Backend.fsproj", "{A486D8A6-4E04-4ADD-A94A-491E35C5012B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{432C895D-DEB7-433F-B23A-744E332DCD14}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{432C895D-DEB7-433F-B23A-744E332DCD14}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{432C895D-DEB7-433F-B23A-744E332DCD14}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A486D8A6-4E04-4ADD-A94A-491E35C5012B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A486D8A6-4E04-4ADD-A94A-491E35C5012B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A486D8A6-4E04-4ADD-A94A-491E35C5012B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A486D8A6-4E04-4ADD-A94A-491E35C5012B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

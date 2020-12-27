@@ -2,7 +2,7 @@
 
     <PropertyGroup>
         <TargetFramework>net5.0</TargetFramework>
-        <RootNamespace>Micro16CFrontend</RootNamespace>
+        <RootNamespace>Micro16C.Frontend</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

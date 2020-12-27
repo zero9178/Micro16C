@@ -207,6 +207,7 @@ and Statement =
     | DoWhileStatement of Statement * Expression
     | ForStatementDecl of Declaration * Expression option * Expression option * Statement
     | ForStatement of Expression option * Expression option * Expression option * Statement
+    | IfStatement of Expression * Statement * Statement option
     | BreakStatement of Token
     | ContinueStatement of Token
     | GotoStatement of string
@@ -703,6 +704,25 @@ let rec parseStatement error (tokens: Token list) =
 
         (comb3 (fun _ statement expression -> DoWhileStatement(statement, expression)) error123 statement expression,
          tokens)
+    | { Type = IfKeyword } :: tokens ->
+        let error1, tokens =
+            expect OpenParentheses error tokens "Expected '(' after 'if'"
+
+        let expression, tokens = parseExpression error tokens
+
+        let error2, tokens =
+            expect CloseParentheses error tokens "Expected ')' to match '('"
+
+        let statement, tokens = parseStatement error tokens
+
+        let error12 = comb2 (fun _ _ _ -> ()) error1 error2
+
+        match tokens with
+        | { Type = ElseKeyword } :: tokens ->
+            let elseBranch, tokens = parseStatement error tokens
+            (comb4 (fun _ x y z -> IfStatement(x, y, Some z)) error12 expression statement elseBranch, tokens)
+        | _ -> (comb3 (fun _ x y -> IfStatement(x, y, None)) error12 expression statement, tokens)
+
     | { Type = ForKeyword } :: tokens ->
 
         let error1, tokens =
@@ -810,6 +830,7 @@ and parseCompoundItems error (tokens: Token list) =
 
         (prependResult (declaration |> Result.map DeclarationCompoundItem) other, tokens)
     | { Type = WhileKeyword } :: _
+    | { Type = IfKeyword } :: _
     | { Type = DoKeyword } :: _
     | { Type = BreakKeyword } :: _
     | { Type = ContinueKeyword } :: _

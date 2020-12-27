@@ -145,6 +145,7 @@ and Statement =
     | WhileStatement of While
     | DoWhileStatement of DoWhile
     | ForStatement of For
+    | IfStatement of Expression * Statement * Statement option
     | BreakStatement of LoopStatement option ref
     | ContinueStatement of LoopStatement option ref
     | CompoundStatement of CompoundItem list
@@ -881,6 +882,16 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
 
             doWhileLoop := DoWhileLoop doWhileObj |> Some
             DoWhileStatement doWhileObj) condition statement
+    | Parse.IfStatement (expression, statement, elseBranch) ->
+        let expression = visitExpression context expression
+        let statement = visitStatement context statement
+
+        let elseBranch =
+            elseBranch |> Option.map (visitStatement context)
+
+        match elseBranch with
+        | None -> comb2 (fun x y -> IfStatement(x, y, None)) expression statement
+        | Some elseBranch -> comb3 (fun x y z -> IfStatement(x, y, Some z)) expression statement elseBranch
     | Parse.CompoundStatement list ->
         let context =
             { context with
