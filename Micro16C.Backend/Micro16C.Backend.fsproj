@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net5.0</TargetFramework>
+        <RootNamespace>Micro16C.Backend</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Include="Assembly.fs"/>
+        <Compile Include="IR.fs"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Micro16C.Frontend\Micro16C.Frontend.fsproj"/>
+    </ItemGroup>
+
+</Project>
