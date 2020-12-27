@@ -350,6 +350,7 @@ let tokenize (input: string) =
                 | "else" -> ElseKeyword
                 | "for" -> ForKeyword
                 | "while" -> WhileKeyword
+                | "if" -> IfKeyword
                 | "goto" -> GotoKeyword
                 | "sizeof" -> SizeOfKeyword
                 | _ -> Identifier identifier

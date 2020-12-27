@@ -210,8 +210,8 @@ and Statement =
     | IfStatement of Expression * Statement * Statement option
     | BreakStatement of Token
     | ContinueStatement of Token
-    | GotoStatement of string
-    | LabelStatement of string * Statement
+    | GotoStatement of Token
+    | LabelStatement of Token * Statement
     | CompoundStatement of CompoundItem list
     | ExpressionStatement of Expression option
 
@@ -782,7 +782,7 @@ let rec parseStatement error (tokens: Token list) =
     | { Type = GotoKeyword } :: tokens ->
         let s, tokens =
             match tokens with
-            | { Type = Identifier s } :: tokens -> (s |> Ok, tokens)
+            | { Type = Identifier _ } as s :: tokens -> (s |> Ok, tokens)
             | [] ->
                 (error ErrorTypeEnd "Expected identifier after 'goto'"
                  |> Error,
@@ -797,7 +797,7 @@ let rec parseStatement error (tokens: Token list) =
 
         (comb2 (fun _ -> GotoStatement) error1 s, tokens)
 
-    | { Type = Identifier s } :: { Type = Comma } :: tokens ->
+    | { Type = Identifier _ } as s :: { Type = Colon } :: tokens ->
         let statement, tokens = parseStatement error tokens
 
         (statement
