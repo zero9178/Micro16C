@@ -150,8 +150,8 @@ and Statement =
     | ContinueStatement of LoopStatement option ref
     | CompoundStatement of CompoundItem list
     | ExpressionStatement of Expression option
-    | LabelStatement of Statement
-    | GotoStatement of Statement option ref
+    | LabelStatement of string * Statement
+    | GotoStatement of (string * Statement) option ref
 
 and Declaration =
     { Type: Type
@@ -210,7 +210,7 @@ type Context =
       Loops: LoopStatement option ref list
       SourceObject: SourceObject
       Labels: Map<string, Statement>
-      Gotos: (Token * Statement option ref) list }
+      Gotos: (Token * (string * Statement) option ref) list }
 
 let rec visitExpression (context: Context) (expression: Parse.Expression): Result<Expression, string> =
     match expression.OptionalAssignmentExpressions with
@@ -999,7 +999,9 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
     | Parse.LabelStatement (name, statement) ->
         let statement, context = visitStatement context statement
 
-        let statement = statement |> Result.map LabelStatement
+        let statement =
+            statement
+            |> Result.map (pack2 (Token.identifier name) >> LabelStatement)
 
         match statement with
         | Ok label ->
@@ -1017,7 +1019,14 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
         | _ -> (statement, context)
     | Parse.GotoStatement name ->
         match Map.tryFind (Token.identifier name) context.Labels with
-        | Some label -> (label |> Some |> ref |> GotoStatement |> Ok, context)
+        | Some (LabelStatement (name, statement)) ->
+            ((name, statement)
+             |> Some
+             |> ref
+             |> GotoStatement
+             |> Ok,
+             context)
+        | Some _ -> failwith "Internal Compiler Error: Statement is not a Label"
         | None ->
             let noneRef = ref None
 
@@ -1107,15 +1116,16 @@ let analyse (sourceObject, translationUnit) =
 
     let error =
         context.Gotos
-        |> List.fold (fun result (label, ref) ->
-            match Map.tryFind (Token.identifier label) context.Labels with
-            | Some label ->
-                ref := Some label
+        |> List.fold (fun result (token, ref) ->
+            match Map.tryFind (Token.identifier token) context.Labels with
+            | Some (LabelStatement (name, statement)) ->
+                ref := Some(name, statement)
                 result
+            | Some _ -> failwith "Internal Compiler Error: Statement is not a Label"
             | None ->
                 let error =
-                    sprintf "Unresolved label '%s'" (Token.identifier label)
-                    |> context.SourceObject.emitError (ErrorTypeToken label)
+                    sprintf "Unresolved label '%s'" (Token.identifier token)
+                    |> context.SourceObject.emitError (ErrorTypeToken token)
                     |> Error
 
                 comb2 (fun _ _ -> ()) result error) (() |> Ok)

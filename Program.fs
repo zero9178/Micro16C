@@ -1,4 +1,5 @@
 ﻿open Micro16C.Frontend
+open Micro16C.MiddleEnd
 
 [<EntryPoint>]
 let main argv =
@@ -19,6 +20,7 @@ let main argv =
     register(R2) int r2 = r1;"
     |> Result.bind Parse.parse
     |> Result.bind Sema.analyse
+    |> Result.map Codegen.codegen
     |> printf "%A"
 
     0

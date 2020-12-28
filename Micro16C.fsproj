@@ -10,7 +10,8 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="Micro16C.Frontend\Micro16C.Frontend.fsproj"/>
+        <ProjectReference Include="Micro16C.Frontend\Micro16C.Frontend.fsproj"/>
+        <ProjectReference Include="Micro16C.MiddleEnd\Micro16C.MiddleEnd.fsproj"/>
     </ItemGroup>
 
 </Project>
