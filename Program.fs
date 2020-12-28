@@ -21,6 +21,7 @@ let main argv =
     |> Result.bind Parse.parse
     |> Result.bind Sema.analyse
     |> Result.map Codegen.codegen
+    |> Result.map (fun x -> x.ToString())
     |> printf "%A"
 
     0

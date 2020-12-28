@@ -126,7 +126,58 @@ module Value =
         | _ -> false
 
 
-type Module = { BasicBlocks: BasicBlock ref list }
+type Module =
+    { BasicBlocks: BasicBlock ref list }
+    override this.ToString() =
+        this.BasicBlocks
+        |> List.fold (fun text block ->
+            let text = text + sprintf "%s:\n" (!block).Name
+
+            ((!block).Instructions
+             |> List.fold (fun text instruction ->
+                 match !instruction with
+                 | { Content = AllocationInstruction _ } ->
+                     text
+                     + sprintf "\t%s = alloca\n" (!instruction).Name
+                 | { Content = GotoInstruction goto } ->
+                     text
+                     + sprintf "\tgoto %s\n" (!goto.BasicBlock).Name
+                 | { Content = BinaryInstruction binary } ->
+                     let opName =
+                         match binary.Kind with
+                         | Add -> "add"
+                         | And -> "and"
+
+                     text
+                     + sprintf "\t%s = %s %s %s\n" (!instruction).Name opName (!binary.Left).Name (!binary.Right).Name
+                 | { Content = UnaryInstruction unary } ->
+                     let opName =
+                         match unary.Kind with
+                         | Not -> "not"
+                         | Shl -> "shl"
+                         | Shr -> "shr"
+
+                     text
+                     + sprintf "\t%s = %s %s\n" (!instruction).Name opName (!unary.Value).Name
+                 | { Content = LoadInstruction load } ->
+                     text
+                     + sprintf "\t%s = load %s\n" (!instruction).Name (!load.Source).Name
+                 | { Content = CondBrInstruction cr } ->
+                     text
+                     + sprintf "\tbr %s %s %s\n" (!cr.Condition).Name (!cr.TrueBranch).Name (!cr.FalseBranch).Name
+                 | { Content = StoreInstruction store } ->
+                     text
+                     + sprintf "\tstore %s -> %s\n" (!store.Value).Name (!store.Destination).Name
+                 | { Content = PhiInstruction phi } ->
+                     let list =
+                         phi.Incoming
+                         |> List.map (fun (x, y) -> sprintf "(%s,%s)" (!x).Name (!y).Name)
+                         |> List.reduce (fun x y -> x + " " + y)
+
+                     text
+                     + sprintf "\t%s = phi %s\n" (!instruction).Name list
+                 | _ -> failwith "Internal Compiler Error") text)
+            + "\n") ""
 
 type Builder =
     { InsertBlock: BasicBlock ref option
@@ -173,14 +224,14 @@ module Builder =
     let private valueName name builder =
         let name = uniqueName name builder.ValueNames
 
-        (name,
+        ("%" + name,
          { builder with
                ValueNames = Set.add name builder.ValueNames })
 
     let private blockName name builder =
         let name = uniqueName name builder.BasicBlockNames
 
-        (name,
+        ("." + name,
          { builder with
                BasicBlockNames = Set.add name builder.BasicBlockNames })
 
@@ -218,6 +269,7 @@ module Builder =
     let createConstant value =
         ref
             { Value.Default with
+                  Name = value |> string
                   Content = Constant { Value = value } }
 
     let createRegisterNamedAlloca register name builder =
