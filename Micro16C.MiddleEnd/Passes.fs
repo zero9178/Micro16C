@@ -102,21 +102,18 @@ let simplifyCFG (irModule: Module) =
 let instructionCombine (irModule: Module) =
     let combineInBlock blockValue =
 
-        let rec combine (instructions: Value ref list) =
-            match instructions with
+        let instrCombine instruction =
+            match instruction with
             | Ref { Content = UnaryInstruction { Kind = Not
                                                  Value = Ref { Content = UnaryInstruction { Kind = Not
                                                                                             Value = passThrough }
-                                                               Users = [ _ ] } as first } } as second :: tail ->
+                                                               Users = [ _ ] } as first } } as second ->
                 second |> Value.replaceWith passThrough
                 first |> Value.eraseFromParent
-                combine tail
-            | _ :: tail -> combine tail
-            | [] -> ()
-
+            | _ -> ()
 
         let block = !blockValue |> Value.asBasicBlock
-        combine block.Instructions
+        block.Instructions |> List.iter instrCombine
 
     irModule
     |> Module.basicBlocks
