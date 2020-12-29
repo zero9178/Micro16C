@@ -19,6 +19,22 @@ type Register =
     | R10
     | AC
 
+    member this.asString =
+        match this with
+        | PC -> "PC"
+        | R0 -> "R0"
+        | R1 -> "R1"
+        | R2 -> "R2"
+        | R3 -> "R3"
+        | R4 -> "R4"
+        | R5 -> "R5"
+        | R6 -> "R6"
+        | R7 -> "R7"
+        | R8 -> "R8"
+        | R9 -> "R9"
+        | R10 -> "R10"
+        | AC -> "AC"
+
 
 [<NoComparison>]
 [<NoEquality>]
@@ -324,9 +340,12 @@ type Module =
             (block.Instructions
              |> List.fold (fun text instruction ->
                  match !instruction with
-                 | { Content = AllocationInstruction _ } ->
+                 | { Content = AllocationInstruction { Register = None } } ->
                      text
                      + sprintf "\t%s = alloca\n" (!instruction).Name
+                 | { Content = AllocationInstruction { Register = Some reg } } ->
+                     text
+                     + sprintf "\t%s = alloca (%s)\n" (!instruction).Name reg.asString
                  | { Content = GotoInstruction goto } ->
                      text
                      + sprintf "\tgoto %s\n" (!goto.BasicBlock).Name
