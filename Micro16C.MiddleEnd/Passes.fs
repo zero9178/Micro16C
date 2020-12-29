@@ -76,8 +76,16 @@ let simplifyCFG (irModule: Module) =
     let simplifyBlock blockValue =
         match !blockValue with
         | { Content = BasicBlockValue block } ->
+            // this optimization may be invalid if the basic block is used in a Phi. For now I'll be conservative and
+            // not remove such basic blocks. As a future TODO I could check for semantic changes
             match block.Instructions with
-            | [ Ref { Content = GotoInstruction { BasicBlock = destination } } ] ->
+            | [ Ref { Content = GotoInstruction { BasicBlock = destination } } ] when not
+                                                                                          (List.exists (fun x ->
+                                                                                              match !x with
+                                                                                              | { Content = PhiInstruction _ } ->
+                                                                                                  true
+                                                                                              | _ -> false)
+                                                                                               (!blockValue).Users) ->
                 blockValue |> Value.replaceWith destination
                 false
             | _ -> true
