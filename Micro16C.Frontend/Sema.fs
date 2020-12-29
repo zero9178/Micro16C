@@ -1057,6 +1057,8 @@ and visitDeclaration (context: Context) (declaration: Parse.Declaration) =
                       |> Option.map (visitAssignmentExpression context) with
                 | Some (Error s) -> (Error s, context)
                 | Some (Ok expr) ->
+                    let expr = lvalueConversion expr
+
                     let decl =
                         { Type = aType
                           Name = declarator.Identifier

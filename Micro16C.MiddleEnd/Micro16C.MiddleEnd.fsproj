@@ -12,6 +12,7 @@
     <ItemGroup>
         <Compile Include="IR.fs"/>
         <Compile Include="Codegen.fs"/>
+        <Compile Include="Passes.fs"/>
     </ItemGroup>
 
 </Project>

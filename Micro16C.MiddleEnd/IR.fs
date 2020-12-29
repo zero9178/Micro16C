@@ -18,15 +18,18 @@ type Register =
     | R10
     | AC
 
+
 type Value =
     { Users: Value ref list
       Name: string
-      Content: ValueContent }
+      Content: ValueContent
+      Parent: BasicBlock ref option }
 
     static member Default =
         { Users = []
           Name = ""
-          Content = Constant { Value = 0s } }
+          Content = Constant { Value = 0s }
+          Parent = None }
 
 and ValueContent =
     | Constant of Constant
@@ -118,12 +121,96 @@ module Value =
                              Destination = destination } -> [ value; destination ]
         | PhiInstruction { Incoming = list } -> list |> List.map fst
 
+    let withOperand index operand value =
+        match (index, value.Content) with
+        | (_, Constant _)
+        | (_, GotoInstruction _)
+        | (_, AllocationInstruction _) -> failwith "Internal Compiler Error: Invalid Operand Index"
+        | (i, CondBrInstruction _)
+        | (i, UnaryInstruction _)
+        | (i, LoadInstruction _) when i >= 1 -> failwith "Internal Compiler Error: Invalid Operand Index"
+        | (i, BinaryInstruction _)
+        | (i, StoreInstruction _) when i >= 2 -> failwith "Internal Compiler Error: Invalid Operand Index"
+        | (i, PhiInstruction instr) when i >= List.length instr.Incoming ->
+            failwith "Internal Compiler Error: Invalid Operand Index"
+        | (0, CondBrInstruction instr) ->
+            { value with
+                  Content = CondBrInstruction { instr with Condition = operand } }
+        | (0, UnaryInstruction instr) ->
+            { value with
+                  Content = UnaryInstruction { instr with Value = operand } }
+        | (0, LoadInstruction instr) ->
+            { value with
+                  Content = LoadInstruction { instr with Source = operand } }
+        | (0, BinaryInstruction instr) ->
+            { value with
+                  Content = BinaryInstruction { instr with Left = operand } }
+        | (1, BinaryInstruction instr) ->
+            { value with
+                  Content = BinaryInstruction { instr with Right = operand } }
+        | (0, StoreInstruction instr) ->
+            { value with
+                  Content = StoreInstruction { instr with Value = operand } }
+        | (1, StoreInstruction instr) ->
+            { value with
+                  Content = StoreInstruction { instr with Destination = operand } }
+        | (i, PhiInstruction instr) ->
+            { value with
+                  Content =
+                      PhiInstruction
+                          { instr with
+                                Incoming =
+                                    instr.Incoming
+                                    |> List.indexed
+                                    |> List.map (fun (j, x) -> if j = i then (operand, snd x) else x) } }
+        | _ -> failwith "Internal Compiler Error"
+
+    let useCount value = value.Users |> List.length
+
     let hasSideEffects value =
         match value.Content with
         | GotoInstruction _
         | StoreInstruction _
         | CondBrInstruction _ -> true
         | _ -> false
+
+    let eraseFromParent value =
+        match (!value).Parent with
+        | None -> ()
+        | Some bb ->
+            bb
+            := { !bb with
+                     Instructions =
+                         (!bb).Instructions
+                         |> List.filter (fun x -> (!x).Name <> (!value).Name) }
+
+    let replaceWith replacement value =
+
+        !value
+        |> operands
+        |> List.iter (fun operand ->
+            operand
+            := { !operand with
+                     Users =
+                         (!operand).Users
+                         |> List.filter (fun x -> (!x).Name <> (!value).Name) })
+
+        (!value).Users
+        |> List.iter (fun user ->
+            let operandIndices =
+                !user
+                |> operands
+                |> List.indexed
+                |> List.filter (fun x -> (!(snd x)).Name = (!value).Name)
+                |> List.map fst
+
+            operandIndices
+            |> List.iter (fun i ->
+                addUser user replacement
+                user := withOperand i replacement !user))
+
+        eraseFromParent value
+
 
 
 type Module =
@@ -178,6 +265,13 @@ type Module =
                      + sprintf "\t%s = phi %s\n" (!instruction).Name list
                  | _ -> failwith "Internal Compiler Error") text)
             + "\n") ""
+
+module Module =
+
+    let instructions irModule =
+        irModule.BasicBlocks
+        |> List.map (fun x -> (!x).Instructions)
+        |> Seq.concat
 
 type Builder =
     { InsertBlock: BasicBlock ref option
@@ -242,6 +336,8 @@ module Builder =
             block
             := { !block with
                      Instructions = value :: (!block).Instructions }
+
+            value := { !value with Parent = Some block }
 
             (value, builder)
 
@@ -434,15 +530,7 @@ module Builder =
             |> List.map (fun x ->
                 x
                 := { !x with
-                         Instructions =
-                             (!x).Instructions
-                             |> List.map (fun x ->
-                                 x
-                                 := { !x with
-                                          Users = (!x).Users |> List.rev }
-
-                                 x)
-                             |> List.rev }
+                         Instructions = (!x).Instructions |> List.rev }
 
                 x)
             |> List.rev
