@@ -23,6 +23,7 @@ let main argv =
     |> Result.map Codegen.codegen
     |> Result.map Passes.deadCodeElimination
     |> Result.map Passes.instructionSimplify
+    |> Result.map Passes.instructionCombine
     |> Result.map Passes.simplifyCFG
     |> Result.map (fun x -> x.ToString())
     |> printf "%A"

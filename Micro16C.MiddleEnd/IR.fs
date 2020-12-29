@@ -92,26 +92,6 @@ and BasicBlock =
           Predecessors = []
           Successors = [] }
 
-module BasicBlock =
-
-    let addEdge from toValue =
-        match (!from, !toValue) with
-        | ({ Content = BasicBlockValue fromBlock }, { Content = BasicBlockValue toBlock }) ->
-            from
-            := { !from with
-                     Content =
-                         BasicBlockValue
-                             { fromBlock with
-                                   Successors = toValue :: fromBlock.Successors } }
-
-            toValue
-            := { !toValue with
-                     Content =
-                         BasicBlockValue
-                             { toBlock with
-                                   Predecessors = from :: toBlock.Predecessors } }
-        | _ -> failwith "Internal Compiler Error: Parameters are not BasicBlock"
-
 module Value =
 
     let addUser dependent operand =
@@ -293,6 +273,30 @@ module Value =
                      ParentBlock = (!value).ParentBlock }
         | _ -> eraseFromParent value
 
+    let asBasicBlock value =
+        match value with
+        | { Content = BasicBlockValue value } -> value
+        | _ -> failwith "Internal Compiler Error: Value is not a BasicBlock"
+
+module BasicBlock =
+
+    let addEdge from toValue =
+        let fromBlock = !from |> Value.asBasicBlock
+        let toBlock = !toValue |> Value.asBasicBlock
+
+        from
+        := { !from with
+                 Content =
+                     BasicBlockValue
+                         { fromBlock with
+                               Successors = toValue :: fromBlock.Successors } }
+
+        toValue
+        := { !toValue with
+                 Content =
+                     BasicBlockValue
+                         { toBlock with
+                               Predecessors = from :: toBlock.Predecessors } }
 
 
 [<NoComparison>]
@@ -302,10 +306,7 @@ type Module =
     override this.ToString() =
         this.BasicBlocks
         |> List.fold (fun text blockValue ->
-            let block =
-                match !blockValue with
-                | { Content = BasicBlockValue block } -> block
-                | _ -> failwith "Internal Compiler Error: Module does not consist of basic blocks"
+            let block = !blockValue |> Value.asBasicBlock
 
             let pred =
                 block.Predecessors
@@ -371,10 +372,8 @@ module Module =
     let instructions irModule =
         irModule.BasicBlocks
         |> Seq.ofList
-        |> Seq.map (fun x ->
-            match !x with
-            | { Content = BasicBlockValue { Instructions = instr } } -> instr
-            | _ -> failwith "Internal Compiler Error: Module does not consist of instructions")
+        |> Seq.map ((!) >> Value.asBasicBlock)
+        |> Seq.map (fun { Instructions = instr } -> instr)
         |> Seq.concat
 
     let basicBlocks irModule = irModule.BasicBlocks

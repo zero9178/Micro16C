@@ -36,10 +36,20 @@ let instructionSimplify (irModule: Module) =
                                           Right = Ref { Content = Constant { Value = rhs } } } } ->
             value
             |> Value.replaceWith (Builder.createConstant (lhs &&& rhs))
+        | { Content = BinaryInstruction { Kind = And; Left = lhs; Right = rhs } } when (!lhs).Name = (!rhs).Name ->
+            value |> Value.replaceWith lhs
         | { Content = UnaryInstruction { Kind = Not
                                          Value = Ref { Content = Constant { Value = rhs } } } } ->
             value
             |> Value.replaceWith (Builder.createConstant (~~~rhs))
+        | { Content = UnaryInstruction { Kind = Shl
+                                         Value = Ref { Content = Constant { Value = constant } } } } ->
+            value
+            |> Value.replaceWith (Builder.createConstant (constant <<< 1))
+        | { Content = UnaryInstruction { Kind = Shr
+                                         Value = Ref { Content = Constant { Value = constant } } } } ->
+            value
+            |> Value.replaceWith (Builder.createConstant ((constant |> uint16) >>> 1 |> int16))
         | _ -> ()
 
     irModule
@@ -80,3 +90,28 @@ let simplifyCFG (irModule: Module) =
         |> List.ofSeq
 
     { BasicBlocks = blocks }
+
+let instructionCombine (irModule: Module) =
+    let combineInBlock blockValue =
+
+        let rec combine (instructions: Value ref list) =
+            match instructions with
+            | Ref { Content = UnaryInstruction { Kind = Not
+                                                 Value = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                            Value = passThrough }
+                                                               Users = [ _ ] } as first } } as second :: tail ->
+                second |> Value.replaceWith passThrough
+                first |> Value.eraseFromParent
+                combine tail
+            | _ :: tail -> combine tail
+            | [] -> ()
+
+
+        let block = !blockValue |> Value.asBasicBlock
+        combine block.Instructions
+
+    irModule
+    |> Module.basicBlocks
+    |> List.iter combineInBlock
+
+    irModule
