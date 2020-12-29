@@ -1,6 +1,7 @@
 module Micro16C.MiddleEnd.IR
 
 open System
+open System.Collections.Generic
 
 let (|Ref|) (ref: 'T ref) = ref.Value
 
@@ -37,7 +38,7 @@ type Register =
 
 
 [<NoComparison>]
-[<NoEquality>]
+[<ReferenceEquality>]
 type Value =
     { Users: Value ref list
       Name: string
@@ -218,9 +219,7 @@ module Value =
                      Content =
                          BasicBlockValue
                              { block with
-                                   Instructions =
-                                       block.Instructions
-                                       |> List.filter (fun x -> (!x).Name <> (!value).Name) } }
+                                   Instructions = block.Instructions |> List.filter ((<>) value) } }
         | _ -> failwith "Internal Compiler Error"
 
     let replaceWith replacement value =
@@ -230,9 +229,7 @@ module Value =
         |> List.iter (fun operand ->
             operand
             := { !operand with
-                     Users =
-                         (!operand).Users
-                         |> List.filter (fun x -> (!x).Name <> (!value).Name) })
+                     Users = (!operand).Users |> List.filter ((<>) value) })
 
         (!value).Users
         |> List.iter (fun user ->
@@ -240,7 +237,7 @@ module Value =
                 !user
                 |> operands
                 |> List.indexed
-                |> List.filter (fun x -> (!(snd x)).Name = (!value).Name)
+                |> List.filter (snd >> ((=) value))
                 |> List.map fst
 
             operandIndices
@@ -249,7 +246,7 @@ module Value =
                 user := withOperand i replacement !user))
 
         match (!value, !replacement) with
-        | ({ Content = BasicBlockValue valueBlock }, { Content = BasicBlockValue replacementBlock }) ->
+        | ({ Content = BasicBlockValue valueBlock }, { Content = BasicBlockValue _ }) ->
             valueBlock.Successors
             |> List.iter (fun succ ->
                 match !succ with
@@ -260,8 +257,7 @@ module Value =
                                  BasicBlockValue
                                      { succBlock with
                                            Predecessors =
-                                               (succBlock.Predecessors
-                                                |> List.filter (fun x -> (!x).Name <> (!value).Name))
+                                               (succBlock.Predecessors |> List.filter ((<>) value))
                                                @ valueBlock.Predecessors } }
                 | _ -> failwith "Internal Compiler Error")
 
@@ -276,8 +272,7 @@ module Value =
                                      { predBlock with
                                            Successors =
                                                replacement
-                                               :: (predBlock.Successors
-                                                   |> List.filter (fun x -> (!x).Name <> (!value).Name)) } }
+                                               :: (predBlock.Successors |> List.filter ((<>) value)) } }
                 | _ -> failwith "Internal Compiler Error")
 
         | ({ Content = BasicBlockValue _ }, _)
@@ -322,35 +317,52 @@ module BasicBlock =
 type Module =
     { BasicBlocks: Value ref list }
     override this.ToString() =
+
+        let mutable counter = 0
+
+        let mutable seenValues =
+            Dictionary<Value, string>(HashIdentity.Reference)
+
         this.BasicBlocks
         |> List.fold (fun text blockValue ->
+
+            let getName (value: Value ref) =
+                match !value with
+                | { Content = Constant { Value = constant } } -> constant |> string
+                | { Name = "" } ->
+                    match seenValues.TryGetValue !value with
+                    | (true, name) -> name
+                    | (false, _) ->
+                        counter <- counter + 1
+                        let name = "%" + ((counter - 1) |> string)
+                        seenValues.Add(!value, name)
+                        name
+                | { Name = name } -> "%" + name
+
             let block = !blockValue |> Value.asBasicBlock
 
-            let pred =
-                block.Predecessors
-                |> List.map (fun x -> (!x).Name)
+            let pred = block.Predecessors |> List.map getName
 
-            let succ =
-                block.Successors |> List.map (fun x -> (!x).Name)
+            let succ = block.Successors |> List.map getName
 
             let text =
                 text + sprintf "; succ = %A pred = %A\n" succ pred
 
             let text =
-                text + sprintf "%s:\n" (!blockValue).Name
+                text + sprintf "%s:\n" (getName blockValue)
 
             (block.Instructions
              |> List.fold (fun text instruction ->
                  match !instruction with
                  | { Content = AllocationInstruction { Register = None } } ->
                      text
-                     + sprintf "\t%s = alloca\n" (!instruction).Name
+                     + sprintf "\t%s = alloca\n" (getName instruction)
                  | { Content = AllocationInstruction { Register = Some reg } } ->
                      text
-                     + sprintf "\t%s = alloca (%s)\n" (!instruction).Name reg.asString
+                     + sprintf "\t%s = alloca (%s)\n" (getName instruction) reg.asString
                  | { Content = GotoInstruction goto } ->
                      text
-                     + sprintf "\tgoto %s\n" (!goto.BasicBlock).Name
+                     + sprintf "\tgoto %s\n" (getName goto.BasicBlock)
                  | { Content = BinaryInstruction binary } ->
                      let opName =
                          match binary.Kind with
@@ -358,7 +370,8 @@ type Module =
                          | And -> "and"
 
                      text
-                     + sprintf "\t%s = %s %s %s\n" (!instruction).Name opName (!binary.Left).Name (!binary.Right).Name
+                     + sprintf "\t%s = %s %s %s\n" (getName instruction) opName (getName binary.Left)
+                           (getName binary.Right)
                  | { Content = UnaryInstruction unary } ->
                      let opName =
                          match unary.Kind with
@@ -367,24 +380,24 @@ type Module =
                          | Shr -> "shr"
 
                      text
-                     + sprintf "\t%s = %s %s\n" (!instruction).Name opName (!unary.Value).Name
+                     + sprintf "\t%s = %s %s\n" (getName instruction) opName (getName unary.Value)
                  | { Content = LoadInstruction load } ->
                      text
-                     + sprintf "\t%s = load %s\n" (!instruction).Name (!load.Source).Name
+                     + sprintf "\t%s = load %s\n" (getName instruction) (getName load.Source)
                  | { Content = CondBrInstruction cr } ->
                      text
-                     + sprintf "\tbr %s %s %s\n" (!cr.Condition).Name (!cr.TrueBranch).Name (!cr.FalseBranch).Name
+                     + sprintf "\tbr %s %s %s\n" (getName cr.Condition) (getName cr.TrueBranch) (getName cr.FalseBranch)
                  | { Content = StoreInstruction store } ->
                      text
-                     + sprintf "\tstore %s -> %s\n" (!store.Value).Name (!store.Destination).Name
+                     + sprintf "\tstore %s -> %s\n" (getName store.Value) (getName store.Destination)
                  | { Content = PhiInstruction phi } ->
                      let list =
                          phi.Incoming
-                         |> List.map (fun (x, y) -> sprintf "(%s,%s)" (!x).Name (!y).Name)
+                         |> List.map (fun (x, y) -> sprintf "(%s,%s)" (getName x) (getName y))
                          |> List.reduce (fun x y -> x + " " + y)
 
                      text
-                     + sprintf "\t%s = phi %s\n" (!instruction).Name list
+                     + sprintf "\t%s = phi %s\n" (getName instruction) list
                  | _ -> failwith "Internal Compiler Error") text)
             + "\n") ""
 
@@ -401,59 +414,11 @@ module Module =
 
 type Builder =
     { InsertBlock: Value ref option
-      ValueNames: Set<string>
-      BasicBlockNames: Set<string>
-      AllBlocks: Value ref list
-      AlreadyInsertedBlocks: Set<string> }
+      AllBlocks: Value ref list }
 
-    static member Default =
-        { InsertBlock = None
-          ValueNames = Set([ "" ])
-          BasicBlockNames = Set([ "" ])
-          AllBlocks = []
-          AlreadyInsertedBlocks = Set([]) }
+    static member Default = { InsertBlock = None; AllBlocks = [] }
 
 module Builder =
-
-    let rec private uniqueName name (set: Set<string>) =
-        if Set.contains name set then
-            let numSuffix =
-                name
-                |> List.ofSeq
-                |> List.rev
-                |> List.takeWhile Char.IsDigit
-                |> List.rev
-
-            match numSuffix with
-            | [] -> uniqueName (name + "0") set
-            | _ ->
-                uniqueName
-                    ((name
-                      |> List.ofSeq
-                      |> List.rev
-                      |> List.skip (List.length numSuffix)
-                      |> List.rev
-                      |> Array.ofList
-                      |> String)
-                     + (1 + (numSuffix |> Array.ofList |> String |> int)
-                        |> string))
-                    set
-        else
-            name
-
-    let private valueName name builder =
-        let name = uniqueName name builder.ValueNames
-
-        ("%" + name,
-         { builder with
-               ValueNames = Set.add name builder.ValueNames })
-
-    let private blockName name builder =
-        let name = uniqueName name builder.BasicBlockNames
-
-        ("." + name,
-         { builder with
-               BasicBlockNames = Set.add name builder.BasicBlockNames })
 
     let private addValue value builder =
         match builder.InsertBlock with
@@ -474,7 +439,6 @@ module Builder =
         | _ -> failwith "Internal Compiler Error"
 
     let createBasicBlock name builder =
-        let name, builder = blockName name builder
 
         (ref
             { Value.Default with
@@ -489,11 +453,10 @@ module Builder =
             match basicBlock with
             | None -> builder
             | Some basicBlock ->
-                if Set.contains (!basicBlock).Name builder.AlreadyInsertedBlocks then
+                if List.contains basicBlock builder.AllBlocks then
                     builder
                 else
                     { builder with
-                          AlreadyInsertedBlocks = Set.add (!basicBlock).Name builder.AlreadyInsertedBlocks
                           AllBlocks = basicBlock :: builder.AllBlocks }
 
         { builder with
@@ -506,8 +469,6 @@ module Builder =
                   Content = Constant { Value = value } }
 
     let createRegisterNamedAlloca register name builder =
-        let name, builder = valueName name builder
-
         let value =
             ref
                 { Value.Default with
@@ -527,8 +488,6 @@ module Builder =
             | Add -> (createConstant (lhs + rhs), builder)
             | And -> (createConstant (lhs &&& rhs), builder)
         | _ ->
-            let name, builder = valueName name builder
-
             let value =
                 ref
                     { Value.Default with
@@ -555,9 +514,6 @@ module Builder =
             // Micro16 does logical, not arithmetic right shifts
             | Shr -> (createConstant ((value |> uint16) >>> 1 |> int16), builder)
         | _ ->
-
-            let name, builder = valueName name builder
-
             let unary =
                 ref
                     { Value.Default with
@@ -571,8 +527,6 @@ module Builder =
     let createUnary = createNamedUnary ""
 
     let createNamedLoad name value builder =
-
-        let name, builder = valueName name builder
 
         let load =
             ref
@@ -588,12 +542,10 @@ module Builder =
 
     let createStore destination value builder =
 
-        let name, builder = valueName ".store" builder
-
         let store =
             ref
                 { Value.Default with
-                      Name = name
+                      Name = ""
                       Content =
                           StoreInstruction
                               { Destination = destination
@@ -606,15 +558,13 @@ module Builder =
 
     let createGoto destination builder =
 
-        let name, builder = valueName ".goto" builder
-
         builder.InsertBlock
         |> Option.iter (fun x -> BasicBlock.addEdge x destination)
 
         let value =
             ref
                 { Value.Default with
-                      Name = name
+                      Name = ""
                       Content = GotoInstruction { BasicBlock = destination } }
 
         destination |> Value.addUser value
@@ -627,8 +577,6 @@ module Builder =
         | { Content = Constant { Value = condition } } when condition = 0s -> createGoto falseBranch builder
         | _ ->
 
-            let name, builder = valueName ".condBr" builder
-
             builder.InsertBlock
             |> Option.iter (fun x -> BasicBlock.addEdge x trueBranch)
 
@@ -638,7 +586,7 @@ module Builder =
             let value =
                 ref
                     { Value.Default with
-                          Name = name
+                          Name = ""
                           Content =
                               CondBrInstruction
                                   { Condition = condition
@@ -652,8 +600,6 @@ module Builder =
             builder |> addValue value |> snd
 
     let createNamedPhi name incoming builder =
-
-        let name, builder = valueName name builder
 
         let value =
             ref

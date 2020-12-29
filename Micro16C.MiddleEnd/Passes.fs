@@ -36,7 +36,7 @@ let instructionSimplify (irModule: Module) =
                                           Right = Ref { Content = Constant { Value = rhs } } } } ->
             value
             |> Value.replaceWith (Builder.createConstant (lhs &&& rhs))
-        | { Content = BinaryInstruction { Kind = And; Left = lhs; Right = rhs } } when (!lhs).Name = (!rhs).Name ->
+        | { Content = BinaryInstruction { Kind = And; Left = lhs; Right = rhs } } when lhs = rhs ->
             value |> Value.replaceWith lhs
         | { Content = UnaryInstruction { Kind = Not
                                          Value = Ref { Content = Constant { Value = rhs } } } } ->
@@ -192,7 +192,7 @@ let removeRedundantLoadStores (irModule: Module) =
         |> List.groupBy (fun x ->
             match !x with
             | { Content = LoadInstruction { Source = alloca } }
-            | { Content = StoreInstruction { Destination = alloca } } -> (!alloca).Name
+            | { Content = StoreInstruction { Destination = alloca } } -> alloca
             | _ -> failwith "Internal Compiler error")
         |> List.map (fun (_, x) ->
             match !(List.head x) with
