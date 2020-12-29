@@ -2,7 +2,6 @@ module Micro16C.MiddleEnd.Passes
 
 open Micro16C.MiddleEnd.IR
 
-let private (|Ref|) (ref: 'T ref) = ref.Value
 
 let instructionSimplify (irModule: Module) =
     let simplify value =
@@ -61,3 +60,23 @@ let deadCodeElimination (irModule: Module) =
     |> Seq.iter eliminate
 
     irModule
+
+let simplifyCFG (irModule: Module) =
+
+    let simplifyBlock blockValue =
+        match !blockValue with
+        | { Content = BasicBlockValue block } ->
+            match block.Instructions with
+            | [ Ref { Content = GotoInstruction { BasicBlock = destination } } ] ->
+                blockValue |> Value.replaceWith destination
+                false
+            | _ -> true
+        | _ -> failwith "Internal Compiler Error"
+
+    let blocks =
+        irModule
+        |> Module.basicBlocks
+        |> Seq.filter simplifyBlock
+        |> List.ofSeq
+
+    { BasicBlocks = blocks }

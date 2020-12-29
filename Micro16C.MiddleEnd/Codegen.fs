@@ -8,7 +8,7 @@ open Micro16C.MiddleEnd.IR
 type Context =
     { Builder: Builder
       Variables: Map<Sema.Declaration, Value ref>
-      Labels: Map<string * Sema.Statement, BasicBlock ref> }
+      Labels: Map<string * Sema.Statement, Value ref> }
 
 module private Context =
 
