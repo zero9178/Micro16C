@@ -123,3 +123,91 @@ let instructionCombine (irModule: Module) =
     |> List.iter combineInBlock
 
     irModule
+
+let analyzeAlloc (irModule: Module) =
+    let analyzeAlloc instr =
+        match !instr with
+        | { Content = AllocationInstruction ({ Aliased = None } as alloca)
+            Users = users } ->
+            let addressTaken =
+                users
+                |> List.exists (fun x ->
+                    match !x with
+                    | { Content = LoadInstruction _ }
+                    | { Content = StoreInstruction _ } -> false
+                    | _ -> true)
+
+            instr
+            := { !instr with
+                     Content =
+                         AllocationInstruction
+                             { alloca with
+                                   Aliased = Some addressTaken } }
+        | _ -> ()
+
+    irModule
+    |> Module.instructions
+    |> Seq.iter analyzeAlloc
+
+    irModule
+
+let removeRedundantLoadStores (irModule: Module) =
+    let removeRedundantLoadStoresInBlock blockValue =
+        let block = !blockValue |> Value.asBasicBlock
+
+        let simplifyLoadStoreSeries instr =
+            // replace all loads first therefore making all stores but the last redundant
+            instr
+            |> List.fold (fun replacement x ->
+                match !x with
+                | { Content = StoreInstruction { Value = passThrough } } -> passThrough |> Some
+                | { Content = LoadInstruction _ } ->
+                    match replacement with
+                    | Some value ->
+                        x |> Value.replaceWith value
+                        replacement
+                    | None -> Some x
+                | _ -> failwith "Internal Compiler Error") None
+            |> ignore
+
+            let safeTail list =
+                match list with
+                | _ :: tail -> tail
+                | _ -> []
+
+            // Remove all but the last store
+            instr
+            |> List.filter (fun x ->
+                match !x with
+                | { Content = StoreInstruction _ } -> true
+                | _ -> false)
+            |> List.rev
+            |> safeTail
+            |> List.iter Value.eraseFromParent
+
+        block.Instructions
+        |> List.filter (fun x ->
+            match !x with
+            | { Content = LoadInstruction { Source = Ref { Content = AllocationInstruction { Aliased = Some false } } } }
+            | { Content = StoreInstruction { Destination = Ref { Content = AllocationInstruction { Aliased = Some false } } } } ->
+                true
+            | _ -> false)
+        |> List.groupBy (fun x ->
+            match !x with
+            | { Content = LoadInstruction { Source = alloca } }
+            | { Content = StoreInstruction { Destination = alloca } } -> (!alloca).Name
+            | _ -> failwith "Internal Compiler error")
+        |> List.map (fun (_, x) ->
+            match !(List.head x) with
+            | { Content = LoadInstruction { Source = alloca } }
+            | { Content = StoreInstruction { Destination = alloca } } -> (alloca, x)
+            | _ -> failwith "Internal Compiler error")
+        |> List.iter (snd >> simplifyLoadStoreSeries)
+
+
+
+    irModule
+    |> Module.basicBlocks
+    |> List.iter removeRedundantLoadStoresInBlock
+
+    irModule

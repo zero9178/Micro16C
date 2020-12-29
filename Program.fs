@@ -25,6 +25,8 @@ let main argv =
     |> Result.map Passes.instructionSimplify
     |> Result.map Passes.instructionCombine
     |> Result.map Passes.simplifyCFG
+    |> Result.map Passes.analyzeAlloc
+    |> Result.map Passes.removeRedundantLoadStores
     |> Result.map (fun x -> x.ToString())
     |> printf "%A"
 

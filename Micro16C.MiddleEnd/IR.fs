@@ -64,7 +64,9 @@ and ValueContent =
 
 and Constant = { Value: int16 }
 
-and AllocationInstruction = { Register: Register option }
+and AllocationInstruction =
+    { Register: Register option
+      Aliased: bool option }
 
 and BinaryKind =
     | And
@@ -510,7 +512,7 @@ module Builder =
             ref
                 { Value.Default with
                       Name = name
-                      Content = AllocationInstruction { Register = register } }
+                      Content = AllocationInstruction { Register = register; Aliased = None } }
 
         builder |> addValue value
 
@@ -586,10 +588,12 @@ module Builder =
 
     let createStore destination value builder =
 
+        let name, builder = valueName ".store" builder
+
         let store =
             ref
                 { Value.Default with
-                      Name = ""
+                      Name = name
                       Content =
                           StoreInstruction
                               { Destination = destination
@@ -602,13 +606,15 @@ module Builder =
 
     let createGoto destination builder =
 
+        let name, builder = valueName ".goto" builder
+
         builder.InsertBlock
         |> Option.iter (fun x -> BasicBlock.addEdge x destination)
 
         let value =
             ref
                 { Value.Default with
-                      Name = ""
+                      Name = name
                       Content = GotoInstruction { BasicBlock = destination } }
 
         destination |> Value.addUser value
@@ -621,6 +627,8 @@ module Builder =
         | { Content = Constant { Value = condition } } when condition = 0s -> createGoto falseBranch builder
         | _ ->
 
+            let name, builder = valueName ".condBr" builder
+
             builder.InsertBlock
             |> Option.iter (fun x -> BasicBlock.addEdge x trueBranch)
 
@@ -630,7 +638,7 @@ module Builder =
             let value =
                 ref
                     { Value.Default with
-                          Name = ""
+                          Name = name
                           Content =
                               CondBrInstruction
                                   { Condition = condition
