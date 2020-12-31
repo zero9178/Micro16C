@@ -74,7 +74,7 @@ let deadCodeElimination (irModule: Module) =
 
 let simplifyCFG (irModule: Module) =
 
-    let simplifyBlock blockValue =
+    let simplifyBlock (index, blockValue) =
         match !blockValue with
         | { Content = BasicBlockValue block } ->
             // this optimization may be invalid if the basic block is used in a Phi. For now I'll be conservative and
@@ -89,13 +89,36 @@ let simplifyCFG (irModule: Module) =
                                                                                                (!blockValue).Users) ->
                 blockValue |> Value.replaceWith destination
                 false
-            | _ -> true
+            | Ref { Content = PhiInstruction { Incoming = list } } as phi :: _ when list
+                                                                                    |> List.map snd
+                                                                                    |> List.exists
+                                                                                        ((=) Value.UndefValue) ->
+                match list
+                      |> List.filter (fun (_, x) -> x <> Value.UndefValue) with
+                | [ (singleValue, _) ] -> phi |> Value.replaceWith singleValue
+                | list ->
+                    phi
+                    := { !phi with
+                             Content = PhiInstruction { Incoming = list } }
+
+                true
+            | _ ->
+                if index <> 0
+                   && !blockValue
+                      |> BasicBlock.predecessors
+                      |> List.isEmpty then
+                    blockValue |> Value.eraseFromParent
+                    false
+                else
+                    true
         | _ -> failwith "Internal Compiler Error"
 
 
     irModule
     |> Module.basicBlocks
+    |> Seq.indexed
     |> Seq.filter simplifyBlock
+    |> Seq.map snd
     |> List.ofSeq
     |> Module.fromBasicBlocks
 
@@ -109,6 +132,54 @@ let instructionCombine (irModule: Module) =
                                                            Users = [ _ ] } as first } } as second ->
             second |> Value.replaceWith passThrough
             first |> Value.eraseFromParent
+        | Ref { Content = BinaryInstruction { Kind = Add
+                                              Left = Ref { Content = Constant { Value = value1 } }
+                                              Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                          Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                            Users = [ _ ] } as first } }
+        | Ref { Content = BinaryInstruction { Kind = Add
+                                              Left = Ref { Content = Constant { Value = value1 } }
+                                              Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                          Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                            Users = [ _ ] } as first } }
+        | Ref { Content = BinaryInstruction { Kind = Add
+                                              Right = Ref { Content = Constant { Value = value1 } }
+                                              Left = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                         Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                           Users = [ _ ] } as first } }
+        | Ref { Content = BinaryInstruction { Kind = Add
+                                              Right = Ref { Content = Constant { Value = value1 } }
+                                              Left = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                         Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                           Users = [ _ ] } as first } } as second ->
+            first
+            |> Value.replaceOperand oldOp (Builder.createConstant (value1 + value2))
+
+            second |> Value.replaceWith first
+        | Ref { Content = BinaryInstruction { Kind = And
+                                              Left = Ref { Content = Constant { Value = value1 } }
+                                              Right = Ref { Content = BinaryInstruction { Kind = And
+                                                                                          Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                            Users = [ _ ] } as first } }
+        | Ref { Content = BinaryInstruction { Kind = And
+                                              Left = Ref { Content = Constant { Value = value1 } }
+                                              Right = Ref { Content = BinaryInstruction { Kind = And
+                                                                                          Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                            Users = [ _ ] } as first } }
+        | Ref { Content = BinaryInstruction { Kind = And
+                                              Right = Ref { Content = Constant { Value = value1 } }
+                                              Left = Ref { Content = BinaryInstruction { Kind = And
+                                                                                         Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                           Users = [ _ ] } as first } }
+        | Ref { Content = BinaryInstruction { Kind = And
+                                              Right = Ref { Content = Constant { Value = value1 } }
+                                              Left = Ref { Content = BinaryInstruction { Kind = And
+                                                                                         Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                           Users = [ _ ] } as first } } as second ->
+            first
+            |> Value.replaceOperand oldOp (Builder.createConstant (value1 ||| value2))
+
+            second |> Value.replaceWith first
         | _ -> ()
 
     irModule

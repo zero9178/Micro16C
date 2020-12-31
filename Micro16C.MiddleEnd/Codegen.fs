@@ -24,7 +24,7 @@ module private Context =
 
     let setInsertPoint basicBlock context =
         context.Builder
-        |> Builder.setInsertPoint basicBlock
+        |> Builder.setInsertBlock basicBlock
         |> withBuilder context
 
     let createRegisterNamedAlloca register name context =
@@ -310,7 +310,8 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
         | Some label ->
             (match Map.tryFind label context.Labels with
              | None ->
-                 let bb, context = Context.createBasicBlock "" context
+                 let bb, context =
+                     Context.createBasicBlock (fst label) context
 
                  { context with
                        Labels = Map.add label bb context.Labels }
@@ -323,7 +324,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
         let bb, context =
             (match Map.tryFind (label, statement) context.Labels with
              | None ->
-                 let bb, context = Context.createBasicBlock "" context
+                 let bb, context = Context.createBasicBlock label context
 
                  (bb,
                   { context with

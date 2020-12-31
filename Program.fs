@@ -25,6 +25,7 @@ let main argv =
     |> Result.bind Parse.parse
     |> Result.bind Sema.analyse
     |> Result.map Codegen.codegen
+    |> Result.map (printModulePass "Before optimizations:")
     |> Result.map Passes.deadCodeElimination
     |> Result.map Passes.instructionSimplify
     |> Result.map Passes.instructionCombine

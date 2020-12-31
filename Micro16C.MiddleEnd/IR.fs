@@ -246,6 +246,15 @@ module Value =
 
         | _ -> failwith "Internal Compiler Error"
 
+    // Careful, in an instruction with multiple operands this will delete all occurrences
+    let replaceOperand operand replacement value =
+        !value
+        |> operands
+        |> List.indexed
+        |> List.filter (snd >> ((=) operand))
+        |> List.map fst
+        |> List.iter (fun i -> setOperand i replacement value)
+
     let useCount value = value.Users |> List.length
 
     let hasSideEffects value =
@@ -268,7 +277,7 @@ module Value =
         | CondBrInstruction _ -> true
         | _ -> false
 
-    let eraseFromParent value =
+    let rec eraseFromParent value =
 
         // If we are removing a basic block we need to make sure every instruction does not have an operand that doesn't
         // use operands from other basic blocks nor have users from other blocks. We replace those with undefs
@@ -283,6 +292,9 @@ module Value =
                  |> List.indexed
                  |> List.filter (fun (_, o) -> (!o).ParentBlock <> (!x).ParentBlock)
                  |> List.map fst))
+            |> Seq.map (fun (x, y) ->
+                x |> replaceWith Value.UndefValue
+                (x, y))
             |> Seq.filter (fun (_, list) -> not (List.isEmpty list))
             |> Seq.iter (fun (x, list) ->
                 list
@@ -300,25 +312,18 @@ module Value =
                                    Instructions = block.Instructions |> List.filter ((<>) value) } }
         | _ -> failwith "Internal Compiler Error"
 
-    let replaceWith replacement value =
+    and replaceWith replacement value =
 
         (!value).Users
-        |> List.iter (fun user ->
-            let operandIndices =
-                !user
-                |> operands
-                |> List.indexed
-                |> List.filter (snd >> ((=) value))
-                |> List.map fst
-
-            operandIndices
-            |> List.iter (fun i -> setOperand i replacement user))
+        |> List.iter (replaceOperand value replacement)
 
         (!value)
         |> operands
         |> List.indexed
         |> List.map fst
         |> List.iter (fun i -> setOperand i Value.UndefValue value)
+
+        assert (useCount !value = 0)
 
         match (!replacement).ParentBlock with
         | None when isInstruction !replacement ->
@@ -474,13 +479,23 @@ module Module =
 
 type Builder =
     { InsertBlock: Value ref option
+      InsertIndex: int
       AllBlocks: Value ref list }
 
-    static member Default = { InsertBlock = None; AllBlocks = [] }
+    static member Default =
+        { InsertBlock = None
+          AllBlocks = []
+          InsertIndex = 0 }
 
     static member fromModule irModule =
-        { AllBlocks = irModule.BasicBlocks
-          InsertBlock = None }
+        { Builder.Default with
+              AllBlocks = irModule.BasicBlocks }
+
+type InsertPoint =
+    | Before of Value ref
+    | After of Value ref
+    | Start
+    | End
 
 module Builder =
 
@@ -488,12 +503,17 @@ module Builder =
         match builder.InsertBlock with
         | None -> (value, builder)
         | Some (Ref { Content = BasicBlockValue block } as blockVal) ->
+
+            let (first, second) =
+                block.Instructions
+                |> List.splitAt builder.InsertIndex
+
             blockVal
             := { !blockVal with
                      Content =
                          BasicBlockValue
                              { block with
-                                   Instructions = value :: block.Instructions } }
+                                   Instructions = first @ [ value ] @ second } }
 
             value
             := { !value with
@@ -510,9 +530,9 @@ module Builder =
                   Content = BasicBlockValue BasicBlock.Default },
          builder)
 
-    let insertPoint builder = builder.InsertBlock
+    let insertBlock builder = builder.InsertBlock
 
-    let setInsertPoint basicBlock builder =
+    let setInsertBlock basicBlock builder =
         let builder =
             match basicBlock with
             | None -> builder
@@ -525,6 +545,26 @@ module Builder =
 
         { builder with
               InsertBlock = basicBlock }
+
+    let setInsertPoint (insertPoint: InsertPoint) builder =
+        match builder.InsertBlock with
+        | None -> builder
+        | Some blockValue ->
+            let block = !blockValue |> Value.asBasicBlock
+
+            match insertPoint with
+            | End -> { builder with InsertIndex = 0 }
+            | Start ->
+                { builder with
+                      InsertIndex = List.length block.Instructions }
+            | After ref ->
+                match block.Instructions |> List.tryFindIndex ((=) ref) with
+                | None -> builder
+                | Some i -> { builder with InsertIndex = i }
+            | Before ref ->
+                match block.Instructions |> List.tryFindIndex ((=) ref) with
+                | None -> builder
+                | Some i -> { builder with InsertIndex = i + 1 }
 
     let createConstant value =
         ref
