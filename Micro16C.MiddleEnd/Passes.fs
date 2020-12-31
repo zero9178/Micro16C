@@ -50,6 +50,30 @@ let instructionSimplify (irModule: Module) =
                                          Value = Ref { Content = Constant { Value = constant } } } } ->
             value
             |> Value.replaceWith (Builder.createConstant ((constant |> uint16) >>> 1 |> int16))
+        | { Content = CondBrInstruction { Condition = Ref { Content = Constant { Value = constant } }
+                                          TrueBranch = trueBranch
+                                          FalseBranch = falseBranch } } ->
+            if constant <> 0s then
+                value
+                |> Value.replaceWith
+                    (Builder.createGoto trueBranch Builder.Default
+                     |> fst)
+            else
+                value
+                |> Value.replaceWith
+                    (Builder.createGoto falseBranch Builder.Default
+                     |> fst)
+        | { Content = PhiInstruction { Incoming = list } } when list
+                                                                |> List.map snd
+                                                                |> List.exists ((=) Value.UndefValue) ->
+            match list
+                  |> List.filter (fun (_, x) -> x <> Value.UndefValue) with
+            | [ (singleValue, _) ] -> value |> Value.replaceWith singleValue
+            | list ->
+                value
+                := { !value with
+                         Content = PhiInstruction { Incoming = list } }
+
         | _ -> ()
 
     irModule
@@ -89,19 +113,6 @@ let simplifyCFG (irModule: Module) =
                                                                                                (!blockValue).Users) ->
                 blockValue |> Value.replaceWith destination
                 false
-            | Ref { Content = PhiInstruction { Incoming = list } } as phi :: _ when list
-                                                                                    |> List.map snd
-                                                                                    |> List.exists
-                                                                                        ((=) Value.UndefValue) ->
-                match list
-                      |> List.filter (fun (_, x) -> x <> Value.UndefValue) with
-                | [ (singleValue, _) ] -> phi |> Value.replaceWith singleValue
-                | list ->
-                    phi
-                    := { !phi with
-                             Content = PhiInstruction { Incoming = list } }
-
-                true
             | _ ->
                 if index <> 0
                    && !blockValue

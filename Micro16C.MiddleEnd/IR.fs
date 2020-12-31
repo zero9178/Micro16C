@@ -694,7 +694,7 @@ module Builder =
         value |> Value.addUser store
         destination |> Value.addUser store
 
-        builder |> addValue store |> snd
+        (store, builder |> addValue store |> snd)
 
     let createGoto destination builder =
 
@@ -705,7 +705,7 @@ module Builder =
 
         destination |> Value.addUser value
 
-        builder |> addValue value |> snd
+        (value, builder |> addValue value |> snd)
 
     let createCondBr condition trueBranch falseBranch builder =
         match !condition with
@@ -726,7 +726,7 @@ module Builder =
             trueBranch |> Value.addUser value
             falseBranch |> Value.addUser value
 
-            builder |> addValue value |> snd
+            (value, builder |> addValue value |> snd)
 
     let createNamedPhi name incoming builder =
 

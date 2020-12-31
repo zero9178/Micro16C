@@ -60,16 +60,19 @@ module private Context =
     let createStore destination value context =
         context.Builder
         |> Builder.createStore destination value
+        |> snd
         |> withBuilder context
 
     let createGoto destination context =
         context.Builder
         |> Builder.createGoto destination
+        |> snd
         |> withBuilder context
 
     let createCondBr condition trueBranch falseBranch context =
         context.Builder
         |> Builder.createCondBr condition trueBranch falseBranch
+        |> snd
         |> withBuilder context
 
     let createNamedPhi name incoming context =
