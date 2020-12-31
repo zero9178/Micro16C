@@ -1,5 +1,6 @@
 module Micro16C.MiddleEnd.IR
 
+open System
 open System.Collections.Generic
 
 let (|Ref|) (ref: 'T ref) = ref.Value
@@ -373,6 +374,8 @@ type Module =
             let mutable seenValues =
                 Dictionary<Value, string>(HashIdentity.Reference)
 
+            let seenNames = ref Set.empty
+
             this.BasicBlocks
             |> List.rev
             |> List.fold (fun text blockValue ->
@@ -381,15 +384,49 @@ type Module =
                     match !value with
                     | { Content = Constant { Value = constant } } -> constant |> string
                     | { Content = Undef } -> "undef"
-                    | { Name = "" } ->
+                    | { Name = name } ->
                         match seenValues.TryGetValue !value with
                         | (true, name) -> name
                         | (false, _) ->
-                            counter <- counter + 1
-                            let name = "%" + ((counter - 1) |> string)
-                            seenValues.Add(!value, name)
-                            name
-                    | { Name = name } -> "%" + name
+                            match name with
+                            | "" ->
+                                counter <- counter + 1
+                                let name = "%" + ((counter - 1) |> string)
+                                seenValues.Add(!value, name)
+                                name
+                            | _ ->
+                                let rec uniqueName name =
+                                    if Set.contains name !seenNames then
+                                        match name
+                                              |> List.ofSeq
+                                              |> List.rev
+                                              |> List.takeWhile Char.IsDigit with
+                                        | [] -> uniqueName (name + "0")
+                                        | digits ->
+                                            let newInt =
+                                                digits
+                                                |> List.rev
+                                                |> List.toArray
+                                                |> String
+                                                |> int
+                                                |> ((+) 1)
+
+                                            let name =
+                                                name
+                                                |> List.ofSeq
+                                                |> List.rev
+                                                |> List.skip (List.length digits)
+                                                |> List.rev
+                                                |> List.toArray
+                                                |> String
+
+                                            uniqueName (name + (newInt |> string))
+                                    else
+                                        seenValues.Add(!value, name)
+                                        seenNames := Set.add name !seenNames
+                                        name
+
+                                uniqueName ("%" + name)
 
                 let block = !blockValue |> Value.asBasicBlock
 
