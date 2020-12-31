@@ -112,16 +112,16 @@ let simplifyCFG (irModule: Module) =
                                                                                               | _ -> false)
                                                                                                (!blockValue).Users) ->
                 blockValue |> Value.replaceWith destination
+            | _ -> ()
+
+            if index <> 0
+               && !blockValue
+                  |> BasicBlock.predecessors
+                  |> List.isEmpty then
+                blockValue |> Value.eraseFromParent
                 false
-            | _ ->
-                if index <> 0
-                   && !blockValue
-                      |> BasicBlock.predecessors
-                      |> List.isEmpty then
-                    blockValue |> Value.eraseFromParent
-                    false
-                else
-                    true
+            else
+                true
         | _ -> failwith "Internal Compiler Error"
 
 
