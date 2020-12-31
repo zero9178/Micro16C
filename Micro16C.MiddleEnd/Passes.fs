@@ -67,6 +67,7 @@ let deadCodeElimination (irModule: Module) =
 
     irModule
     |> Module.instructions
+    |> Seq.rev
     |> Seq.iter eliminate
 
     irModule
@@ -78,7 +79,7 @@ let simplifyCFG (irModule: Module) =
         | { Content = BasicBlockValue block } ->
             // this optimization may be invalid if the basic block is used in a Phi. For now I'll be conservative and
             // not remove such basic blocks. As a future TODO I could check for semantic changes
-            match block.Instructions with
+            match block |> BasicBlock.instructions with
             | [ Ref { Content = GotoInstruction { BasicBlock = destination } } ] when not
                                                                                           (List.exists (fun x ->
                                                                                               match !x with
@@ -91,33 +92,28 @@ let simplifyCFG (irModule: Module) =
             | _ -> true
         | _ -> failwith "Internal Compiler Error"
 
-    let blocks =
-        irModule
-        |> Module.basicBlocks
-        |> Seq.filter simplifyBlock
-        |> List.ofSeq
-
-    { BasicBlocks = blocks }
-
-let instructionCombine (irModule: Module) =
-    let combineInBlock blockValue =
-
-        let instrCombine instruction =
-            match instruction with
-            | Ref { Content = UnaryInstruction { Kind = Not
-                                                 Value = Ref { Content = UnaryInstruction { Kind = Not
-                                                                                            Value = passThrough }
-                                                               Users = [ _ ] } as first } } as second ->
-                second |> Value.replaceWith passThrough
-                first |> Value.eraseFromParent
-            | _ -> ()
-
-        let block = !blockValue |> Value.asBasicBlock
-        block.Instructions |> List.iter instrCombine
 
     irModule
     |> Module.basicBlocks
-    |> List.iter combineInBlock
+    |> Seq.filter simplifyBlock
+    |> List.ofSeq
+    |> Module.fromBasicBlocks
+
+let instructionCombine (irModule: Module) =
+    let combine instruction =
+
+        match instruction with
+        | Ref { Content = UnaryInstruction { Kind = Not
+                                             Value = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                        Value = passThrough }
+                                                           Users = [ _ ] } as first } } as second ->
+            second |> Value.replaceWith passThrough
+            first |> Value.eraseFromParent
+        | _ -> ()
+
+    irModule
+    |> Module.instructions
+    |> Seq.iter combine
 
     irModule
 
@@ -182,7 +178,8 @@ let removeRedundantLoadStores (irModule: Module) =
             |> safeTail
             |> List.iter Value.eraseFromParent
 
-        block.Instructions
+        block
+        |> BasicBlock.instructions
         |> List.filter (fun x ->
             match !x with
             | { Content = LoadInstruction { Source = Ref { Content = AllocationInstruction { Aliased = Some false } } } }
@@ -205,6 +202,6 @@ let removeRedundantLoadStores (irModule: Module) =
 
     irModule
     |> Module.basicBlocks
-    |> List.iter removeRedundantLoadStoresInBlock
+    |> Seq.iter removeRedundantLoadStoresInBlock
 
     irModule

@@ -1,6 +1,10 @@
 ﻿open Micro16C.Frontend
 open Micro16C.MiddleEnd
 
+let printModulePass title (irModule: IR.Module) =
+    printf "%s\n%s\n" title (irModule.ToString())
+    irModule
+
 [<EntryPoint>]
 let main argv =
     Lex.tokenize "register(R0) int r0 = 5;
@@ -27,7 +31,7 @@ let main argv =
     |> Result.map Passes.simplifyCFG
     |> Result.map Passes.analyzeAlloc
     |> Result.map Passes.removeRedundantLoadStores
-    |> Result.map (fun x -> x.ToString())
-    |> printf "%A"
+    |> Result.map (printModulePass "End of optimizations:")
+    |> ignore
 
     0
