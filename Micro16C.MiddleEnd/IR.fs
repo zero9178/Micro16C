@@ -2,6 +2,7 @@ module Micro16C.MiddleEnd.IR
 
 open System
 open System.Collections.Generic
+open System.Collections.Immutable
 
 let (|Ref|) (ref: 'T ref) = ref.Value
 
@@ -105,10 +106,14 @@ and PhiInstruction =
     { Incoming: (Value ref * Value ref) list }
 
 and BasicBlock =
-    private
-        { Instructions: Value ref list }
+    { Instructions: Value ref list
+      ImmediateDominator: Value ref option
+      DominanceFrontier: ImmutableHashSet<Value ref> option }
 
-        static member Default = { Instructions = [] }
+    static member Default =
+        { Instructions = []
+          ImmediateDominator = None
+          DominanceFrontier = None }
 
 let rec private filterOnce predicate list =
     match list with
@@ -361,6 +366,19 @@ module BasicBlock =
         |> List.choose id
 
     let instructions basicBlock = basicBlock.Instructions |> List.rev
+
+    let dominators basicBlock =
+        Seq.unfold (fun blockValue ->
+            let block = !blockValue |> Value.asBasicBlock
+
+            match block.ImmediateDominator with
+            | None -> None
+            | Some s when s = blockValue -> None
+            | Some s -> Some(s, s)) basicBlock
+
+    let dominates other basicBlock =
+        other |> dominators |> Seq.contains basicBlock
+
 
 [<NoComparison>]
 [<NoEquality>]

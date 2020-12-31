@@ -33,6 +33,8 @@ let main argv =
     |> Result.map Passes.analyzeAlloc
     |> Result.map Passes.removeRedundantLoadStores
     |> Result.map (printModulePass "End of optimizations:")
+    |> Result.map Passes.analyzeDominance
+    |> Result.map Passes.analyzeDominanceFrontiers
     |> ignore
 
     0

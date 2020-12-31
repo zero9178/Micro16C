@@ -1,5 +1,7 @@
 module Micro16C.MiddleEnd.Passes
 
+open System.Collections.Generic
+open System.Collections.Immutable
 open Micro16C.MiddleEnd.IR
 
 
@@ -285,5 +287,125 @@ let removeRedundantLoadStores (irModule: Module) =
     irModule
     |> Module.basicBlocks
     |> Seq.iter removeRedundantLoadStoresInBlock
+
+    irModule
+
+let analyzeDominance (irModule: Module) =
+    let map = Dictionary()
+
+    irModule
+    |> Module.basicBlocks
+    |> Seq.map (fun x -> (x, None))
+    |> Seq.iter map.Add
+
+    let order = Dictionary()
+
+    irModule
+    |> Module.basicBlocks
+    |> Seq.indexed
+    |> Seq.map (fun (y, x) -> (x, y))
+    |> Seq.iter order.Add
+
+    let processSeq seq =
+        map.[List.head seq] <- Some(List.head seq)
+
+        let seq = List.skip 1 seq
+
+        let intersect b1 b2 =
+            let mutable finger1 = b1
+            let mutable finger2 = b2
+
+            while finger1 <> finger2 do
+                while order.[finger1] > order.[finger2] do
+                    match map.[finger1] with
+                    | Some s -> finger1 <- s
+                    | None -> failwith "Shouldn't be possible"
+
+                while order.[finger2] > order.[finger1] do
+                    match map.[finger2] with
+                    | Some s -> finger2 <- s
+                    | None -> failwith "Shouldn't be possible"
+
+            finger1
+
+        while seq
+              |> List.fold (fun changed node ->
+                  let processedPredecessors =
+                      !node
+                      |> BasicBlock.predecessors
+                      |> List.choose (fun x -> map.[x] |> Option.map (fun value -> (x, value)))
+
+                  match processedPredecessors with
+                  | (newIDom, _) :: rest ->
+                      let newIDom =
+                          rest
+                          |> List.map fst
+                          |> List.fold intersect newIDom
+
+                      if map.[node] <> Some newIDom then
+                          map.[node] <- Some newIDom
+                          true
+                      else
+                          changed
+                  | [] -> failwith "Ought to not be possible") false do
+            ()
+
+
+    irModule
+    |> Module.basicBlocks
+    |> List.ofSeq
+    |> processSeq
+
+    irModule
+    |> Module.basicBlocks
+    |> Seq.iter (fun x ->
+        let block = Value.asBasicBlock !x
+
+        x
+        := { !x with
+                 Content =
+                     BasicBlockValue
+                         { block with
+                               ImmediateDominator = map.[x] } })
+
+    irModule
+
+let analyzeDominanceFrontiers (irModule: Module) =
+
+    let map = Dictionary()
+
+    irModule
+    |> Module.basicBlocks
+    |> Seq.map (fun x -> (x, ImmutableHashSet.Create()))
+    |> Seq.iter map.Add
+
+    irModule
+    |> Module.basicBlocks
+    |> Seq.map (fun x -> (x, !x |> BasicBlock.predecessors))
+    |> Seq.filter (fun (_, x) -> List.length x >= 2)
+    |> Seq.iter (fun (b, preds) ->
+        preds
+        |> List.iter (fun p ->
+            let mutable runner = p
+
+            while Some runner
+                  <> (Value.asBasicBlock !b).ImmediateDominator do
+                map.[runner] <- map.[runner].Add(b)
+
+                match (Value.asBasicBlock !runner).ImmediateDominator with
+                | None -> failwith "No immediate dominator calculated before analysing dominance frontiers"
+                | Some s -> runner <- s))
+
+    irModule
+    |> Module.basicBlocks
+    |> Seq.iter (fun x ->
+        let block = Value.asBasicBlock !x
+
+        x
+        := { !x with
+                 Content =
+                     BasicBlockValue
+                         { block with
+                               DominanceFrontier = Some map.[x] } })
 
     irModule
