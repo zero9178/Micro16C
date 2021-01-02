@@ -412,6 +412,16 @@ module BasicBlock =
     let dominates other basicBlock =
         other |> dominators |> Seq.contains basicBlock
 
+    let tryTerminator basicBlock =
+        match basicBlock.Instructions with
+        | head :: _ when Value.isTerminating !head -> Some head
+        | _ -> None
+
+    let terminator basicBlock =
+        match tryTerminator basicBlock with
+        | Some s -> s
+        | None -> failwith "Internal Compiler Error: Basic Block has no terminator"
+
 
 [<NoComparison>]
 [<NoEquality>]

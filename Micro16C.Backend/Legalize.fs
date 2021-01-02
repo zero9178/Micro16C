@@ -24,10 +24,27 @@ let legalizeConstants (irModule: Module): Module =
                 | { Content = Constant { Value = c } } when c <> 0s && c <> 1s && c <> -1s -> Some(i, c)
                 | _ -> None)
             |> List.iter (fun (i, c) ->
+
+                // If the constant is an operand of the phi we can't place it in front of the phi; phis need to be
+                // at the start of a basic block before any non phi instructions. Instead we'll check the predecessor
+                // where the constant comes from and put the instructions before it's terminating instruction
                 let builder =
-                    Builder.Default
-                    |> Builder.setInsertBlock ((!instr).ParentBlock)
-                    |> Builder.setInsertPoint (Before instr)
+                    match !instr with
+                    | { Content = PhiInstruction { Incoming = _ } } ->
+                        let pred =
+                            !instr |> Value.operands |> List.item (i + 1)
+
+                        Builder.Default
+                        |> Builder.setInsertBlock (Some pred)
+                        |> Builder.setInsertPoint
+                            ((!pred)
+                             |> Value.asBasicBlock
+                             |> BasicBlock.terminator
+                             |> Before)
+                    | _ ->
+                        Builder.Default
+                        |> Builder.setInsertBlock ((!instr).ParentBlock)
+                        |> Builder.setInsertPoint (Before instr)
 
                 let bitPairs =
                     Seq.unfold (fun c ->
