@@ -42,6 +42,7 @@ let main argv =
         |> Result.map Passes.simplifyCFG
         |> Result.map (printModulePass "End of optimizations:")
         |> Result.map Legalize.legalizeConstants
-        |> Result.map RegisterAllocator.allocateRegisters
+        |> Result.map GenAssembly.genAssembly
+        |> Result.map Assembly.printAssembly
 
     0

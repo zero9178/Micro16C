@@ -16,11 +16,7 @@ let allocateRegisters (irModule: Module): ImmutableDictionary<Value ref, Registe
             |> List.fold (fun map succ ->
                 !succ
                 |> Value.asBasicBlock
-                |> BasicBlock.instructions
-                |> List.takeWhile (fun x ->
-                    match !x with
-                    | { Content = PhiInstruction _ } -> true
-                    | _ -> false)
+                |> BasicBlock.phis
                 |> List.fold (fun (map: ImmutableDictionary<Value ref, int * int>) phi ->
                     match !phi with
                     | { Content = PhiInstruction { Incoming = list } } ->

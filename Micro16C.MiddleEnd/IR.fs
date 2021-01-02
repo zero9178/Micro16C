@@ -431,6 +431,14 @@ module BasicBlock =
         | Some s -> s
         | None -> failwith "Internal Compiler Error: Basic Block has no terminator"
 
+    let phis basicBlock =
+        basicBlock
+        |> instructions
+        |> List.takeWhile (fun x ->
+            match !x with
+            | { Content = PhiInstruction _ } -> true
+            | _ -> false)
+
 
 [<NoComparison>]
 [<NoEquality>]

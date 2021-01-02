@@ -1,4 +1,4 @@
-﻿module Micro16C.Backend.Codegen
+﻿module Micro16C.Backend.Assembly
 
 open Micro16C.MiddleEnd.IR
 
@@ -45,6 +45,28 @@ type Bus =
     | R10 = 0b1110
     | AC = 0b1111
 
+module Bus =
+
+    let toString bus =
+        match bus with
+        | Bus.Zero -> "0"
+        | Bus.One -> "1"
+        | Bus.NegOne -> "(-1)"
+        | Bus.PC -> "PC"
+        | Bus.R0 -> "R0"
+        | Bus.R1 -> "R1"
+        | Bus.R2 -> "R2"
+        | Bus.R3 -> "R3"
+        | Bus.R4 -> "R4"
+        | Bus.R5 -> "R5"
+        | Bus.R6 -> "R6"
+        | Bus.R7 -> "R7"
+        | Bus.R8 -> "R8"
+        | Bus.R9 -> "R9"
+        | Bus.R10 -> "R10"
+        | Bus.AC -> "AC"
+        | _ -> failwith "Internal Compiler Error: Invalid bus value"
+
 
 module Register =
 
@@ -70,10 +92,11 @@ type Operation =
       ALU: ALU option
       Shifter: Shifter option
       MemoryAccess: MemoryAccess option
+      MARWrite: bool option
       SBus: Bus option
       BBus: Bus option
       ABus: Bus option
-      Address: uint8 option }
+      Address: string option }
     // Every field here is an option. None signifies that a field is not set due to not being semantically relevant
     // That makes it easier to merge multiple ops into one
 
@@ -83,7 +106,82 @@ type Operation =
           ALU = None
           Shifter = None
           MemoryAccess = None
+          MARWrite = None
           SBus = None
           BBus = None
           ABus = None
           Address = None }
+
+    override this.ToString() =
+        let op =
+            match (this.ALU, this.AMux, this.ABus, this.BBus) with
+            | (None, _, _, _) -> ""
+            | (Some ALU.ABus, Some AMux.MBR, _, _) -> "MBR"
+            | (Some ALU.ABus, Some AMux.ABus, Some a, _) -> Bus.toString a
+            | (Some ALU.Add, Some AMux.MBR, _, Some b) -> "MBR + " + Bus.toString b
+            | (Some ALU.Add, Some AMux.ABus, Some a, Some b) -> Bus.toString a + " + " + Bus.toString b
+            | (Some ALU.And, Some AMux.MBR, _, Some b) -> "MBR & " + Bus.toString b
+            | (Some ALU.And, Some AMux.ABus, Some a, Some b) -> Bus.toString a + " & " + Bus.toString b
+            | (Some ALU.Neg, Some AMux.MBR, _, _) -> "~MBR"
+            | (Some ALU.Neg, Some AMux.ABus, Some a, _) -> "~" + Bus.toString a
+            | _ -> failwith "Internal Compiler Error: Illegally formed assembly instruction"
+
+        let op =
+            match this.Shifter with
+            | None
+            | Some Shifter.Noop -> op
+            | Some Shifter.Left -> sprintf "lsh(%s)" op
+            | Some Shifter.Right -> sprintf "rsh(%s)" op
+            | _ -> failwith "Internal Compiler Error: Illegally formed assembly instruction"
+
+        let op =
+            match this.SBus with
+            | Some s -> Bus.toString s + " <- " + op
+            | None -> op
+
+        let op =
+            match (op, this.SBus, this.Condition, this.Address) with
+            | (op, _, None, _)
+            | (op, _, Some Cond.NoJump, _) -> op
+            | ("", None, Some Cond.Neg, Some s) -> sprintf "if N goto .%s" s
+            | (op, None, Some Cond.Neg, Some s) -> sprintf "(%s); if N goto .%s" op s
+            | ("", None, Some Cond.Zero, Some s) -> sprintf "if Z goto .%s" s
+            | (op, None, Some Cond.Zero, Some s) -> sprintf "(%s); if Z goto .%s" op s
+            | ("", None, Some Cond.None, Some s) -> sprintf "goto .%s" s
+            | (op, None, Some Cond.None, Some s) -> sprintf "(%s); goto .%s" op s
+            | ("", Some _, Some Cond.Neg, Some s) -> sprintf "if N goto .%s" s
+            | (op, Some _, Some Cond.Neg, Some s) -> sprintf "%s; if N goto .%s" op s
+            | ("", Some _, Some Cond.Zero, Some s) -> sprintf "if Z goto .%s" s
+            | (op, Some _, Some Cond.Zero, Some s) -> sprintf "%s; if Z goto .%s" op s
+            | ("", Some _, Some Cond.None, Some s) -> sprintf "goto .%s" s
+            | (op, Some _, Some Cond.None, Some s) -> sprintf "%s; goto .%s" op s
+            | _ -> failwith "Internal Compiler Error: Illegally formed assembly instruction"
+
+        let op =
+            match (op, this.MARWrite, this.BBus) with
+            | (op, Some false, _)
+            | (op, None, _) -> op
+            | ("", Some true, Some b) -> sprintf "MAR <- %s" (Bus.toString b)
+            | (op, Some true, Some b) -> sprintf "%s; MAR <- %s" op (Bus.toString b)
+            | _ -> failwith "Internal Compiler Error: Illegally formed assembly instruction"
+
+        let op =
+            match (op, this.MemoryAccess) with
+            | (op, None) -> op
+            | ("", Some Read) -> "rd"
+            | ("", Some Write) -> "wr"
+            | (op, Some Read) -> sprintf "%s; rd" op
+            | (op, Some Write) -> sprintf "%s; wr" op
+
+        op
+
+type AssemblyLine =
+    | Operation of Operation
+    | Label of string
+
+let printAssembly assemblyLine =
+    assemblyLine
+    |> List.iter (fun x ->
+        match x with
+        | Label s -> printfn ":%s" s
+        | Operation s -> printfn "%s" (s.ToString()))
