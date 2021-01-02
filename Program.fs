@@ -31,10 +31,14 @@ let main argv =
     |> Result.map Passes.instructionCombine
     |> Result.map Passes.simplifyCFG
     |> Result.map Passes.analyzeAlloc
-    |> Result.map Passes.removeRedundantLoadStores
-    |> Result.map (printModulePass "End of optimizations:")
     |> Result.map Passes.analyzeDominance
     |> Result.map Passes.analyzeDominanceFrontiers
+    |> Result.map Passes.mem2reg
+    |> Result.map Passes.deadCodeElimination
+    |> Result.map Passes.instructionSimplify
+    |> Result.map Passes.instructionCombine
+    |> Result.map Passes.simplifyCFG
+    |> Result.map (printModulePass "End of optimizations:")
     |> ignore
 
     0

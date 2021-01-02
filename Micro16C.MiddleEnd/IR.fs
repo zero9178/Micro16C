@@ -2,7 +2,6 @@ module Micro16C.MiddleEnd.IR
 
 open System
 open System.Collections.Generic
-open System.Collections.Immutable
 
 let (|Ref|) (ref: 'T ref) = ref.Value
 
@@ -45,6 +44,8 @@ type Value =
       Name: string
       Content: ValueContent
       ParentBlock: Value ref option }
+
+    override this.ToString() = this.Name
 
     static member Default =
         { Users = []
@@ -103,12 +104,13 @@ and CondBrInstruction =
       FalseBranch: Value ref }
 
 and PhiInstruction =
-    { Incoming: (Value ref * Value ref) list }
+    { Incoming: (Value ref * Value ref) list
+      Register: Register option }
 
 and BasicBlock =
     { Instructions: Value ref list
       ImmediateDominator: Value ref option
-      DominanceFrontier: ImmutableHashSet<Value ref> option }
+      DominanceFrontier: Value ref list option }
 
     static member Default =
         { Instructions = []
@@ -290,22 +292,26 @@ module Value =
         match (!value) with
         | { Content = BasicBlockValue block } ->
             block.Instructions
-            |> Seq.ofList
-            |> Seq.map (fun x ->
+            |> List.map (fun x ->
                 (x,
                  !x
                  |> operands
                  |> List.indexed
                  |> List.filter (fun (_, o) -> (!o).ParentBlock <> (!x).ParentBlock)
                  |> List.map fst))
-            |> Seq.map (fun (x, y) ->
-                x |> replaceWith Value.UndefValue
-                (x, y))
-            |> Seq.filter (fun (_, list) -> not (List.isEmpty list))
-            |> Seq.iter (fun (x, list) ->
+            |> List.iter (fun (x, list) ->
                 list
                 |> List.iter (fun i -> setOperand i Value.UndefValue x))
+
+            block.Instructions
+            |> List.iter (replaceWith Value.UndefValue)
         | _ -> ()
+
+        (!value)
+        |> operands
+        |> List.indexed
+        |> List.map fst
+        |> List.iter (fun i -> setOperand i Value.UndefValue value)
 
         match (!value).ParentBlock with
         | None -> ()
@@ -318,16 +324,12 @@ module Value =
                                    Instructions = block.Instructions |> List.filter ((<>) value) } }
         | _ -> failwith "Internal Compiler Error"
 
+        value := !Value.UndefValue
+
     and replaceWith replacement value =
 
         (!value).Users
         |> List.iter (replaceOperand value replacement)
-
-        (!value)
-        |> operands
-        |> List.indexed
-        |> List.map fst
-        |> List.iter (fun i -> setOperand i Value.UndefValue value)
 
         assert (useCount !value = 0)
 
@@ -342,6 +344,8 @@ module Value =
         match value with
         | { Content = BasicBlockValue value } -> value
         | _ -> failwith "Internal Compiler Error: Value is not a BasicBlock"
+
+    let name value = value.Name
 
 module BasicBlock =
 
@@ -366,6 +370,10 @@ module BasicBlock =
         |> List.choose id
 
     let instructions basicBlock = basicBlock.Instructions |> List.rev
+
+    let immediateDominator basicBlock = basicBlock.ImmediateDominator
+
+    let dominanceFrontier basicBlock = basicBlock.DominanceFrontier
 
     let dominators basicBlock =
         Seq.unfold (fun blockValue ->
@@ -523,14 +531,12 @@ module Module =
 
     let instructions irModule =
         irModule.BasicBlocks
-        |> Seq.ofList
-        |> Seq.rev
-        |> Seq.map ((!) >> Value.asBasicBlock)
-        |> Seq.map (fun { Instructions = instr } -> instr |> Seq.rev)
-        |> Seq.concat
+        |> List.rev
+        |> List.map ((!) >> Value.asBasicBlock)
+        |> List.map (fun { Instructions = instr } -> instr |> List.rev)
+        |> List.concat
 
-    let basicBlocks irModule =
-        irModule.BasicBlocks |> Seq.ofList |> Seq.rev
+    let basicBlocks irModule = irModule.BasicBlocks |> List.rev
 
 type Builder =
     { InsertBlock: Value ref option
@@ -752,7 +758,7 @@ module Builder =
             ref
                 { Value.Default with
                       Name = name
-                      Content = PhiInstruction { Incoming = incoming } }
+                      Content = PhiInstruction { Incoming = incoming; Register = None } }
 
         incoming
         |> List.iter (fun (x, y) ->

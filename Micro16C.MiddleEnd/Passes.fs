@@ -65,22 +65,12 @@ let instructionSimplify (irModule: Module) =
                 |> Value.replaceWith
                     (Builder.createGoto falseBranch Builder.Default
                      |> fst)
-        | { Content = PhiInstruction { Incoming = list } } when list
-                                                                |> List.map snd
-                                                                |> List.exists ((=) Value.UndefValue) ->
-            match list
-                  |> List.filter (fun (_, x) -> x <> Value.UndefValue) with
-            | [ (singleValue, _) ] -> value |> Value.replaceWith singleValue
-            | list ->
-                value
-                := { !value with
-                         Content = PhiInstruction { Incoming = list } }
 
         | _ -> ()
 
     irModule
     |> Module.instructions
-    |> Seq.iter simplify
+    |> List.iter simplify
 
     irModule
 
@@ -93,8 +83,8 @@ let deadCodeElimination (irModule: Module) =
 
     irModule
     |> Module.instructions
-    |> Seq.rev
-    |> Seq.iter eliminate
+    |> List.rev
+    |> List.iter eliminate
 
     irModule
 
@@ -129,10 +119,9 @@ let simplifyCFG (irModule: Module) =
 
     irModule
     |> Module.basicBlocks
-    |> Seq.indexed
-    |> Seq.filter simplifyBlock
-    |> Seq.map snd
-    |> List.ofSeq
+    |> List.indexed
+    |> List.filter simplifyBlock
+    |> List.map snd
     |> Module.fromBasicBlocks
 
 let instructionCombine (irModule: Module) =
@@ -197,7 +186,7 @@ let instructionCombine (irModule: Module) =
 
     irModule
     |> Module.instructions
-    |> Seq.iter combine
+    |> List.iter combine
 
     irModule
 
@@ -224,7 +213,7 @@ let analyzeAlloc (irModule: Module) =
 
     irModule
     |> Module.instructions
-    |> Seq.iter analyzeAlloc
+    |> List.iter analyzeAlloc
 
     irModule
 
@@ -286,7 +275,7 @@ let removeRedundantLoadStores (irModule: Module) =
 
     irModule
     |> Module.basicBlocks
-    |> Seq.iter removeRedundantLoadStoresInBlock
+    |> List.iter removeRedundantLoadStoresInBlock
 
     irModule
 
@@ -295,16 +284,16 @@ let analyzeDominance (irModule: Module) =
 
     irModule
     |> Module.basicBlocks
-    |> Seq.map (fun x -> (x, None))
-    |> Seq.iter map.Add
+    |> List.map (fun x -> (x, None))
+    |> List.iter map.Add
 
     let order = Dictionary()
 
     irModule
     |> Module.basicBlocks
-    |> Seq.indexed
-    |> Seq.map (fun (y, x) -> (x, y))
-    |> Seq.iter order.Add
+    |> List.indexed
+    |> List.map (fun (y, x) -> (x, y))
+    |> List.iter order.Add
 
     let processSeq seq =
         map.[List.head seq] <- Some(List.head seq)
@@ -351,14 +340,11 @@ let analyzeDominance (irModule: Module) =
             ()
 
 
-    irModule
-    |> Module.basicBlocks
-    |> List.ofSeq
-    |> processSeq
+    irModule |> Module.basicBlocks |> processSeq
 
     irModule
     |> Module.basicBlocks
-    |> Seq.iter (fun x ->
+    |> List.iter (fun x ->
         let block = Value.asBasicBlock !x
 
         x
@@ -376,29 +362,39 @@ let analyzeDominanceFrontiers (irModule: Module) =
 
     irModule
     |> Module.basicBlocks
-    |> Seq.map (fun x -> (x, ImmutableHashSet.Create()))
-    |> Seq.iter map.Add
+    |> List.map (fun x -> (x, ImmutableHashSet.Create()))
+    |> List.iter map.Add
 
     irModule
     |> Module.basicBlocks
-    |> Seq.map (fun x -> (x, !x |> BasicBlock.predecessors))
-    |> Seq.filter (fun (_, x) -> List.length x >= 2)
-    |> Seq.iter (fun (b, preds) ->
+    |> List.map (fun x -> (x, !x |> BasicBlock.predecessors))
+    |> List.filter (fun (_, x) -> List.length x >= 2)
+    |> List.iter (fun (b, preds) ->
+        let iDom =
+            (!b
+             |> Value.asBasicBlock
+             |> BasicBlock.immediateDominator)
+
         preds
         |> List.iter (fun p ->
-            let mutable runner = p
 
-            while Some runner
-                  <> (Value.asBasicBlock !b).ImmediateDominator do
-                map.[runner] <- map.[runner].Add(b)
+            Seq.unfold (fun runner ->
+                if Some runner = iDom then
+                    None
+                else
+                    map.[runner] <- map.[runner].Add(b)
 
-                match (Value.asBasicBlock !runner).ImmediateDominator with
-                | None -> failwith "No immediate dominator calculated before analysing dominance frontiers"
-                | Some s -> runner <- s))
+                    match !runner
+                          |> Value.asBasicBlock
+                          |> BasicBlock.immediateDominator with
+                    | None -> failwith "No immediate dominator calculated before analysing dominance frontiers"
+                    | Some s -> Some((), s)) p
+            |> Seq.tryLast
+            |> ignore))
 
     irModule
     |> Module.basicBlocks
-    |> Seq.iter (fun x ->
+    |> List.iter (fun x ->
         let block = Value.asBasicBlock !x
 
         x
@@ -406,6 +402,125 @@ let analyzeDominanceFrontiers (irModule: Module) =
                  Content =
                      BasicBlockValue
                          { block with
-                               DominanceFrontier = Some map.[x] } })
+                               DominanceFrontier = Some(map.[x] |> List.ofSeq) } })
+
+    irModule
+
+let mem2reg (irModule: Module) =
+
+    irModule
+    |> Module.instructions
+    |> List.filter (fun x ->
+        match !x with
+        | { Content = AllocationInstruction { Aliased = Some false } } -> true
+        | _ -> false)
+    |> List.map (fun alloca -> (alloca, ImmutableHashSet.CreateRange(HashIdentity.Reference, (!alloca).Users)))
+    |> List.iter (fun (alloca, loadStores) ->
+        let s =
+            loadStores
+            |> Seq.filter (fun x ->
+                match !x with
+                | { Content = StoreInstruction _ } -> true
+                | _ -> false)
+            |> Seq.map (fun x -> (!x).ParentBlock)
+            |> Seq.choose id
+            |> Seq.distinct
+            |> ImmutableHashSet.CreateRange
+
+        let dominanceFrontiers (nodes: ImmutableHashSet<Value ref>): ImmutableHashSet<Value ref> =
+            nodes
+            |> Seq.map
+                ((!)
+                 >> Value.asBasicBlock
+                 >> BasicBlock.dominanceFrontier)
+            |> Seq.choose id
+            |> Seq.map ImmutableHashSet.CreateRange
+            |> Seq.reduce (fun x -> x.Union)
+
+        let phis =
+            Seq.unfold (fun (x: ImmutableHashSet<Value ref>) ->
+                let next = (s.Union x) |> dominanceFrontiers
+                if next.SetEquals(x) then None else Some(next, next)) s
+            |> Seq.tryLast
+            |> Option.map
+                (Seq.map (fun block ->
+                    let builder =
+                        Builder.Default
+                        |> Builder.setInsertBlock (Some block)
+                        |> Builder.setInsertPoint Start
+
+                    let phi =
+                        builder
+                        |> Builder.createPhi
+                            (!block
+                             |> BasicBlock.predecessors
+                             |> List.map (fun x -> (Value.UndefValue, x)))
+                        |> fst
+
+                    match !alloca with
+                    | { Content = AllocationInstruction { Register = Some r } } ->
+                        match !phi with
+                        | { Content = PhiInstruction phiInstruction } ->
+                            phi
+                            := { !phi with
+                                     Content =
+                                         PhiInstruction
+                                             { phiInstruction with
+                                                   Register = Some r } }
+                        | _ -> ()
+                    | _ -> ()
+
+                    phi))
+
+        let phis =
+            match phis with
+            | None -> ImmutableHashSet.Create()
+            | Some s -> ImmutableHashSet.CreateRange(HashIdentity.Reference, s)
+
+        let phiPredBlocks =
+            phis
+            |> Seq.map (fun x ->
+                (!x).ParentBlock
+                |> Option.map ((!) >> BasicBlock.predecessors)
+                |> Option.map (List.map (fun p -> (p, x))))
+            |> Seq.choose id
+            |> Seq.concat
+            |> Seq.groupBy fst
+            |> Seq.map (fun (x, y) -> KeyValuePair(x, y |> List.ofSeq |> List.map snd))
+            |> (fun x -> ImmutableDictionary.CreateRange(HashIdentity.Reference, x))
+
+        irModule
+        |> Module.instructions
+        |> List.fold (fun replacement x ->
+            match !x with
+            | { Content = StoreInstruction { Value = passThrough } } when loadStores.Contains x ->
+                x |> Value.eraseFromParent
+                passThrough
+            | { Content = LoadInstruction _ } when loadStores.Contains x ->
+                x |> Value.replaceWith replacement
+                replacement
+            | { Content = PhiInstruction _ } when phis.Contains x -> x
+            | _ when Value.isTerminating !x ->
+                match (!x).ParentBlock with
+                | None -> replacement
+                | Some parentBlock ->
+                    match phiPredBlocks.TryGetValue(parentBlock) with
+                    | (false, _) -> replacement
+                    | (true, phis) ->
+                        phis
+                        |> List.iter (fun phiValue ->
+                            !phiValue
+                            |> Value.operands
+                            |> List.indexed
+                            |> List.pairwise
+                            |> List.filter (fun (_, (_, bb)) -> bb = parentBlock)
+                            |> List.iter (fun ((i, _), _) -> phiValue |> Value.setOperand i replacement))
+
+                        replacement
+            | _ -> replacement) Value.UndefValue
+        |> ignore
+
+        alloca |> Value.eraseFromParent
+        ())
 
     irModule
