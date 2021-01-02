@@ -65,7 +65,12 @@ let instructionSimplify (irModule: Module) =
                 |> Value.replaceWith
                     (Builder.createGoto falseBranch Builder.Default
                      |> fst)
+        | { Content = PhiInstruction { Register = None; Incoming = list } } ->
+            let distinctValues = list |> List.map fst |> List.distinct
 
+            if distinctValues |> List.length = 1 then
+                value
+                |> Value.replaceWith (List.head distinctValues)
         | _ -> ()
 
     irModule
@@ -128,6 +133,14 @@ let instructionCombine (irModule: Module) =
     let combine instruction =
 
         match instruction with
+        | Ref { Content = UnaryInstruction { Kind = Shr
+                                             Value = Ref { Content = UnaryInstruction { Kind = Shl
+                                                                                        Value = passThrough }
+                                                           Users = [ _ ] } as first } }
+        | Ref { Content = UnaryInstruction { Kind = Shl
+                                             Value = Ref { Content = UnaryInstruction { Kind = Shr
+                                                                                        Value = passThrough }
+                                                           Users = [ _ ] } as first } }
         | Ref { Content = UnaryInstruction { Kind = Not
                                              Value = Ref { Content = UnaryInstruction { Kind = Not
                                                                                         Value = passThrough }
@@ -336,9 +349,11 @@ let analyzeDominance (irModule: Module) =
                           true
                       else
                           changed
-                  | [] -> failwith "Ought to not be possible") false do
+                  | [] ->
+                      failwith
+                          "Internal Compiler Error: Block with no predecessors found. Run simplifyCFG pass to eliminate")
+                     false do
             ()
-
 
     irModule |> Module.basicBlocks |> processSeq
 
@@ -367,8 +382,11 @@ let analyzeDominanceFrontiers (irModule: Module) =
 
     irModule
     |> Module.basicBlocks
-    |> List.map (fun x -> (x, !x |> BasicBlock.predecessors))
-    |> List.filter (fun (_, x) -> List.length x >= 2)
+    |> List.choose (fun x ->
+        match !x |> BasicBlock.predecessors with
+        | []
+        | [ _ ] -> None
+        | preds -> Some(x, preds))
     |> List.iter (fun (b, preds) ->
         let iDom =
             (!b
@@ -387,7 +405,9 @@ let analyzeDominanceFrontiers (irModule: Module) =
                     match !runner
                           |> Value.asBasicBlock
                           |> BasicBlock.immediateDominator with
-                    | None -> failwith "No immediate dominator calculated before analysing dominance frontiers"
+                    | None ->
+                        failwith
+                            "Internal Compiler Error: No immediate dominator calculated before analysing dominance frontiers"
                     | Some s -> Some((), s)) p
             |> Seq.tryLast
             |> ignore))
@@ -410,20 +430,18 @@ let mem2reg (irModule: Module) =
 
     irModule
     |> Module.instructions
-    |> List.filter (fun x ->
+    |> List.choose (fun x ->
         match !x with
-        | { Content = AllocationInstruction { Aliased = Some false } } -> true
-        | _ -> false)
-    |> List.map (fun alloca -> (alloca, ImmutableHashSet.CreateRange(HashIdentity.Reference, (!alloca).Users)))
+        | { Content = AllocationInstruction { Aliased = Some false } } ->
+            Some(x, ImmutableHashSet.CreateRange(HashIdentity.Reference, (!x).Users))
+        | _ -> None)
     |> List.iter (fun (alloca, loadStores) ->
         let s =
             loadStores
-            |> Seq.filter (fun x ->
+            |> Seq.choose (fun x ->
                 match !x with
-                | { Content = StoreInstruction _ } -> true
-                | _ -> false)
-            |> Seq.map (fun x -> (!x).ParentBlock)
-            |> Seq.choose id
+                | { Content = StoreInstruction _ } -> (!x).ParentBlock
+                | _ -> None)
             |> Seq.distinct
             |> ImmutableHashSet.CreateRange
 
@@ -479,11 +497,10 @@ let mem2reg (irModule: Module) =
 
         let phiPredBlocks =
             phis
-            |> Seq.map (fun x ->
+            |> Seq.choose (fun x ->
                 (!x).ParentBlock
                 |> Option.map ((!) >> BasicBlock.predecessors)
                 |> Option.map (List.map (fun p -> (p, x))))
-            |> Seq.choose id
             |> Seq.concat
             |> Seq.groupBy fst
             |> Seq.map (fun (x, y) -> KeyValuePair(x, y |> List.ofSeq |> List.map snd))
@@ -520,7 +537,6 @@ let mem2reg (irModule: Module) =
             | _ -> replacement) Value.UndefValue
         |> ignore
 
-        alloca |> Value.eraseFromParent
-        ())
+        alloca |> Value.eraseFromParent)
 
     irModule
