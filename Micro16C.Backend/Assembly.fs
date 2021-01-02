@@ -1,6 +1,6 @@
 ﻿module Micro16C.Backend.Codegen
 
-open Micro16C.Frontend.Sema
+open Micro16C.MiddleEnd.IR
 
 type AMux =
     | MBR = 0b0
@@ -46,34 +46,23 @@ type Bus =
     | AC = 0b1111
 
 
-//    static member ofIndex integer =
-//        match integer with
-//        | 0 -> R0
-//        | 1 -> R1
-//        | 2 -> R2
-//        | 3 -> R3
-//        | 4 -> R4
-//        | 5 -> R5
-//        | 6 -> R6
-//        | 7 -> R7
-//        | 8 -> R8
-//        | 9 -> R9
-//        | 10 -> R10
-//        | _ -> failwith "Internal Compiler Error: Register index out of range"
-//
-//    static member toBus(register: Register) =
-//        match register with
-//        | Register.R0 -> Bus.R0
-//        | Register.R1 -> Bus.R1
-//        | Register.R2 -> Bus.R2
-//        | Register.R3 -> Bus.R3
-//        | Register.R4 -> Bus.R4
-//        | Register.R5 -> Bus.R5
-//        | Register.R6 -> Bus.R6
-//        | Register.R7 -> Bus.R7
-//        | Register.R8 -> Bus.R8
-//        | Register.R9 -> Bus.R9
-//        | Register.R10 -> Bus.R10
+module Register =
+
+    let toBus (register: Register) =
+        match register with
+        | Register.PC -> Bus.PC
+        | Register.AC -> Bus.AC
+        | Register.R0 -> Bus.R0
+        | Register.R1 -> Bus.R1
+        | Register.R2 -> Bus.R2
+        | Register.R3 -> Bus.R3
+        | Register.R4 -> Bus.R4
+        | Register.R5 -> Bus.R5
+        | Register.R6 -> Bus.R6
+        | Register.R7 -> Bus.R7
+        | Register.R8 -> Bus.R8
+        | Register.R9 -> Bus.R9
+        | Register.R10 -> Bus.R10
 
 type Operation =
     { AMux: AMux option

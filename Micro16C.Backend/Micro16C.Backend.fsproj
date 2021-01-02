@@ -8,6 +8,7 @@
     <ItemGroup>
         <Compile Include="Assembly.fs"/>
         <Compile Include="Legalize.fs"/>
+        <Compile Include="RegisterAllocator.fs"/>
     </ItemGroup>
 
     <ItemGroup>

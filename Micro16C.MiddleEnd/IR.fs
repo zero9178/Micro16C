@@ -279,6 +279,15 @@ module Value =
         | BasicBlockValue _ -> false
         | _ -> true
 
+    let producesValue value =
+        match value.Content with
+        | AllocationInstruction _
+        | BinaryInstruction _
+        | UnaryInstruction _
+        | LoadInstruction _
+        | PhiInstruction _ -> true
+        | _ -> false
+
     let isTerminating value =
         match value.Content with
         | GotoInstruction _

@@ -15,8 +15,4 @@
         <ProjectReference Include="Micro16C.MiddleEnd\Micro16C.MiddleEnd.fsproj"/>
     </ItemGroup>
 
-    <ItemGroup>
-        <PackageReference Include="JetBrains.Profiler.Api" Version="1.1.7"/>
-    </ItemGroup>
-
 </Project>
