@@ -285,6 +285,11 @@ module Value =
         | CondBrInstruction _ -> true
         | _ -> false
 
+    let asBasicBlock value =
+        match value with
+        | { Content = BasicBlockValue value } -> value
+        | _ -> failwith "Internal Compiler Error: Value is not a BasicBlock"
+
     let rec eraseFromParent value =
 
         // If we are removing a basic block we need to make sure every instruction does not have an operand that doesn't
@@ -335,15 +340,35 @@ module Value =
 
         match (!replacement).ParentBlock with
         | None when isInstruction !replacement ->
+            match (!value).ParentBlock with
+            | None -> ()
+            | Some parentBlockValue ->
+                replacement
+                := { !replacement with
+                         ParentBlock = Some parentBlockValue }
+
+                let index =
+                    (!parentBlockValue |> asBasicBlock).Instructions
+                    |> List.findIndex ((=) value)
+
+                eraseFromParent value
+
+                let parentBlock = !parentBlockValue |> asBasicBlock
+
+                let (first, second) =
+                    parentBlock.Instructions |> List.splitAt index
+
+                parentBlockValue
+                := { !parentBlockValue with
+                         Content =
+                             BasicBlockValue
+                                 { parentBlock with
+                                       Instructions = first @ [ replacement ] @ second } }
+
             value
             := { !replacement with
                      ParentBlock = (!value).ParentBlock }
         | _ -> eraseFromParent value
-
-    let asBasicBlock value =
-        match value with
-        | { Content = BasicBlockValue value } -> value
-        | _ -> failwith "Internal Compiler Error: Value is not a BasicBlock"
 
     let name value = value.Name
 
@@ -647,47 +672,35 @@ module Builder =
     let createAlloca = createNamedAlloca ""
 
     let createNamedBinary name left kind right builder =
-        match (!left, !right) with
-        | ({ Content = Constant { Value = lhs } }, { Content = Constant { Value = rhs } }) ->
-            match kind with
-            | Add -> (createConstant (lhs + rhs), builder)
-            | And -> (createConstant (lhs &&& rhs), builder)
-        | _ ->
-            let value =
-                ref
-                    { Value.Default with
-                          Name = name
-                          Content =
-                              BinaryInstruction
-                                  { Left = left
-                                    Kind = kind
-                                    Right = right } }
+        let value =
+            ref
+                { Value.Default with
+                      Name = name
+                      Content =
+                          BinaryInstruction
+                              { Left = left
+                                Kind = kind
+                                Right = right } }
 
-            left |> Value.addUser value
-            right |> Value.addUser value
+        left |> Value.addUser value
+        right |> Value.addUser value
 
-            builder |> addValue value
+        builder |> addValue value
+
 
     let createBinary = createNamedBinary ""
 
     let createNamedUnary name kind value builder =
-        match !value with
-        | { Content = Constant { Value = value } } ->
-            match kind with
-            | Not -> (createConstant ~~~value, builder)
-            | Shl -> (createConstant (value <<< 1), builder)
-            // Micro16 does logical, not arithmetic right shifts
-            | Shr -> (createConstant ((value |> uint16) >>> 1 |> int16), builder)
-        | _ ->
-            let unary =
-                ref
-                    { Value.Default with
-                          Name = name
-                          Content = UnaryInstruction { Kind = kind; Value = value } }
+        let unary =
+            ref
+                { Value.Default with
+                      Name = name
+                      Content = UnaryInstruction { Kind = kind; Value = value } }
 
-            value |> Value.addUser unary
+        value |> Value.addUser unary
 
-            builder |> addValue unary
+        builder |> addValue unary
+
 
     let createUnary = createNamedUnary ""
 
@@ -732,25 +745,22 @@ module Builder =
         (value, builder |> addValue value |> snd)
 
     let createCondBr condition trueBranch falseBranch builder =
-        match !condition with
-        | { Content = Constant { Value = condition } } when condition <> 0s -> createGoto trueBranch builder
-        | { Content = Constant { Value = condition } } when condition = 0s -> createGoto falseBranch builder
-        | _ ->
+        let value =
+            ref
+                { Value.Default with
+                      Content =
+                          CondBrInstruction
+                              { Condition = condition
+                                TrueBranch = trueBranch
+                                FalseBranch = falseBranch } }
 
-            let value =
-                ref
-                    { Value.Default with
-                          Content =
-                              CondBrInstruction
-                                  { Condition = condition
-                                    TrueBranch = trueBranch
-                                    FalseBranch = falseBranch } }
+        condition |> Value.addUser value
+        trueBranch |> Value.addUser value
+        falseBranch |> Value.addUser value
 
-            condition |> Value.addUser value
-            trueBranch |> Value.addUser value
-            falseBranch |> Value.addUser value
+        (value, builder |> addValue value |> snd)
 
-            (value, builder |> addValue value |> snd)
+
 
     let createNamedPhi name incoming builder =
 

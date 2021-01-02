@@ -7,6 +7,7 @@
 
     <ItemGroup>
         <Compile Include="Assembly.fs"/>
+        <Compile Include="Legalize.fs"/>
     </ItemGroup>
 
     <ItemGroup>

@@ -1,4 +1,5 @@
-﻿open Micro16C.Frontend
+﻿open Micro16C.Backend
+open Micro16C.Frontend
 open Micro16C.MiddleEnd
 
 let printModulePass title (irModule: IR.Module) =
@@ -39,6 +40,8 @@ let main argv =
     |> Result.map Passes.instructionCombine
     |> Result.map Passes.simplifyCFG
     |> Result.map (printModulePass "End of optimizations:")
+    |> Result.map Legalize.legalizeConstants
+    |> Result.map (printModulePass "End of Legalize:")
     |> ignore
 
     0
