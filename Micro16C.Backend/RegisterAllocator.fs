@@ -37,19 +37,19 @@ let allocateRegisters (irModule: Module): ImmutableDictionary<Value ref, Registe
         |> Module.instructions
         |> List.indexed
         |> List.fold (fun (map: ImmutableDictionary<Value ref, int * int>) (i, instr) ->
+            let used =
+                if Value.producesValue !instr then [ instr ] else []
+                @ match !instr with
+                  | { Content = PhiInstruction _ } -> []
+                  | _ ->
+                      !instr
+                      |> Value.operands
+                      |> List.filter ((!) >> Value.producesValue)
+
             let map =
                 match !instr with
                 | { Content = AllocationInstruction _ } -> map
                 | _ ->
-                    let used =
-                        if Value.producesValue !instr then [ instr ] else []
-                        @ match !instr with
-                          | { Content = PhiInstruction _ } -> []
-                          | _ ->
-                              !instr
-                              |> Value.operands
-                              |> List.filter ((!) >> Value.producesValue)
-
                     used
                     |> List.fold (fun map instr ->
                         match map.TryGetValue instr with
