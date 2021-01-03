@@ -9,8 +9,8 @@ let printModulePass title (irModule: IR.Module) =
 [<EntryPoint>]
 let main argv =
     let result =
-        Lex.tokenize "register(R0) int r0 = 5;
-        int register(R1) r1 = 20;
+        Lex.tokenize "int r0 = 5;
+        int r1 = 20;
         int mod;
         while(1)
         {
@@ -42,6 +42,8 @@ let main argv =
         |> Result.map Passes.simplifyCFG
         |> Result.map (printModulePass "End of optimizations:")
         |> Result.map Legalize.legalizeConstants
+        |> Result.map Legalize.genPhiMoves
+        |> Result.map (printModulePass "End of IR:")
         |> Result.map GenAssembly.genAssembly
         |> Result.map Assembly.printAssembly
 

@@ -166,11 +166,11 @@ module private Op =
                 (value, context)
                 ||> bitAnd (Builder.createConstant (0x8000s))
 
-            let modEnd, context =
-                Context.createBasicBlock "modEnd" context
-
             let modCont, context =
                 Context.createBasicBlock "modCont" context
+
+            let modEnd, context =
+                Context.createBasicBlock "modEnd" context
 
             context
             |> Context.createCondBr isNeg modEnd modCont

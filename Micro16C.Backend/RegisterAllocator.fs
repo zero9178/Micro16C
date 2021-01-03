@@ -6,57 +6,40 @@ open Micro16C.MiddleEnd.IR
 
 let allocateRegisters (irModule: Module): ImmutableDictionary<Value ref, Register> =
 
-    let adjustForPhi i instr (map: ImmutableDictionary<Value ref, int * int>) =
-        match !instr with
-        | { ParentBlock = Some parentBlock } as instrValue when Value.isTerminating instrValue ->
-            // Check successors if they have phi values. If they do we need to extend the lifetime of the value
-            // coming from this block to the terminating instruction itself
-            !parentBlock
-            |> BasicBlock.successors
-            |> List.fold (fun map succ ->
-                !succ
-                |> Value.asBasicBlock
-                |> BasicBlock.phis
-                |> List.fold (fun (map: ImmutableDictionary<Value ref, int * int>) phi ->
-                    match !phi with
-                    | { Content = PhiInstruction { Incoming = list } } ->
-                        let (op, _) =
-                            list |> List.find (snd >> ((=) parentBlock))
-
-                        if Value.producesValue !op then
-                            match map.TryGetValue op with
-                            | (false, _) -> map.Add(op, (i, i))
-                            | (true, (start, _)) -> map.SetItem(op, (start, i))
-                        else
-                            map
-                    | _ -> failwith "Internal Compiler Error: Expected Phi Instruction") map) map
-        | _ -> map
-
     let liveIntervals =
         irModule
         |> Module.instructions
         |> List.indexed
         |> List.fold (fun (map: ImmutableDictionary<Value ref, int * int>) (i, instr) ->
-            let used =
-                if Value.producesValue !instr then [ instr ] else []
-                @ match !instr with
-                  | { Content = PhiInstruction _ } -> []
-                  | _ ->
-                      !instr
-                      |> Value.operands
-                      |> List.filter ((!) >> Value.producesValue)
 
-            let map =
+            let i, used =
                 match !instr with
-                | { Content = AllocationInstruction _ } -> map
+                | { Content = PhiInstruction _
+                    ParentBlock = Some parentBlock } ->
+                    (i
+                     + (!parentBlock
+                        |> Value.asBasicBlock
+                        |> BasicBlock.phis
+                        |> List.skipWhile ((<>) instr)
+                        |> List.length),
+                     [ instr ])
                 | _ ->
-                    used
-                    |> List.fold (fun map instr ->
-                        match map.TryGetValue instr with
-                        | (false, _) -> map.Add(instr, (i, i))
-                        | (true, (start, _)) -> map.SetItem(instr, (start, i))) map
+                    (i,
+                     (if Value.producesValue !instr then [ instr ] else [])
+                     @ (!instr
+                        |> Value.operands
+                        |> List.filter ((!) >> Value.producesValue)))
 
-            adjustForPhi i instr map) (ImmutableDictionary.Create<Value ref, int * int>(HashIdentity.Reference))
+            match !instr with
+            | { Content = AllocationInstruction _ } -> map
+            | _ ->
+                used
+                |> List.fold (fun map instr ->
+                    match map.TryGetValue instr with
+                    | (false, _) -> map.Add(instr, (i, i))
+                    | (true, (start, _)) -> map.SetItem(instr, (start, i))) map
+
+            ) (ImmutableDictionary.Create<Value ref, int * int>(HashIdentity.Reference))
 
     let registerToIndex register =
         match register with
@@ -123,13 +106,11 @@ let allocateRegisters (irModule: Module): ImmutableDictionary<Value ref, Registe
         | 12 -> PC
         | _ -> failwith "Internal Compiler Error: Invalid Index"
 
-    let inUseRegisters = Array.init 13 (fun _ -> None)
-
     let findRegisterFor inUseRegisters v =
 
         let intervalsOverlap i1 i2 =
             ((fst i1) >= (fst i2) && (fst i1) < (snd i2))
-            || (snd i1) >= (fst i2) && (snd i1) < (snd i2)
+            || (fst i2) >= (fst i1) && (fst i2) < (snd i1)
 
         let rec findRegisterForImpl index (array: int option []) =
             match Array.tryItem index array with
@@ -173,7 +154,10 @@ let allocateRegisters (irModule: Module): ImmutableDictionary<Value ref, Registe
                         assert (Option.isNone inUseRegisters.[index])
                         index
 
-                Array.set inUseRegisters index (valueEnds.[v] |> Some)
+                match valueEnds.[v] with
+                | endV when endV = i -> ()
+                | endV -> Array.set inUseRegisters index (endV |> Some)
+
                 (map.Add(v, indexToRegister index), inUseRegisters)) (map, inUseRegisters))
-           (ImmutableDictionary.Create<Value ref, Register>(HashIdentity.Reference), inUseRegisters)
+           (ImmutableDictionary.Create<Value ref, Register>(HashIdentity.Reference), Array.init 13 (fun _ -> None))
     |> fst

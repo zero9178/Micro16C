@@ -1,10 +1,65 @@
 module Micro16C.Backend.GenAssembly
 
-open System.Collections.Immutable
+open System
+open System.Collections.Generic
 open Micro16C.Backend.Assembly
 open Micro16C.MiddleEnd.IR
 
+
+
 let genAssembly (irModule: Module): AssemblyLine list =
+
+    let mutable counter = 0
+
+    let mutable seenValues =
+        Dictionary<Value, string>(HashIdentity.Reference)
+
+    let seenNames = ref Set.empty
+
+    let getName (value: Value ref) =
+        match seenValues.TryGetValue !value with
+        | (true, name) -> name
+        | (false, _) ->
+            match !value |> Value.name with
+            | "" ->
+                counter <- counter + 1
+                let name = (counter - 1) |> string
+                seenValues.Add(!value, name)
+                name
+            | _ ->
+                let rec uniqueName name =
+                    if Set.contains name !seenNames then
+                        match name
+                              |> List.ofSeq
+                              |> List.rev
+                              |> List.takeWhile Char.IsDigit with
+                        | [] -> uniqueName (name + "0")
+                        | digits ->
+                            let newInt =
+                                digits
+                                |> List.rev
+                                |> List.toArray
+                                |> String
+                                |> int
+                                |> ((+) 1)
+
+                            let name =
+                                name
+                                |> List.ofSeq
+                                |> List.rev
+                                |> List.skip (List.length digits)
+                                |> List.rev
+                                |> List.toArray
+                                |> String
+
+                            uniqueName (name + (newInt |> string))
+                    else
+                        seenValues.Add(!value, name)
+                        seenNames := Set.add name !seenNames
+                        name
+
+                uniqueName (!value |> Value.name)
+
     let valueToRegisters =
         RegisterAllocator.allocateRegisters irModule
 
@@ -17,35 +72,6 @@ let genAssembly (irModule: Module): AssemblyLine list =
 
     let prependOperation operation list = (Operation operation) :: list
 
-    let genPhi instr list =
-        match (!instr).ParentBlock with
-        | None -> failwith "Internal Compiler Error: Instruction with no parent block"
-        | Some parentBlock ->
-            !parentBlock
-            |> BasicBlock.successors
-            |> List.fold (fun list succ ->
-                !succ
-                |> Value.asBasicBlock
-                |> BasicBlock.phis
-                |> List.fold (fun list phi ->
-                    match !phi with
-                    | { Content = PhiInstruction { Incoming = incoming } } ->
-                        let (op, _) =
-                            incoming |> List.find (snd >> ((=) parentBlock))
-
-                        if operandToBus op = operandToBus phi then
-                            list
-                        else
-                            prependOperation
-                                { Operation.Default with
-                                      SBus = operandToBus phi |> Some
-                                      ABus = operandToBus op |> Some
-                                      AMux = Some AMux.ABus
-                                      ALU = Some ALU.ABus
-                                      Shifter = Some Shifter.Noop }
-                                list
-                    | _ -> failwith "Internal Compiler Error: Expected Phi Instruction") list) list
-
     let basicBlocks =
         irModule |> Module.basicBlocks |> Array.ofList
 
@@ -54,15 +80,11 @@ let genAssembly (irModule: Module): AssemblyLine list =
     |> Array.fold (fun list (bbIndex, bbValue) ->
         let bb = !bbValue |> Value.asBasicBlock
 
-        let list =
-            (!bbValue |> Value.name |> Label) :: list
+        let list = (bbValue |> getName |> Label) :: list
 
         bb
         |> BasicBlock.instructions
         |> List.fold (fun list instr ->
-
-            let list =
-                if Value.isTerminating !instr then genPhi instr list else list
 
             match !instr with
             | { Content = BinaryInstruction { Left = Ref { Content = Constant { Value = 0x8000s } }
@@ -71,6 +93,31 @@ let genAssembly (irModule: Module): AssemblyLine list =
             | { Content = BinaryInstruction { Right = Ref { Content = Constant { Value = 0x8000s } }
                                               Left = op
                                               Kind = And } } ->
+                if operandToBus instr = operandToBus op then
+                    list
+                else
+                    prependOperation
+                        { Operation.Default with
+                              SBus = operandToBus instr |> Some
+                              ABus = operandToBus op |> Some
+                              AMux = Some AMux.ABus
+                              ALU = Some ALU.ABus
+                              Shifter = Some Shifter.Noop }
+                        list
+            | { Content = MoveInstruction { Source = op }
+                Users = [ Ref { Content = PhiInstruction _ } as phi ] } ->
+                if operandToBus phi = operandToBus op then
+                    list
+                else
+                    prependOperation
+                        { Operation.Default with
+                              SBus = operandToBus phi |> Some
+                              ABus = operandToBus op |> Some
+                              AMux = Some AMux.ABus
+                              ALU = Some ALU.ABus
+                              Shifter = Some Shifter.Noop }
+                        list
+            | { Content = MoveInstruction { Source = op } } ->
                 if operandToBus instr = operandToBus op then
                     list
                 else
@@ -125,7 +172,7 @@ let genAssembly (irModule: Module): AssemblyLine list =
                    <> Array.tryItem (bbIndex + 1) basicBlocks then
                     prependOperation
                         { Operation.Default with
-                              Address = !branch |> Value.name |> Some
+                              Address = branch |> getName |> Some
                               Condition = Some Cond.None }
                         list
                 else
@@ -141,7 +188,7 @@ let genAssembly (irModule: Module): AssemblyLine list =
                 let list =
                     prependOperation
                         { Operation.Default with
-                              Address = !trueBranch |> Value.name |> Some
+                              Address = trueBranch |> getName |> Some
                               AMux = Some AMux.ABus
                               Condition = Some Cond.Neg
                               ABus = value |> operandToBus |> Some
@@ -154,7 +201,7 @@ let genAssembly (irModule: Module): AssemblyLine list =
                 else
                     prependOperation
                         { Operation.Default with
-                              Address = !falseBranch |> Value.name |> Some
+                              Address = falseBranch |> getName |> Some
                               Condition = Some Cond.None }
                         list
             | { Content = CondBrInstruction { Condition = value
@@ -163,7 +210,7 @@ let genAssembly (irModule: Module): AssemblyLine list =
                 let list =
                     prependOperation
                         { Operation.Default with
-                              Address = !falseBranch |> Value.name |> Some
+                              Address = falseBranch |> getName |> Some
                               AMux = Some AMux.ABus
                               Condition = Some Cond.Zero
                               ABus = value |> operandToBus |> Some
@@ -176,7 +223,7 @@ let genAssembly (irModule: Module): AssemblyLine list =
                 else
                     prependOperation
                         { Operation.Default with
-                              Address = !trueBranch |> Value.name |> Some
+                              Address = trueBranch |> getName |> Some
                               Condition = Some Cond.None }
                         list
             | { Content = PhiInstruction _ } -> list

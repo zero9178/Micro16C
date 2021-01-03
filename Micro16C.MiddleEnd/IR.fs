@@ -67,6 +67,7 @@ and ValueContent =
     | PhiInstruction of PhiInstruction
     | BasicBlockValue of BasicBlock
     | Undef
+    | MoveInstruction of MoveInstruction
 
 and Constant = { Value: int16 }
 
@@ -106,6 +107,8 @@ and CondBrInstruction =
 and PhiInstruction =
     { Incoming: (Value ref * Value ref) list
       Register: Register option }
+
+and MoveInstruction = { Source: Value ref }
 
 and BasicBlock =
     { Instructions: Value ref list
@@ -147,6 +150,7 @@ module Value =
         | BinaryInstruction { Left = lhs; Right = rhs } -> [ lhs; rhs ]
         | GotoInstruction { BasicBlock = value }
         | UnaryInstruction { Value = value }
+        | MoveInstruction { Source = value }
         | LoadInstruction { Source = value } -> [ value ]
         | StoreInstruction { Value = value
                              Destination = destination } -> [ value; destination ]
@@ -166,6 +170,7 @@ module Value =
         | (_, AllocationInstruction _) -> failwith "Internal Compiler Error: Invalid Operand Index"
         | (i, UnaryInstruction _)
         | (i, GotoInstruction _)
+        | (i, MoveInstruction _)
         | (i, LoadInstruction _) when i >= 1 -> failwith "Internal Compiler Error: Invalid Operand Index"
         | (i, BinaryInstruction _)
         | (i, StoreInstruction _) when i >= 2 -> failwith "Internal Compiler Error: Invalid Operand Index"
@@ -208,6 +213,12 @@ module Value =
             value
             := { !value with
                      Content = LoadInstruction { instr with Source = operand } }
+        | (0, MoveInstruction instr) ->
+            instr.Source |> removeUser value
+
+            value
+            := { !value with
+                     Content = MoveInstruction { instr with Source = operand } }
         | (0, BinaryInstruction instr) ->
             instr.Left |> removeUser value
 
@@ -285,6 +296,7 @@ module Value =
         | BinaryInstruction _
         | UnaryInstruction _
         | LoadInstruction _
+        | MoveInstruction _
         | PhiInstruction _ -> true
         | _ -> false
 
@@ -558,6 +570,9 @@ type Module =
                      | { Content = LoadInstruction load } ->
                          text
                          + sprintf "\t%s = load %s\n" (getName instruction) (getName load.Source)
+                     | { Content = MoveInstruction move } ->
+                         text
+                         + sprintf "\t%s = move %s\n" (getName instruction) (getName move.Source)
                      | { Content = CondBrInstruction cr } ->
                          text
                          + sprintf "\tbr %s %s %s\n" (getName cr.Condition) (getName cr.TrueBranch)
@@ -576,9 +591,6 @@ type Module =
                      | _ -> failwith "Internal Compiler Error") text)
                 + "\n") ""
 
-        static member fromBasicBlocks basicBlocks =
-            { BasicBlocks = basicBlocks |> List.rev }
-
 module Module =
 
     let instructions irModule =
@@ -589,6 +601,9 @@ module Module =
         |> List.concat
 
     let basicBlocks irModule = irModule.BasicBlocks |> List.rev
+
+    let fromBasicBlocks basicBlocks =
+        { BasicBlocks = basicBlocks |> List.rev }
 
 type Builder =
     { InsertBlock: Value ref option
@@ -635,29 +650,50 @@ module Builder =
             (value, builder)
         | _ -> failwith "Internal Compiler Error"
 
-    let createBasicBlock name builder =
+    let createBasicBlockAt (insertPoint: InsertPoint) name builder =
+        let basicBlock =
+            ref
+                { Value.Default with
+                      Name = name
+                      Content = BasicBlockValue BasicBlock.Default }
 
-        (ref
-            { Value.Default with
-                  Name = name
-                  Content = BasicBlockValue BasicBlock.Default },
-         builder)
+        match insertPoint with
+        | End ->
+            (basicBlock,
+             { builder with
+                   AllBlocks = basicBlock :: builder.AllBlocks })
+        | Start ->
+            (basicBlock,
+             { builder with
+                   AllBlocks = builder.AllBlocks @ [ basicBlock ] })
+        | After ref ->
+            match builder.AllBlocks |> List.tryFindIndex ((=) ref) with
+            | None -> failwith "Internal Compiler Error: Failed to find Basic Block in block list"
+            | Some i ->
+                let (first, second) = builder.AllBlocks |> List.splitAt i
+
+                (basicBlock,
+                 { builder with
+                       AllBlocks = first @ [ basicBlock ] @ second })
+        | Before ref ->
+            match builder.AllBlocks |> List.tryFindIndex ((=) ref) with
+            | None -> failwith "Internal Compiler Error: Failed to find Basic Block in block list"
+            | Some i ->
+                let (first, second) =
+                    builder.AllBlocks |> List.splitAt (i + 1)
+
+                (basicBlock,
+                 { builder with
+                       AllBlocks = first @ [ basicBlock ] @ second })
+
+    let createBasicBlock = createBasicBlockAt End
 
     let insertBlock builder = builder.InsertBlock
 
     let setInsertBlock basicBlock builder =
-        let builder =
-            match basicBlock with
-            | None -> builder
-            | Some basicBlock ->
-                if List.contains basicBlock builder.AllBlocks then
-                    builder
-                else
-                    { builder with
-                          AllBlocks = basicBlock :: builder.AllBlocks }
-
         { builder with
-              InsertBlock = basicBlock }
+              InsertBlock = basicBlock
+              InsertIndex = 0 }
 
     let setInsertPoint (insertPoint: InsertPoint) builder =
         match builder.InsertBlock with
@@ -672,11 +708,11 @@ module Builder =
                       InsertIndex = List.length block.Instructions }
             | After ref ->
                 match block.Instructions |> List.tryFindIndex ((=) ref) with
-                | None -> builder
+                | None -> failwith "Internal Compiler Error: Failed to find After instruction in insert block"
                 | Some i -> { builder with InsertIndex = i }
             | Before ref ->
                 match block.Instructions |> List.tryFindIndex ((=) ref) with
-                | None -> builder
+                | None -> failwith "Internal Compiler Error: Failed to find Before instruction in insert block"
                 | Some i -> { builder with InsertIndex = i + 1 }
 
     let createConstant value =
@@ -744,6 +780,20 @@ module Builder =
         builder |> addValue load
 
     let createLoad = createNamedLoad ""
+
+    let createNamedMove name value builder =
+
+        let move =
+            ref
+                { Value.Default with
+                      Name = name
+                      Content = MoveInstruction { Source = value } }
+
+        value |> Value.addUser move
+
+        builder |> addValue move
+
+    let createMove = createNamedMove ""
 
     let createStore destination value builder =
 

@@ -101,3 +101,64 @@ let legalizeConstants (irModule: Module): Module =
     |> List.iter checkOps
 
     irModule
+
+let genPhiMoves (irModule: Module): Module =
+
+    let builder = Builder.fromModule irModule
+
+    let builder =
+        irModule
+        |> Module.basicBlocks
+        |> List.map (fun x -> (x, !x |> BasicBlock.predecessors))
+        |> List.fold (fun builder (b, preds) ->
+            preds
+            |> List.fold (fun builder p ->
+                let n, builder =
+                    if !b |> BasicBlock.predecessors |> List.length > 1
+                       && !p |> BasicBlock.successors |> List.length > 1 then
+                        let block, builder =
+                            builder |> Builder.createBasicBlockAt (After p) ""
+
+                        !p
+                        |> Value.asBasicBlock
+                        |> BasicBlock.terminator
+                        |> Value.replaceOperand b block
+
+                        (block,
+                         builder
+                         |> Builder.setInsertBlock (Some block)
+                         |> Builder.createGoto b
+                         |> snd)
+                    else
+                        (p, builder)
+
+                !b
+                |> Value.asBasicBlock
+                |> BasicBlock.phis
+                |> List.fold (fun builder phi ->
+                    let blockIndex =
+                        !phi
+                        |> Value.operands
+                        |> List.indexed
+                        |> List.findIndex (snd >> (=) p)
+
+                    let operand =
+                        !phi
+                        |> Value.operands
+                        |> List.item (blockIndex - 1)
+
+                    let move, builder =
+                        builder
+                        |> Builder.setInsertBlock (Some n)
+                        |> Builder.setInsertPoint
+                            (!n
+                             |> Value.asBasicBlock
+                             |> BasicBlock.terminator
+                             |> Before)
+                        |> Builder.createMove operand
+
+                    phi |> Value.setOperand (blockIndex - 1) move
+                    phi |> Value.setOperand blockIndex n
+                    builder) builder) builder) builder
+
+    Builder.finalize builder
