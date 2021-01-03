@@ -444,8 +444,8 @@ and visitEqualityExpression (context: Context) (expression: Parse.EqualityExpres
 
             let op =
                 match token with
-                | { Type = TokenType.Equal } -> NotEqual
-                | { Type = TokenType.NotEqual } -> Equal
+                | { Type = TokenType.Equal } -> Equal
+                | { Type = TokenType.NotEqual } -> NotEqual
                 | _ -> failwith "Internal Compiler Error: Invalid Token Type"
 
             comb2 (fun lhs rhs ->

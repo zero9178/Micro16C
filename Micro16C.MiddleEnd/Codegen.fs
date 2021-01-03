@@ -286,10 +286,10 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
             |> visitExpression statement.Expression
 
         let cont, context =
-            Context.createBasicBlock "doWhileContinue" context
+            Context.createBasicBlock "WhileContinue" context
 
         let body, context =
-            Context.createBasicBlock "doWhileBody" context
+            Context.createBasicBlock "WhileBody" context
 
         context
         |> Context.createCondBr NotZero value body cont

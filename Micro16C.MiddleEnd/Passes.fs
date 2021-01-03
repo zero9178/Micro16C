@@ -539,35 +539,50 @@ let mem2reg (irModule: Module) =
             |> Seq.map (fun (x, y) -> KeyValuePair(x, y |> List.ofSeq |> List.map snd))
             |> (fun x -> ImmutableDictionary.CreateRange(HashIdentity.Reference, x))
 
-        irModule
-        |> Module.instructions
-        |> List.fold (fun replacement x ->
-            match !x with
-            | { Content = StoreInstruction { Value = passThrough } } when loadStores.Contains x ->
-                x |> Value.eraseFromParent
-                passThrough
-            | { Content = LoadInstruction _ } when loadStores.Contains x ->
-                x |> Value.replaceWith replacement
-                replacement
-            | { Content = PhiInstruction _ } when phis.Contains x -> x
-            | _ when Value.isTerminating !x ->
-                match (!x).ParentBlock with
-                | None -> replacement
-                | Some parentBlock ->
-                    match phiPredBlocks.TryGetValue(parentBlock) with
-                    | (false, _) -> replacement
-                    | (true, phis) ->
-                        phis
-                        |> List.iter (fun phiValue ->
-                            !phiValue
-                            |> Value.operands
-                            |> List.indexed
-                            |> List.pairwise
-                            |> List.filter (fun (_, (_, bb)) -> bb = parentBlock)
-                            |> List.iter (fun ((i, _), _) -> phiValue |> Value.setOperand i replacement))
+        let mutable alreadyVisited =
+            ImmutableHashSet.Create<Value ref>(HashIdentity.Reference)
 
-                        replacement
-            | _ -> replacement) Value.UndefValue
+        let rec rename replacement blockValue =
+            if alreadyVisited.Contains blockValue then
+                ()
+            else
+                alreadyVisited <- alreadyVisited.Add blockValue
+
+                let replacement =
+                    !blockValue
+                    |> Value.asBasicBlock
+                    |> BasicBlock.instructions
+                    |> List.fold (fun replacement x ->
+                        match !x with
+                        | { Content = StoreInstruction { Value = passThrough } } when loadStores.Contains x ->
+                            x |> Value.eraseFromParent
+                            passThrough
+                        | { Content = LoadInstruction _ } when loadStores.Contains x ->
+                            x |> Value.replaceWith replacement
+                            replacement
+                        | { Content = PhiInstruction _ } when phis.Contains x -> x
+                        | _ -> replacement) replacement
+
+                match phiPredBlocks.TryGetValue(blockValue) with
+                | (false, _) -> ()
+                | (true, phis) ->
+                    phis
+                    |> List.iter (fun phiValue ->
+                        !phiValue
+                        |> Value.operands
+                        |> List.indexed
+                        |> List.pairwise
+                        |> List.filter (fun (_, (_, bb)) -> bb = blockValue)
+                        |> List.iter (fun ((i, _), _) -> phiValue |> Value.setOperand i replacement))
+
+                !blockValue
+                |> BasicBlock.successors
+                |> List.iter (rename replacement)
+
+        irModule
+        |> Module.basicBlocks
+        |> List.tryHead
+        |> Option.map (rename Value.UndefValue)
         |> ignore
 
         alloca |> Value.eraseFromParent)

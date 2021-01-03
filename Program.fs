@@ -40,6 +40,7 @@ let main argv =
         |> Result.map Passes.instructionSimplify
         |> Result.map Passes.instructionCombine
         |> Result.map Passes.simplifyCFG
+        |> Result.map Passes.removeRedundantLoadStores
         |> Result.map (printModulePass "End of optimizations:")
         |> Result.map Legalize.legalizeConstants
         |> Result.map Legalize.genPhiMoves
