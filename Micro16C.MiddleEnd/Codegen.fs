@@ -69,9 +69,9 @@ module private Context =
         |> snd
         |> withBuilder context
 
-    let createCondBr condition trueBranch falseBranch context =
+    let createCondBr kind condition trueBranch falseBranch context =
         context.Builder
-        |> Builder.createCondBr condition trueBranch falseBranch
+        |> Builder.createCondBr kind condition trueBranch falseBranch
         |> snd
         |> withBuilder context
 
@@ -114,9 +114,6 @@ module private Op =
         bitAnd lhs rhs context ||> bitNot
 
     let rem lhs rhs context =
-        let isNeg, context =
-            (lhs, context)
-            ||> bitAnd (Builder.createConstant (0x8000s))
 
         let neg, context =
             Context.createBasicBlock "modNeg" context
@@ -130,7 +127,7 @@ module private Op =
 
             let negated, context =
                 context
-                |> Context.createCondBr isNeg neg cont
+                |> Context.createCondBr Negative lhs neg cont
                 |> Context.setInsertPoint (Some neg)
                 |> pack2 lhs
                 ||> negate
@@ -162,10 +159,6 @@ module private Op =
             let value, context =
                 (acc, context) ||> Context.createLoad ||> plus rhs
 
-            let isNeg, context =
-                (value, context)
-                ||> bitAnd (Builder.createConstant (0x8000s))
-
             let modCont, context =
                 Context.createBasicBlock "modCont" context
 
@@ -173,7 +166,7 @@ module private Op =
                 Context.createBasicBlock "modEnd" context
 
             context
-            |> Context.createCondBr isNeg modEnd modCont
+            |> Context.createCondBr Negative value modEnd modCont
             |> Context.setInsertPoint (Some modCont)
             |> Context.createStore acc value
             |> Context.createGoto body
@@ -238,7 +231,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
 
         let context =
             context
-            |> Context.createCondBr condition trueBranch falseBranch
+            |> Context.createCondBr NotZero condition trueBranch falseBranch
             |> Context.setInsertPoint (Some trueBranch)
             |> visitStatement trueStatement
 
@@ -281,7 +274,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
             Context.createBasicBlock "doWhileContinue" context
 
         context
-        |> Context.createCondBr value body cont
+        |> Context.createCondBr NotZero value body cont
         |> Context.setInsertPoint (Some cont)
     | Sema.WhileStatement statement ->
         let cond, context = Context.createBasicBlock "cond" context
@@ -299,7 +292,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
             Context.createBasicBlock "doWhileBody" context
 
         context
-        |> Context.createCondBr value body cont
+        |> Context.createCondBr NotZero value body cont
         |> Context.setInsertPoint (Some body)
         |> visitStatement statement.Statement
         |> Context.createGoto cond

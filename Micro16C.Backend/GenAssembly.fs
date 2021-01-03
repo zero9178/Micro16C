@@ -177,12 +177,8 @@ let genAssembly (irModule: Module): AssemblyLine list =
                         list
                 else
                     list
-            | { Content = CondBrInstruction { Condition = Ref { Content = BinaryInstruction { Kind = And
-                                                                                              Right = Ref { Content = Constant { Value = 0x8000s } } } } as value
-                                              FalseBranch = falseBranch
-                                              TrueBranch = trueBranch } }
-            | { Content = CondBrInstruction { Condition = Ref { Content = BinaryInstruction { Kind = And
-                                                                                              Left = Ref { Content = Constant { Value = 0x8000s } } } } as value
+            | { Content = CondBrInstruction { Kind = Negative
+                                              Value = value
                                               FalseBranch = falseBranch
                                               TrueBranch = trueBranch } } ->
                 let list =
@@ -204,7 +200,8 @@ let genAssembly (irModule: Module): AssemblyLine list =
                               Address = falseBranch |> getName |> Some
                               Condition = Some Cond.None }
                         list
-            | { Content = CondBrInstruction { Condition = value
+            | { Content = CondBrInstruction { Kind = NotZero
+                                              Value = value
                                               FalseBranch = falseBranch
                                               TrueBranch = trueBranch } } ->
                 let list =

@@ -99,8 +99,13 @@ and StoreInstruction =
 
 and GotoInstruction = { BasicBlock: Value ref }
 
+and CondBrKind =
+    | NotZero
+    | Negative
+
 and CondBrInstruction =
-    { Condition: Value ref
+    { Kind: CondBrKind
+      Value: Value ref
       TrueBranch: Value ref
       FalseBranch: Value ref }
 
@@ -154,7 +159,7 @@ module Value =
         | LoadInstruction { Source = value } -> [ value ]
         | StoreInstruction { Value = value
                              Destination = destination } -> [ value; destination ]
-        | CondBrInstruction { Condition = value
+        | CondBrInstruction { Value = value
                               TrueBranch = trueBranch
                               FalseBranch = falseBranch } -> [ value; trueBranch; falseBranch ]
         | PhiInstruction { Incoming = list } ->
@@ -178,11 +183,11 @@ module Value =
         | (i, PhiInstruction instr) when i >= 2 * List.length instr.Incoming ->
             failwith "Internal Compiler Error: Invalid Operand Index"
         | (0, CondBrInstruction instr) ->
-            instr.Condition |> removeUser value
+            instr.Value |> removeUser value
 
             value
             := { !value with
-                     Content = CondBrInstruction { instr with Condition = operand } }
+                     Content = CondBrInstruction { instr with Value = operand } }
         | (1, CondBrInstruction instr) ->
             instr.TrueBranch |> removeUser value
 
@@ -574,8 +579,14 @@ type Module =
                          text
                          + sprintf "\t%s = move %s\n" (getName instruction) (getName move.Source)
                      | { Content = CondBrInstruction cr } ->
+
+                         let opName =
+                             match cr.Kind with
+                             | Negative -> "< 0"
+                             | NotZero -> "!= 0"
+
                          text
-                         + sprintf "\tbr %s %s %s\n" (getName cr.Condition) (getName cr.TrueBranch)
+                         + sprintf "\tbr %s %s %s %s\n" (getName cr.Value) opName (getName cr.TrueBranch)
                                (getName cr.FalseBranch)
                      | { Content = StoreInstruction store } ->
                          text
@@ -821,13 +832,14 @@ module Builder =
 
         (value, builder |> addValue value |> snd)
 
-    let createCondBr condition trueBranch falseBranch builder =
+    let createCondBr kind condition trueBranch falseBranch builder =
         let value =
             ref
                 { Value.Default with
                       Content =
                           CondBrInstruction
-                              { Condition = condition
+                              { Kind = kind
+                                Value = condition
                                 TrueBranch = trueBranch
                                 FalseBranch = falseBranch } }
 

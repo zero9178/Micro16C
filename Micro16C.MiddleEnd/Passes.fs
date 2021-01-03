@@ -52,10 +52,25 @@ let instructionSimplify (irModule: Module) =
                                          Value = Ref { Content = Constant { Value = constant } } } } ->
             value
             |> Value.replaceWith (Builder.createConstant ((constant |> uint16) >>> 1 |> int16))
-        | { Content = CondBrInstruction { Condition = Ref { Content = Constant { Value = constant } }
+        | { Content = CondBrInstruction { Kind = NotZero
+                                          Value = Ref { Content = Constant { Value = constant } }
                                           TrueBranch = trueBranch
                                           FalseBranch = falseBranch } } ->
             if constant <> 0s then
+                value
+                |> Value.replaceWith
+                    (Builder.createGoto trueBranch Builder.Default
+                     |> fst)
+            else
+                value
+                |> Value.replaceWith
+                    (Builder.createGoto falseBranch Builder.Default
+                     |> fst)
+        | { Content = CondBrInstruction { Kind = Negative
+                                          Value = Ref { Content = Constant { Value = constant } }
+                                          TrueBranch = trueBranch
+                                          FalseBranch = falseBranch } } ->
+            if constant < 0s then
                 value
                 |> Value.replaceWith
                     (Builder.createGoto trueBranch Builder.Default
@@ -144,8 +159,8 @@ let instructionCombine (irModule: Module) =
         | Ref { Content = UnaryInstruction { Kind = Not
                                              Value = Ref { Content = UnaryInstruction { Kind = Not
                                                                                         Value = passThrough }
-                                                           Users = [ _ ] } as first } } as second ->
-            second |> Value.replaceWith passThrough
+                                                           Users = [ _ ] } as first } } ->
+            instruction |> Value.replaceWith passThrough
             first |> Value.eraseFromParent
         | Ref { Content = BinaryInstruction { Kind = Add
                                               Left = Ref { Content = Constant { Value = value1 } }
@@ -166,11 +181,11 @@ let instructionCombine (irModule: Module) =
                                               Right = Ref { Content = Constant { Value = value1 } }
                                               Left = Ref { Content = BinaryInstruction { Kind = Add
                                                                                          Left = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                           Users = [ _ ] } as first } } as second ->
+                                                           Users = [ _ ] } as first } } ->
             first
             |> Value.replaceOperand oldOp (Builder.createConstant (value1 + value2))
 
-            second |> Value.replaceWith first
+            instruction |> Value.replaceWith first
         | Ref { Content = BinaryInstruction { Kind = And
                                               Left = Ref { Content = Constant { Value = value1 } }
                                               Right = Ref { Content = BinaryInstruction { Kind = And
@@ -190,11 +205,29 @@ let instructionCombine (irModule: Module) =
                                               Right = Ref { Content = Constant { Value = value1 } }
                                               Left = Ref { Content = BinaryInstruction { Kind = And
                                                                                          Left = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                           Users = [ _ ] } as first } } as second ->
+                                                           Users = [ _ ] } as first } } ->
             first
             |> Value.replaceOperand oldOp (Builder.createConstant (value1 ||| value2))
 
-            second |> Value.replaceWith first
+            instruction |> Value.replaceWith first
+        | Ref { Content = CondBrInstruction { Kind = NotZero
+                                              Value = Ref { Users = [ _ ]
+                                                            Content = BinaryInstruction { Right = Ref { Content = Constant { Value = 0x8000s } }
+                                                                                          Left = passThrough } } as neg
+                                              TrueBranch = trueBranch
+                                              FalseBranch = falseBranch } }
+        | Ref { Content = CondBrInstruction { Kind = NotZero
+                                              Value = Ref { Users = [ _ ]
+                                                            Content = BinaryInstruction { Left = Ref { Content = Constant { Value = 0x8000s } }
+                                                                                          Right = passThrough } } as neg
+                                              TrueBranch = trueBranch
+                                              FalseBranch = falseBranch } } ->
+            let newCond, _ =
+                Builder.Default
+                |> Builder.createCondBr Negative passThrough trueBranch falseBranch
+
+            instruction |> Value.replaceWith newCond
+            neg |> Value.eraseFromParent
         | _ -> ()
 
     irModule
