@@ -257,6 +257,7 @@ let genAssembly (irModule: Module): AssemblyLine list =
                               BBus = destination |> operandToBus |> Some
                               ABus = value |> operandToBus |> Some
                               ALU = Some ALU.ABus
+                              AMux = Some AMux.ABus
                               Shifter = Some Shifter.Noop }
                         list
 

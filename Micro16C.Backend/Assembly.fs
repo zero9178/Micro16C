@@ -142,6 +142,13 @@ type Operation =
             | None -> op
 
         let op =
+            match (op, this.MBRWrite, this.SBus) with
+            | (op, Some false, _)
+            | (op, None, _) -> op
+            | (op, Some true, None) -> sprintf "MAR <- %s" op
+            | (op, Some true, Some _) -> sprintf "%s; MAR <- %s" op op
+
+        let op =
             match (op, this.SBus, this.Condition, this.Address) with
             | (op, _, None, _)
             | (op, _, Some Cond.NoJump, _) -> op
