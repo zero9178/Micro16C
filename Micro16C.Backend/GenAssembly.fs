@@ -104,7 +104,7 @@ let genAssembly (irModule: Module): AssemblyLine list =
                               ALU = Some ALU.ABus
                               Shifter = Some Shifter.Noop }
                         list
-            | { Content = MoveInstruction { Source = op }
+            | { Content = CopyInstruction { Source = op }
                 Users = [ Ref { Content = PhiInstruction _ } as phi ] } ->
                 if operandToBus phi = operandToBus op then
                     list
@@ -117,7 +117,7 @@ let genAssembly (irModule: Module): AssemblyLine list =
                               ALU = Some ALU.ABus
                               Shifter = Some Shifter.Noop }
                         list
-            | { Content = MoveInstruction { Source = op } } ->
+            | { Content = CopyInstruction { Source = op } } ->
                 if operandToBus instr = operandToBus op then
                     list
                 else

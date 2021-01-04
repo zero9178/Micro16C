@@ -67,7 +67,7 @@ and ValueContent =
     | PhiInstruction of PhiInstruction
     | BasicBlockValue of BasicBlock
     | Undef
-    | MoveInstruction of MoveInstruction
+    | CopyInstruction of MoveInstruction
 
 and Constant = { Value: int16 }
 
@@ -155,7 +155,7 @@ module Value =
         | BinaryInstruction { Left = lhs; Right = rhs } -> [ lhs; rhs ]
         | GotoInstruction { BasicBlock = value }
         | UnaryInstruction { Value = value }
-        | MoveInstruction { Source = value }
+        | CopyInstruction { Source = value }
         | LoadInstruction { Source = value } -> [ value ]
         | StoreInstruction { Value = value
                              Destination = destination } -> [ value; destination ]
@@ -175,7 +175,7 @@ module Value =
         | (_, AllocationInstruction _) -> failwith "Internal Compiler Error: Invalid Operand Index"
         | (i, UnaryInstruction _)
         | (i, GotoInstruction _)
-        | (i, MoveInstruction _)
+        | (i, CopyInstruction _)
         | (i, LoadInstruction _) when i >= 1 -> failwith "Internal Compiler Error: Invalid Operand Index"
         | (i, BinaryInstruction _)
         | (i, StoreInstruction _) when i >= 2 -> failwith "Internal Compiler Error: Invalid Operand Index"
@@ -218,12 +218,12 @@ module Value =
             value
             := { !value with
                      Content = LoadInstruction { instr with Source = operand } }
-        | (0, MoveInstruction instr) ->
+        | (0, CopyInstruction instr) ->
             instr.Source |> removeUser value
 
             value
             := { !value with
-                     Content = MoveInstruction { instr with Source = operand } }
+                     Content = CopyInstruction { instr with Source = operand } }
         | (0, BinaryInstruction instr) ->
             instr.Left |> removeUser value
 
@@ -301,7 +301,7 @@ module Value =
         | BinaryInstruction _
         | UnaryInstruction _
         | LoadInstruction _
-        | MoveInstruction _
+        | CopyInstruction _
         | PhiInstruction _ -> true
         | _ -> false
 
@@ -575,7 +575,7 @@ type Module =
                      | { Content = LoadInstruction load } ->
                          text
                          + sprintf "\t%s = load %s\n" (getName instruction) (getName load.Source)
-                     | { Content = MoveInstruction move } ->
+                     | { Content = CopyInstruction move } ->
                          text
                          + sprintf "\t%s = move %s\n" (getName instruction) (getName move.Source)
                      | { Content = CondBrInstruction cr } ->
@@ -792,19 +792,19 @@ module Builder =
 
     let createLoad = createNamedLoad ""
 
-    let createNamedMove name value builder =
+    let createNamedCopy name value builder =
 
         let move =
             ref
                 { Value.Default with
                       Name = name
-                      Content = MoveInstruction { Source = value } }
+                      Content = CopyInstruction { Source = value } }
 
         value |> Value.addUser move
 
         builder |> addValue move
 
-    let createMove = createNamedMove ""
+    let createCopy = createNamedCopy ""
 
     let createStore destination value builder =
 

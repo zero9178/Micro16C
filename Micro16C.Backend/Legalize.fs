@@ -147,7 +147,7 @@ let genPhiMoves (irModule: Module): Module =
                         |> Value.operands
                         |> List.item (blockIndex - 1)
 
-                    let move, builder =
+                    let copy, builder =
                         builder
                         |> Builder.setInsertBlock (Some n)
                         |> Builder.setInsertPoint
@@ -155,9 +155,9 @@ let genPhiMoves (irModule: Module): Module =
                              |> Value.asBasicBlock
                              |> BasicBlock.terminator
                              |> Before)
-                        |> Builder.createMove operand
+                        |> Builder.createCopy operand
 
-                    phi |> Value.setOperand (blockIndex - 1) move
+                    phi |> Value.setOperand (blockIndex - 1) copy
                     phi |> Value.setOperand blockIndex n
                     builder) builder) builder) builder
 
