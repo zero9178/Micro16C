@@ -1,5 +1,6 @@
 module Micro16C.Backend.Legalize
 
+open System.Collections.Immutable
 open Micro16C.MiddleEnd.IR
 
 let legalizeConstants (irModule: Module): Module =
@@ -110,52 +111,87 @@ let genPhiMoves (irModule: Module): Module =
         irModule
         |> Module.basicBlocks
         |> List.map (fun x -> (x, !x |> BasicBlock.predecessors))
-        |> List.fold (fun builder (b, preds) ->
+        |> List.fold (fun builder (currBlock, preds) ->
             preds
-            |> List.fold (fun builder p ->
+            |> List.fold (fun builder pred ->
                 let n, builder =
-                    if !b |> BasicBlock.predecessors |> List.length > 1
-                       && !p |> BasicBlock.successors |> List.length > 1 then
+                    if !currBlock
+                       |> BasicBlock.predecessors
+                       |> List.length > 1
+                       && !pred |> BasicBlock.successors |> List.length > 1 then
+                        // Destroy critical edges by inserting a block in between, in which we'll be able to place our
+                        // copy operations
                         let block, builder =
-                            builder |> Builder.createBasicBlockAt (After p) ""
+                            builder
+                            |> Builder.createBasicBlockAt (After pred) ""
 
-                        !p
+                        !pred
                         |> Value.asBasicBlock
                         |> BasicBlock.terminator
-                        |> Value.replaceOperand b block
+                        |> Value.replaceOperand currBlock block
 
                         (block,
                          builder
                          |> Builder.setInsertBlock (Some block)
-                         |> Builder.createGoto b
+                         |> Builder.createGoto currBlock
                          |> snd)
                     else
-                        (p, builder)
+                        (pred, builder)
 
-                !b
-                |> Value.asBasicBlock
-                |> BasicBlock.phis
+
+                let builder =
+                    builder
+                    |> Builder.setInsertBlock (Some n)
+                    |> Builder.setInsertPoint
+                        (!n
+                         |> Value.asBasicBlock
+                         |> BasicBlock.terminator
+                         |> Before)
+
+                let startOfMoves = builder |> Builder.afterInstr
+
+                let phis =
+                    !currBlock
+                    |> Value.asBasicBlock
+                    |> BasicBlock.phis
+
+                let createdTemporaries =
+                    ref (ImmutableDictionary.Create<Value ref, Value ref>(HashIdentity.Reference))
+
+                phis
                 |> List.fold (fun builder phi ->
                     let blockIndex =
                         !phi
                         |> Value.operands
                         |> List.indexed
-                        |> List.findIndex (snd >> (=) p)
+                        |> List.findIndex (snd >> (=) pred)
 
                     let operand =
                         !phi
                         |> Value.operands
                         |> List.item (blockIndex - 1)
 
+                    let copyOperand, builder =
+                        if phis |> List.contains operand then
+                            match (!createdTemporaries).TryGetValue operand with
+                            | (true, temporary) -> (temporary, builder)
+                            | (false, _) ->
+                                let currPoint = builder |> Builder.beforeInstr
+
+                                let temp, builder =
+                                    builder
+                                    |> Builder.setInsertPoint startOfMoves
+                                    |> Builder.createCopy operand
+
+                                createdTemporaries
+                                := (!createdTemporaries).SetItem(operand, temp)
+
+                                (temp, builder |> Builder.setInsertPoint currPoint)
+                        else
+                            (operand, builder)
+
                     let copy, builder =
-                        builder
-                        |> Builder.setInsertBlock (Some n)
-                        |> Builder.setInsertPoint
-                            (!n
-                             |> Value.asBasicBlock
-                             |> BasicBlock.terminator
-                             |> Before)
-                        |> Builder.createCopy operand
+                        builder |> Builder.createCopy copyOperand
 
                     phi |> Value.setOperand (blockIndex - 1) copy
                     phi |> Value.setOperand blockIndex n

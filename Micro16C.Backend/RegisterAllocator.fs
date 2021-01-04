@@ -6,6 +6,39 @@ open Micro16C.MiddleEnd.IR
 
 let allocateRegisters (irModule: Module): ImmutableDictionary<Value ref, Register> =
 
+    let adjustCopyForPhi i instr map =
+        match !instr with
+        | { ParentBlock = Some parentBlock } when Value.isTerminating !instr ->
+            !parentBlock
+            |> BasicBlock.successors
+            |> List.fold (fun map succ ->
+                !succ
+                |> Value.asBasicBlock
+                |> BasicBlock.phis
+                |> List.fold (fun (map: ImmutableDictionary<Value ref, int * int>) phi ->
+                    let copyOp =
+                        !phi
+                        |> Value.operands
+                        |> List.pairwise
+                        |> List.find (snd >> (=) parentBlock)
+                        |> fst
+
+                    // Extend the lifetime of the operand of the phi to the terminator of the block
+                    let map =
+                        match map.TryGetValue copyOp with
+                        | (false, _) -> map.Add(copyOp, (i, i))
+                        | (true, (start, _)) -> map.SetItem(copyOp, (start, i))
+
+
+                    // Additionally, the lifetime of a phi ends in at the end of it's predecessors or it's last use. Usually
+                    // predecessors are dominators of the block of the phi but in the case of a loop we might end up
+                    // in a predecessor of a phi which is after the phi itself. It's lifetime then needs to be extended
+                    // to the end of the block as well.
+                    match map.TryGetValue phi with
+                    | (false, _) -> map
+                    | (true, (start, _)) -> map.SetItem(phi, (start, i))) map) map
+        | _ -> map
+
     let liveIntervals =
         irModule
         |> Module.instructions
@@ -14,6 +47,9 @@ let allocateRegisters (irModule: Module): ImmutableDictionary<Value ref, Registe
 
             let i, used =
                 match !instr with
+                // Phi instructions lifetime starts at the very first non-phi instruction of that block. Their operands
+                // lifetime does not get extended to the phi itself, but extend to the end of their block.
+                // This is handled in adjustCopyForPhi.
                 | { Content = PhiInstruction _
                     ParentBlock = Some parentBlock } ->
                     (i
@@ -30,16 +66,14 @@ let allocateRegisters (irModule: Module): ImmutableDictionary<Value ref, Registe
                         |> Value.operands
                         |> List.filter ((!) >> Value.producesValue)))
 
-            match !instr with
-            | { Content = AllocationInstruction _ } -> map
-            | _ ->
+            let map =
                 used
-                |> List.fold (fun map instr ->
+                |> List.fold (fun (map: ImmutableDictionary<Value ref, int * int>) instr ->
                     match map.TryGetValue instr with
                     | (false, _) -> map.Add(instr, (i, i))
                     | (true, (start, _)) -> map.SetItem(instr, (start, i))) map
 
-            ) (ImmutableDictionary.Create<Value ref, int * int>(HashIdentity.Reference))
+            adjustCopyForPhi i instr map) (ImmutableDictionary.Create<Value ref, int * int>(HashIdentity.Reference))
 
     let registerToIndex register =
         match register with

@@ -577,7 +577,7 @@ type Module =
                          + sprintf "\t%s = load %s\n" (getName instruction) (getName load.Source)
                      | { Content = CopyInstruction move } ->
                          text
-                         + sprintf "\t%s = move %s\n" (getName instruction) (getName move.Source)
+                         + sprintf "\t%s = copy %s\n" (getName instruction) (getName move.Source)
                      | { Content = CondBrInstruction cr } ->
 
                          let opName =
@@ -701,6 +701,32 @@ module Builder =
 
     let insertBlock builder = builder.InsertBlock
 
+    let afterInstr builder =
+        match builder.InsertBlock with
+        | None -> failwith "Internal Compiler Error: No current insert block"
+        | Some blockValue ->
+            let block = !blockValue |> Value.asBasicBlock
+
+            if builder.InsertIndex = List.length block.Instructions then
+                Start
+            else
+                block.Instructions
+                |> List.item builder.InsertIndex
+                |> After
+
+    let beforeInstr builder =
+        match builder.InsertBlock with
+        | None -> failwith "Internal Compiler Error: No current insert block"
+        | Some blockValue ->
+            let block = !blockValue |> Value.asBasicBlock
+
+            if builder.InsertIndex = 0 then
+                End
+            else
+                (block.Instructions
+                 |> List.item (builder.InsertIndex - 1))
+                |> Before
+
     let setInsertBlock basicBlock builder =
         { builder with
               InsertBlock = basicBlock
@@ -794,15 +820,15 @@ module Builder =
 
     let createNamedCopy name value builder =
 
-        let move =
+        let copy =
             ref
                 { Value.Default with
                       Name = name
                       Content = CopyInstruction { Source = value } }
 
-        value |> Value.addUser move
+        value |> Value.addUser copy
 
-        builder |> addValue move
+        builder |> addValue copy
 
     let createCopy = createNamedCopy ""
 
