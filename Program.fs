@@ -46,6 +46,7 @@ let main argv =
         |> Result.map Legalize.genPhiMoves
         |> Result.map (printModulePass "End of IR:")
         |> Result.map GenAssembly.genAssembly
+        |> Result.map GenAssembly.removeRedundantLabels
         |> Result.map Assembly.printAssembly
 
     0

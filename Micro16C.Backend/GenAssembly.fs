@@ -223,6 +223,63 @@ let genAssembly (irModule: Module): AssemblyLine list =
                               Address = trueBranch |> getName |> Some
                               Condition = Some Cond.None }
                         list
+            | { Content = LoadInstruction { Source = value } } ->
+                let list =
+                    prependOperation
+                        { Operation.Default with
+                              MemoryAccess = Some MemoryAccess.Read
+                              MARWrite = Some true
+                              BBus = value |> operandToBus |> Some }
+                        list
+
+                let list =
+                    prependOperation
+                        { Operation.Default with
+                              MemoryAccess = Some MemoryAccess.Read
+                              MARWrite = Some false }
+                        list
+
+                prependOperation
+                    { Operation.Default with
+                          SBus = operandToBus instr |> Some
+                          AMux = Some AMux.MBR
+                          ALU = Some ALU.ABus
+                          Shifter = Some Shifter.Noop }
+                    list
+            | { Content = StoreInstruction { Value = value
+                                             Destination = destination } } ->
+                let list =
+                    prependOperation
+                        { Operation.Default with
+                              MemoryAccess = Some MemoryAccess.Write
+                              MARWrite = Some true
+                              MBRWrite = Some true
+                              BBus = destination |> operandToBus |> Some
+                              ABus = value |> operandToBus |> Some
+                              ALU = Some ALU.ABus
+                              Shifter = Some Shifter.Noop }
+                        list
+
+                prependOperation
+                    { Operation.Default with
+                          MemoryAccess = Some MemoryAccess.Write
+                          MBRWrite = Some false
+                          MARWrite = Some false }
+                    list
             | { Content = PhiInstruction _ } -> list
-            | _ -> list) list) []
+            | _ -> failwith "Internal Compiler Error: Can't compile IR instruction to assembly") list) []
     |> List.rev
+
+let removeRedundantLabels assemblyList =
+    let usedLabels =
+        assemblyList
+        |> List.fold (fun set assembly ->
+            match assembly with
+            | Operation { Address = Some s } -> Set.add s set
+            | _ -> set) (Set([]))
+
+    assemblyList
+    |> List.filter (fun assembly ->
+        match assembly with
+        | Label s when not (usedLabels |> Set.contains s) -> false
+        | _ -> true)

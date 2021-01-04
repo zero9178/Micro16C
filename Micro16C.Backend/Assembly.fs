@@ -93,6 +93,7 @@ type Operation =
       Shifter: Shifter option
       MemoryAccess: MemoryAccess option
       MARWrite: bool option
+      MBRWrite: bool option
       SBus: Bus option
       BBus: Bus option
       ABus: Bus option
@@ -107,6 +108,7 @@ type Operation =
           Shifter = None
           MemoryAccess = None
           MARWrite = None
+          MBRWrite = None
           SBus = None
           BBus = None
           ABus = None
