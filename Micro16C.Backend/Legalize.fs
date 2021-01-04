@@ -125,6 +125,15 @@ let genPhiMoves (irModule: Module): Module =
                             builder
                             |> Builder.createBasicBlockAt (After pred) ""
 
+                        let basicBlock = !block |> Value.asBasicBlock
+
+                        block
+                        := { !block with
+                                 Content =
+                                     BasicBlockValue
+                                         { basicBlock with
+                                               ImmediateDominator = Some pred } }
+
                         !pred
                         |> Value.asBasicBlock
                         |> BasicBlock.terminator
