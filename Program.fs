@@ -43,6 +43,7 @@ let main argv =
         |> Result.map Passes.removeRedundantLoadStores
         |> Result.map (printModulePass "End of optimizations:")
         |> Result.map Legalize.legalizeConstants
+        |> Result.map Legalize.destroyCriticalEdges
         |> Result.map Legalize.genPhiMoves
         |> Result.map (printModulePass "End of IR:")
         |> Result.map GenAssembly.genAssembly

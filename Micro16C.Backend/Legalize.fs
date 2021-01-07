@@ -103,6 +103,51 @@ let legalizeConstants (irModule: Module): Module =
 
     irModule
 
+let destroyCriticalEdges (irModule: Module) =
+
+    let builder = Builder.fromModule irModule
+
+    irModule
+    |> Module.basicBlocks
+    |> List.map (fun x -> (x, !x |> BasicBlock.predecessors))
+    |> List.fold (fun builder (currBlock, preds) ->
+        preds
+        |> List.fold (fun builder pred ->
+            if preds |> List.length > 1
+               && !pred |> BasicBlock.successors |> List.length > 1 then
+                // Destroy critical edges by inserting a block in between, in which we'll be able to place our
+                // copy operations
+                let block, builder =
+                    builder
+                    |> Builder.createBasicBlockAt (After pred) ""
+
+                let basicBlock = !block |> Value.asBasicBlock
+
+                block
+                := { !block with
+                         Content =
+                             BasicBlockValue
+                                 { basicBlock with
+                                       ImmediateDominator = Some pred } }
+
+                !pred
+                |> Value.asBasicBlock
+                |> BasicBlock.terminator
+                |> Value.replaceOperand currBlock block
+
+                !currBlock
+                |> Value.asBasicBlock
+                |> BasicBlock.phis
+                |> List.iter (Value.replaceOperand pred block)
+
+                (builder
+                 |> Builder.setInsertBlock (Some block)
+                 |> Builder.createGoto currBlock
+                 |> snd)
+            else
+                builder) builder) builder
+    |> Builder.finalize
+
 let genPhiMoves (irModule: Module): Module =
 
     let builder = Builder.fromModule irModule
@@ -114,45 +159,11 @@ let genPhiMoves (irModule: Module): Module =
         |> List.fold (fun builder (currBlock, preds) ->
             preds
             |> List.fold (fun builder pred ->
-                let n, builder =
-                    if !currBlock
-                       |> BasicBlock.predecessors
-                       |> List.length > 1
-                       && !pred |> BasicBlock.successors |> List.length > 1 then
-                        // Destroy critical edges by inserting a block in between, in which we'll be able to place our
-                        // copy operations
-                        let block, builder =
-                            builder
-                            |> Builder.createBasicBlockAt (After pred) ""
-
-                        let basicBlock = !block |> Value.asBasicBlock
-
-                        block
-                        := { !block with
-                                 Content =
-                                     BasicBlockValue
-                                         { basicBlock with
-                                               ImmediateDominator = Some pred } }
-
-                        !pred
-                        |> Value.asBasicBlock
-                        |> BasicBlock.terminator
-                        |> Value.replaceOperand currBlock block
-
-                        (block,
-                         builder
-                         |> Builder.setInsertBlock (Some block)
-                         |> Builder.createGoto currBlock
-                         |> snd)
-                    else
-                        (pred, builder)
-
-
                 let builder =
                     builder
-                    |> Builder.setInsertBlock (Some n)
+                    |> Builder.setInsertBlock (Some pred)
                     |> Builder.setInsertPoint
-                        (!n
+                        (!pred
                          |> Value.asBasicBlock
                          |> BasicBlock.terminator
                          |> Before)
@@ -203,7 +214,6 @@ let genPhiMoves (irModule: Module): Module =
                         builder |> Builder.createCopy copyOperand
 
                     phi |> Value.setOperand (blockIndex - 1) copy
-                    phi |> Value.setOperand blockIndex n
                     builder) builder) builder) builder
 
     Builder.finalize builder
