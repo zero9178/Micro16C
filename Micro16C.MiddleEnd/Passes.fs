@@ -3,6 +3,7 @@ module Micro16C.MiddleEnd.Passes
 open System.Collections.Generic
 open System.Collections.Immutable
 open Micro16C.MiddleEnd.IR
+open Micro16C.MiddleEnd.Util
 
 
 let instructionSimplify (irModule: Module) =
@@ -117,9 +118,8 @@ let simplifyCFG (irModule: Module) =
             // not remove such basic blocks. As a future TODO I could check for semantic changes
             match block |> BasicBlock.instructions with
             | [ Ref { Content = GotoInstruction { BasicBlock = destination } } ] when not
-                                                                                          (List.exists (fun x ->
-                                                                                              match !x with
-                                                                                              | { Content = PhiInstruction _ } ->
+                                                                                          (List.exists (function
+                                                                                              | Ref { Content = PhiInstruction _ } ->
                                                                                                   true
                                                                                               | _ -> false)
                                                                                                (!blockValue).Users) ->
@@ -243,10 +243,9 @@ let analyzeAlloc (irModule: Module) =
             Users = users } ->
             let addressTaken =
                 users
-                |> List.exists (fun x ->
-                    match !x with
-                    | { Content = LoadInstruction _ }
-                    | { Content = StoreInstruction _ } -> false
+                |> List.exists (function
+                    | Ref { Content = LoadInstruction _ }
+                    | Ref { Content = StoreInstruction _ } -> false
                     | _ -> true)
 
             instr
@@ -289,9 +288,8 @@ let removeRedundantLoadStores (irModule: Module) =
 
             // Remove all but the last store
             instr
-            |> List.filter (fun x ->
-                match !x with
-                | { Content = StoreInstruction _ } -> true
+            |> List.filter (function
+                | Ref { Content = StoreInstruction _ } -> true
                 | _ -> false)
             |> List.rev
             |> safeTail
@@ -299,16 +297,14 @@ let removeRedundantLoadStores (irModule: Module) =
 
         block
         |> BasicBlock.instructions
-        |> List.filter (fun x ->
-            match !x with
-            | { Content = LoadInstruction { Source = Ref { Content = AllocationInstruction { Aliased = Some false } } } }
-            | { Content = StoreInstruction { Destination = Ref { Content = AllocationInstruction { Aliased = Some false } } } } ->
+        |> List.filter (function
+            | Ref { Content = LoadInstruction { Source = Ref { Content = AllocationInstruction { Aliased = Some false } } } }
+            | Ref { Content = StoreInstruction { Destination = Ref { Content = AllocationInstruction { Aliased = Some false } } } } ->
                 true
             | _ -> false)
-        |> List.groupBy (fun x ->
-            match !x with
-            | { Content = LoadInstruction { Source = alloca } }
-            | { Content = StoreInstruction { Destination = alloca } } -> alloca
+        |> List.groupBy (function
+            | Ref { Content = LoadInstruction { Source = alloca } }
+            | Ref { Content = StoreInstruction { Destination = alloca } } -> alloca
             | _ -> failwith "Internal Compiler error")
         |> List.map (fun (_, x) ->
             match !(List.head x) with
@@ -316,8 +312,6 @@ let removeRedundantLoadStores (irModule: Module) =
             | { Content = StoreInstruction { Destination = alloca } } -> (alloca, x)
             | _ -> failwith "Internal Compiler error")
         |> List.iter (snd >> simplifyLoadStoreSeries)
-
-
 
     irModule
     |> Module.basicBlocks
@@ -471,21 +465,20 @@ let mem2reg (irModule: Module) =
     |> List.iter (fun (alloca, loadStores) ->
         let s =
             loadStores
-            |> Seq.choose (fun x ->
-                match !x with
-                | { Content = StoreInstruction _ } -> (!x).ParentBlock
+            |> Seq.choose (function
+                | Ref { Content = StoreInstruction _
+                        ParentBlock = parentBlock } -> parentBlock
                 | _ -> None)
             |> fun x -> ImmutableHashSet.CreateRange(HashIdentity.Reference, x)
 
-        let dominanceFrontiers (nodes: ImmutableHashSet<Value ref>): ImmutableHashSet<Value ref> =
-            nodes
-            |> Seq.map
+        let dominanceFrontiers =
+            Seq.map
                 ((!)
                  >> Value.asBasicBlock
                  >> BasicBlock.dominanceFrontier)
-            |> Seq.choose id
-            |> Seq.map (fun x -> ImmutableHashSet.CreateRange(HashIdentity.Reference, x))
-            |> Seq.reduce (fun x -> x.Union)
+            >> Seq.choose id
+            >> Seq.map (fun x -> ImmutableHashSet.CreateRange(HashIdentity.Reference, x))
+            >> Seq.reduce (fun x -> x.Union)
 
         let phis =
             Seq.unfold (fun (x: ImmutableHashSet<Value ref>) ->
@@ -530,7 +523,8 @@ let mem2reg (irModule: Module) =
         let phiPredBlocks =
             phis
             |> Seq.choose (fun x ->
-                (!x).ParentBlock
+                !x
+                |> Value.parentBlock
                 |> Option.map ((!) >> BasicBlock.predecessors)
                 |> Option.map (List.map (fun p -> (p, x))))
             |> Seq.concat
@@ -562,17 +556,16 @@ let mem2reg (irModule: Module) =
                         | { Content = PhiInstruction _ } when phis.Contains x -> x
                         | _ -> replacement) replacement
 
-                match phiPredBlocks.TryGetValue(blockValue) with
-                | (false, _) -> ()
-                | (true, phis) ->
-                    phis
-                    |> List.iter (fun phiValue ->
+                phiPredBlocks
+                |> ImmutableMap.tryFind blockValue
+                |> Option.iter
+                    (List.iter (fun phiValue ->
                         !phiValue
                         |> Value.operands
                         |> List.indexed
                         |> List.pairwise
                         |> List.filter (fun (_, (_, bb)) -> bb = blockValue)
-                        |> List.iter (fun ((i, _), _) -> phiValue |> Value.setOperand i replacement))
+                        |> List.iter (fun ((i, _), _) -> phiValue |> Value.setOperand i replacement)))
 
                 !blockValue
                 |> BasicBlock.successors
@@ -643,10 +636,9 @@ let analyzeLifetimes (irModule: Module) =
                 |> Value.asBasicBlock
                 |> BasicBlock.revInstructions
                 |> List.skip 1
-                |> List.takeWhile (fun instr ->
-                    match !instr with
-                    | { Content = CopyInstruction _
-                        Users = [ Ref { Content = PhiInstruction _ } ] } -> true
+                |> List.takeWhile (function
+                    | Ref { Content = CopyInstruction _
+                            Users = [ Ref { Content = PhiInstruction _ } ] } -> true
                     | _ -> false)
 
             copiesAtEnd
@@ -676,17 +668,17 @@ let analyzeLifetimes (irModule: Module) =
                 |> List.map ((!) >> Value.asBasicBlock >> BasicBlock.phis)
                 |> List.iter
                     (List.iter (fun phi ->
-                        match (!map).TryGetValue phi with
-                        | (false, _) ->
+                        match !map |> ImmutableMap.tryFind phi with
+                        | None ->
                             map
                             := (!map)
                                 .Add(phi, [ Done(copyStartIndex, copyEndIndex) ])
-                        | (true, ([] as rest))
-                        | (true, (Done _ :: _ as rest)) ->
+                        | Some ([] as rest)
+                        | Some (Done _ :: _ as rest) ->
                             map
                             := (!map)
                                 .SetItem(phi, Done(copyStartIndex, copyEndIndex) :: rest)
-                        | (true, (NotDone _ as notDone :: rest)) ->
+                        | Some (NotDone _ as notDone :: rest) ->
                             map
                             := (!map)
                                 .SetItem(phi,
@@ -721,27 +713,30 @@ let analyzeLifetimes (irModule: Module) =
 
             used
             |> List.iter (fun instr ->
-                match (!map).TryGetValue instr with
-                | (true, []) -> failwith "Ought to not be possible"
-                | (true, NotDone (_, endV) :: rest) ->
+                match !map |> ImmutableMap.tryFind instr with
+                | Some [] -> failwith "Ought to not be possible"
+                | Some (NotDone (_, endV) :: rest) ->
                     map
-                    := (!map)
-                        .SetItem(instr, NotDone(index, endV) :: rest)
-                | (true, rest) ->
+                    := !map
+                       |> ImmutableMap.add instr (NotDone(index, endV) :: rest)
+                | Some rest ->
                     map
-                    := (!map)
-                        .SetItem(instr, NotDone(index, index) :: rest)
-                | (false, _) ->
+                    := !map
+                       |> ImmutableMap.add instr (NotDone(index, index) :: rest)
+                | None ->
                     map
-                    := (!map).Add(instr, [ NotDone(index, index) ]))
+                    := !map
+                       |> ImmutableMap.add instr [ NotDone(index, index) ])
+
             // turn the instr current range from NotDone into done
-            match (!map).TryGetValue instr with
-            | (false, _)
-            | (true, [])
-            | (true, Done _ :: _) -> ()
-            | (true, NotDone (start, endV) :: rest) ->
+            match (!map) |> ImmutableMap.tryFind instr with
+            | None
+            | Some []
+            | Some (Done _ :: _) -> ()
+            | Some (NotDone (start, endV) :: rest) ->
                 map
-                := (!map).SetItem(instr, Done(start, endV) :: rest))
+                := !map
+                   |> ImmutableMap.add instr (Done(start, endV) :: rest))
 
         // Handles loops. Iterate over all predecessors and check if any of them have a higher index, aka appear later
         // and are therefore connected over a back edge. We take the outer most loop of these and extend the lifetimes of
@@ -765,17 +760,10 @@ let analyzeLifetimes (irModule: Module) =
 
             map
             := !map
-               |> Seq.map (fun kv ->
-                   let value, lifetimes = kv.Deconstruct()
-
-                   match lifetimes with
-                   | []
-                   | Done _ :: _ -> kv
-                   | NotDone (start, _) :: rest -> KeyValuePair(value, NotDone(start, rangeEnd) :: rest))
-               |> LifetimesDictionary
-                   .Empty
-                   .WithComparers(HashIdentity.Reference)
-                   .SetItems)
+               |> ImmutableMap.map (function
+                   | value, ([] as lifetimes)
+                   | value, (Done _ :: _ as lifetimes) -> (value, lifetimes)
+                   | value, NotDone (start, _) :: rest -> (value, NotDone(start, rangeEnd) :: rest)))
 
         match prev with
         | None -> ()
@@ -801,18 +789,12 @@ let analyzeLifetimes (irModule: Module) =
                 | (Some blockEnd, Some prevStart) ->
                     map
                     := !map
-                       |> Seq.map (fun kv ->
-                           let (value, lifeRange) = kv.Deconstruct()
-
-                           match lifeRange with
-                           | []
-                           | Done _ :: _ -> kv
-                           | NotDone (lastUse, _) :: _ when lastUse <= blockEnd -> kv
-                           | NotDone (_, endV) :: rest -> KeyValuePair(value, Done(prevStart, endV) :: rest))
-                       |> LifetimesDictionary
-                           .Empty
-                           .WithComparers(HashIdentity.Reference)
-                           .SetItems
+                       |> ImmutableMap.map (function
+                           | value, ([] as lifeRange)
+                           | value, (Done _ :: _ as lifeRange) -> (value, lifeRange)
+                           | value, (NotDone (lastUse, _) :: _ as lifeRange) when lastUse <= blockEnd ->
+                               (value, lifeRange)
+                           | value, NotDone (_, endV) :: rest -> (value, Done(prevStart, endV) :: rest))
                 | _ -> ()
 
     irModule
@@ -825,9 +807,7 @@ let analyzeLifetimes (irModule: Module) =
     |> List.iter analyzeLifetimesInBlock
 
     !map
-    |> Seq.iter (fun kv ->
-        let value, lifetimes = kv.Deconstruct()
-
+    |> ImmutableMap.iter (fun (value, lifetimes) ->
         value
         := { !value with
                  LifeIntervals =

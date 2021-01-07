@@ -10,6 +10,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <Compile Include="Util.fs"/>
         <Compile Include="IR.fs"/>
         <Compile Include="Codegen.fs"/>
         <Compile Include="Passes.fs"/>

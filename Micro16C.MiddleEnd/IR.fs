@@ -136,6 +136,16 @@ let rec private filterOnce predicate list =
 
 module Value =
 
+    let name value = value.Name
+
+    let parentBlock value = value.ParentBlock
+
+    let users value = value.Users
+
+    let index value = Option.get value.Index
+
+    let lifeIntervals value = value.LifeIntervals
+
     let internal addUser dependent operand =
         match !operand with
         | { Content = Constant _ } -> ()
@@ -283,7 +293,7 @@ module Value =
         |> List.map fst
         |> List.iter (fun i -> setOperand i replacement value)
 
-    let useCount value = value.Users |> List.length
+    let useCount = users >> List.length
 
     let hasSideEffects value =
         match value.Content with
@@ -315,8 +325,8 @@ module Value =
         | CondBrInstruction _ -> true
         | _ -> false
 
-    let asBasicBlock value =
-        match value with
+    let asBasicBlock =
+        function
         | { Content = BasicBlockValue value } -> value
         | _ -> failwith "Internal Compiler Error: Value is not a BasicBlock"
 
@@ -400,52 +410,42 @@ module Value =
                      ParentBlock = (!value).ParentBlock }
         | _ -> eraseFromParent value
 
-    let name value = value.Name
-
-    let parentBlock value = value.ParentBlock
-
-    let index value = Option.get value.Index
-
-    let lifeIntervals value = value.LifeIntervals
-
 module BasicBlock =
 
-    let successors basicBlock =
-        let instructions =
-            (basicBlock |> Value.asBasicBlock).Instructions
-
-        match instructions with
-        | head :: _ when Value.isTerminating !head ->
-            !head
-            |> Value.operands
-            |> List.filter (fun x ->
-                match !x with
-                | { Content = BasicBlockValue _ } -> true
-                | _ -> false)
-        | _ -> []
-
-    let predecessors basicBlock =
-        basicBlock.Users
-        |> List.filter ((!) >> Value.isTerminating)
-        |> List.map (fun x -> (!x).ParentBlock)
-        |> List.choose id
-
-    let instructions basicBlock = basicBlock.Instructions |> List.rev
-
     let revInstructions basicBlock = basicBlock.Instructions
+
+    let instructions = revInstructions >> List.rev
 
     let immediateDominator basicBlock = basicBlock.ImmediateDominator
 
     let dominanceFrontier basicBlock = basicBlock.DominanceFrontier
 
-    let dominators basicBlock =
-        Seq.unfold (fun blockValue ->
-            let block = !blockValue |> Value.asBasicBlock
+    let successors basicBlock =
+        match basicBlock
+              |> Value.asBasicBlock
+              |> revInstructions with
+        | head :: _ when Value.isTerminating !head ->
+            !head
+            |> Value.operands
+            |> List.filter (function
+                | Ref { Content = BasicBlockValue _ } -> true
+                | _ -> false)
+        | _ -> []
 
-            match block.ImmediateDominator with
+    let predecessors =
+        Value.users
+        >> List.filter ((!) >> Value.isTerminating)
+        >> List.map ((!) >> Value.parentBlock)
+        >> List.choose id
+
+    let dominators =
+        Seq.unfold (fun blockValue ->
+            match !blockValue
+                  |> Value.asBasicBlock
+                  |> immediateDominator with
             | None -> None
             | Some s when s = blockValue -> None
-            | Some s -> Some(s, s)) basicBlock
+            | Some s -> Some(s, s))
 
     let dominates other basicBlock =
         other |> dominators |> Seq.contains basicBlock
@@ -460,20 +460,16 @@ module BasicBlock =
         | Some s -> s
         | None -> failwith "Internal Compiler Error: Basic Block has no terminator"
 
-    let phis basicBlock =
-        basicBlock
-        |> instructions
-        |> List.takeWhile (fun x ->
-            match !x with
-            | { Content = PhiInstruction _ } -> true
+    let phis =
+        instructions
+        >> List.takeWhile (function
+            | Ref { Content = PhiInstruction _ } -> true
             | _ -> false)
 
-    let nonPhiInstructions basicBlock =
-        basicBlock
-        |> instructions
-        |> List.skipWhile (fun x ->
-            match !x with
-            | { Content = PhiInstruction _ } -> true
+    let nonPhiInstructions =
+        instructions
+        >> List.skipWhile (function
+            | Ref { Content = PhiInstruction _ } -> true
             | _ -> false)
 
 
@@ -624,16 +620,18 @@ type Module =
 
 module Module =
 
-    let instructions irModule =
-        irModule.BasicBlocks
-        |> List.rev
-        |> List.map ((!) >> Value.asBasicBlock)
-        |> List.map (fun { Instructions = instr } -> instr |> List.rev)
-        |> List.concat
-
     let basicBlocks irModule = irModule.BasicBlocks |> List.rev
 
     let revBasicBlocks irModule = irModule.BasicBlocks
+
+    let instructions =
+        revBasicBlocks
+        >> List.rev
+        >> List.map
+            ((!)
+             >> Value.asBasicBlock
+             >> BasicBlock.instructions)
+        >> List.concat
 
     let fromBasicBlocks basicBlocks =
         { BasicBlocks = basicBlocks |> List.rev }
