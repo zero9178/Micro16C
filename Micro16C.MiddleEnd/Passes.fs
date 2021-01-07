@@ -80,12 +80,12 @@ let instructionSimplify (irModule: Module) =
                 |> Value.replaceWith
                     (Builder.createGoto falseBranch Builder.Default
                      |> fst)
-        | { Content = PhiInstruction { Register = None; Incoming = list } } ->
-            let distinctValues = list |> List.map fst |> List.distinct
-
-            if distinctValues |> List.length = 1 then
-                value
-                |> Value.replaceWith (List.head distinctValues)
+        | { Content = PhiInstruction { Register = None; Incoming = list } } when list
+                                                                                 |> List.map fst
+                                                                                 |> List.distinct
+                                                                                 |> List.length = 1 ->
+            value
+            |> Value.replaceWith (list |> List.head |> fst)
         | _ -> ()
 
     irModule
@@ -326,14 +326,14 @@ let removeRedundantLoadStores (irModule: Module) =
     irModule
 
 let analyzeDominance (irModule: Module) =
-    let map = Dictionary()
+    let map = Dictionary(HashIdentity.Reference)
 
     irModule
     |> Module.basicBlocks
     |> List.map (fun x -> (x, None))
     |> List.iter map.Add
 
-    let order = Dictionary()
+    let order = Dictionary(HashIdentity.Reference)
 
     irModule
     |> Module.basicBlocks
@@ -341,10 +341,10 @@ let analyzeDominance (irModule: Module) =
     |> List.map (fun (y, x) -> (x, y))
     |> List.iter order.Add
 
-    let processSeq seq =
-        map.[List.head seq] <- Some(List.head seq)
+    let processBlocks blocks =
+        map.[List.head blocks] <- Some(List.head blocks)
 
-        let seq = List.skip 1 seq
+        let blocks = List.skip 1 blocks
 
         let intersect b1 b2 =
             let mutable finger1 = b1
@@ -363,7 +363,7 @@ let analyzeDominance (irModule: Module) =
 
             finger1
 
-        while seq
+        while blocks
               |> List.fold (fun changed node ->
                   let processedPredecessors =
                       !node
@@ -388,7 +388,7 @@ let analyzeDominance (irModule: Module) =
                      false do
             ()
 
-    irModule |> Module.basicBlocks |> processSeq
+    irModule |> Module.basicBlocks |> processBlocks
 
     irModule
     |> Module.basicBlocks
@@ -406,11 +406,11 @@ let analyzeDominance (irModule: Module) =
 
 let analyzeDominanceFrontiers (irModule: Module) =
 
-    let map = Dictionary()
+    let map = Dictionary(HashIdentity.Reference)
 
     irModule
     |> Module.basicBlocks
-    |> List.map (fun x -> (x, ImmutableHashSet.Create()))
+    |> List.map (fun x -> (x, ImmutableHashSet.Create<Value ref>(HashIdentity.Reference)))
     |> List.iter map.Add
 
     irModule
@@ -422,9 +422,9 @@ let analyzeDominanceFrontiers (irModule: Module) =
         | preds -> Some(x, preds))
     |> List.iter (fun (b, preds) ->
         let iDom =
-            (!b
-             |> Value.asBasicBlock
-             |> BasicBlock.immediateDominator)
+            !b
+            |> Value.asBasicBlock
+            |> BasicBlock.immediateDominator
 
         preds
         |> List.iter (fun p ->
@@ -475,8 +475,7 @@ let mem2reg (irModule: Module) =
                 match !x with
                 | { Content = StoreInstruction _ } -> (!x).ParentBlock
                 | _ -> None)
-            |> Seq.distinct
-            |> ImmutableHashSet.CreateRange
+            |> fun x -> ImmutableHashSet.CreateRange(HashIdentity.Reference, x)
 
         let dominanceFrontiers (nodes: ImmutableHashSet<Value ref>): ImmutableHashSet<Value ref> =
             nodes
@@ -485,7 +484,7 @@ let mem2reg (irModule: Module) =
                  >> Value.asBasicBlock
                  >> BasicBlock.dominanceFrontier)
             |> Seq.choose id
-            |> Seq.map ImmutableHashSet.CreateRange
+            |> Seq.map (fun x -> ImmutableHashSet.CreateRange(HashIdentity.Reference, x))
             |> Seq.reduce (fun x -> x.Union)
 
         let phis =
