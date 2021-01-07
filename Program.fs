@@ -46,6 +46,8 @@ let main argv =
         |> Result.map Legalize.destroyCriticalEdges
         |> Result.map Legalize.genPhiMoves
         |> Result.map (printModulePass "End of IR:")
+        |> Result.map Passes.numberAll
+        |> Result.map Passes.analyzeLifetimes
         |> Result.map GenAssembly.genAssembly
         |> Result.map GenAssembly.removeRedundantLabels
         |> Result.map Assembly.printAssembly

@@ -43,7 +43,9 @@ type Value =
     { Users: Value ref list
       Name: string
       Content: ValueContent
-      ParentBlock: Value ref option }
+      ParentBlock: Value ref option
+      Index: int option
+      LifeIntervals: (int * int) list }
 
     override this.ToString() = this.Name
 
@@ -51,7 +53,9 @@ type Value =
         { Users = []
           Name = ""
           Content = Undef
-          ParentBlock = None }
+          ParentBlock = None
+          Index = None
+          LifeIntervals = [] }
 
     static member UndefValue = ref Value.Default
 
@@ -398,6 +402,12 @@ module Value =
 
     let name value = value.Name
 
+    let parentBlock value = value.ParentBlock
+
+    let index value = Option.get value.Index
+
+    let lifeIntervals value = value.LifeIntervals
+
 module BasicBlock =
 
     let successors basicBlock =
@@ -421,6 +431,8 @@ module BasicBlock =
         |> List.choose id
 
     let instructions basicBlock = basicBlock.Instructions |> List.rev
+
+    let revInstructions basicBlock = basicBlock.Instructions
 
     let immediateDominator basicBlock = basicBlock.ImmediateDominator
 
@@ -452,6 +464,14 @@ module BasicBlock =
         basicBlock
         |> instructions
         |> List.takeWhile (fun x ->
+            match !x with
+            | { Content = PhiInstruction _ } -> true
+            | _ -> false)
+
+    let nonPhiInstructions basicBlock =
+        basicBlock
+        |> instructions
+        |> List.skipWhile (fun x ->
             match !x with
             | { Content = PhiInstruction _ } -> true
             | _ -> false)
@@ -612,6 +632,8 @@ module Module =
         |> List.concat
 
     let basicBlocks irModule = irModule.BasicBlocks |> List.rev
+
+    let revBasicBlocks irModule = irModule.BasicBlocks
 
     let fromBasicBlocks basicBlocks =
         { BasicBlocks = basicBlocks |> List.rev }
