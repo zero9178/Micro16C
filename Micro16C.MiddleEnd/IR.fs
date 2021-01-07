@@ -420,45 +420,41 @@ module BasicBlock =
 
     let dominanceFrontier basicBlock = basicBlock.DominanceFrontier
 
-    let successors basicBlock =
-        match basicBlock
-              |> Value.asBasicBlock
-              |> revInstructions with
-        | head :: _ when Value.isTerminating !head ->
-            !head
-            |> Value.operands
-            |> List.filter (function
-                | Ref { Content = BasicBlockValue _ } -> true
-                | _ -> false)
-        | _ -> []
+    let successors =
+        Value.asBasicBlock
+        >> revInstructions
+        >> List.tryHead
+        >> Option.filter ((!) >> Value.isTerminating)
+        >> Option.map
+            ((!)
+             >> Value.operands
+             >> List.filter (function
+                 | Ref { Content = BasicBlockValue _ } -> true
+                 | _ -> false))
+        >> Option.defaultValue []
 
     let predecessors =
         Value.users
         >> List.filter ((!) >> Value.isTerminating)
-        >> List.map ((!) >> Value.parentBlock)
-        >> List.choose id
+        >> List.choose ((!) >> Value.parentBlock)
 
     let dominators =
         Seq.unfold (fun blockValue ->
-            match !blockValue
-                  |> Value.asBasicBlock
-                  |> immediateDominator with
-            | None -> None
-            | Some s when s = blockValue -> None
-            | Some s -> Some(s, s))
+            !blockValue
+            |> Value.asBasicBlock
+            |> immediateDominator
+            |> Option.filter ((=) blockValue)
+            |> Option.map (fun x -> (x, x)))
 
     let dominates other basicBlock =
         other |> dominators |> Seq.contains basicBlock
 
-    let tryTerminator basicBlock =
-        match basicBlock.Instructions with
-        | head :: _ when Value.isTerminating !head -> Some head
-        | _ -> None
+    let tryTerminator =
+        revInstructions
+        >> List.tryHead
+        >> Option.filter ((!) >> Value.isTerminating)
 
-    let terminator basicBlock =
-        match tryTerminator basicBlock with
-        | Some s -> s
-        | None -> failwith "Internal Compiler Error: Basic Block has no terminator"
+    let terminator = tryTerminator >> Option.get
 
     let phis =
         instructions
