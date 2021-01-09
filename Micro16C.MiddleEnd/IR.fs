@@ -45,7 +45,8 @@ type Value =
       Content: ValueContent
       ParentBlock: Value ref option
       Index: int option
-      LifeIntervals: (int * int) list }
+      LifeIntervals: (int * int) list
+      Register: Register option }
 
     override this.ToString() = this.Name
 
@@ -55,7 +56,8 @@ type Value =
           Content = Undef
           ParentBlock = None
           Index = None
-          LifeIntervals = [] }
+          LifeIntervals = []
+          Register = None }
 
     static member UndefValue = ref Value.Default
 
@@ -143,6 +145,8 @@ module Value =
     let users value = value.Users
 
     let index value = Option.get value.Index
+
+    let register (value: Value) = value.Register
 
     let lifeIntervals value = value.LifeIntervals
 
@@ -620,14 +624,15 @@ module Module =
 
     let revBasicBlocks irModule = irModule.BasicBlocks
 
-    let instructions =
+    let revInstructions =
         revBasicBlocks
-        >> List.rev
         >> List.map
             ((!)
              >> Value.asBasicBlock
-             >> BasicBlock.instructions)
+             >> BasicBlock.revInstructions)
         >> List.concat
+
+    let instructions = revInstructions >> List.rev
 
     let fromBasicBlocks basicBlocks =
         { BasicBlocks = basicBlocks |> List.rev }

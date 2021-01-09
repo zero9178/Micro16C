@@ -48,6 +48,7 @@ let main argv =
         |> Result.map (printModulePass "End of IR:")
         |> Result.map Passes.numberAll
         |> Result.map Passes.analyzeLifetimes
+        |> Result.map RegisterAllocator.allocateRegisters
         |> Result.map GenAssembly.genAssembly
         |> Result.map GenAssembly.removeRedundantLabels
         |> Result.map Assembly.printAssembly

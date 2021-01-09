@@ -60,15 +60,16 @@ let genAssembly (irModule: Module): AssemblyLine list =
 
                 uniqueName (!value |> Value.name)
 
-    let valueToRegisters =
-        RegisterAllocator.allocateRegisters irModule
-
     let operandToBus operand =
         match !operand with
         | { Content = Constant { Value = 0s } } -> Bus.Zero
         | { Content = Constant { Value = 1s } } -> Bus.One
         | { Content = Constant { Value = -1s } } -> Bus.NegOne
-        | _ -> valueToRegisters.[operand] |> Register.toBus
+        | _ ->
+            !operand
+            |> Value.register
+            |> Option.get
+            |> Register.toBus
 
     let prependOperation operation list = (Operation operation) :: list
 
@@ -280,7 +281,6 @@ let removeRedundantLabels assemblyList =
             | _ -> set) (Set([]))
 
     assemblyList
-    |> List.filter (fun assembly ->
-        match assembly with
-        | Label s when not (usedLabels |> Set.contains s) -> false
+    |> List.filter (function
+        | Label s -> usedLabels |> Set.contains s
         | _ -> true)

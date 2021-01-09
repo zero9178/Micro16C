@@ -324,7 +324,7 @@ let analyzeDominance (irModule: Module) =
 
     irModule
     |> Module.basicBlocks
-    |> List.map (fun x -> (x, None))
+    |> List.map (associateValue None)
     |> List.iter map.Add
 
     let order = Dictionary(HashIdentity.Reference)
@@ -404,7 +404,7 @@ let analyzeDominanceFrontiers (irModule: Module) =
 
     irModule
     |> Module.basicBlocks
-    |> List.map (fun x -> (x, ImmutableHashSet.Create<Value ref>(HashIdentity.Reference)))
+    |> List.map (associateValue (ImmutableHashSet.Create<Value ref>(HashIdentity.Reference)))
     |> List.iter map.Add
 
     irModule
@@ -526,11 +526,11 @@ let mem2reg (irModule: Module) =
                 !x
                 |> Value.parentBlock
                 |> Option.map ((!) >> BasicBlock.predecessors)
-                |> Option.map (List.map (fun p -> (p, x))))
+                |> Option.map (List.map (associateValue x)))
             |> Seq.concat
             |> Seq.groupBy fst
-            |> Seq.map (fun (x, y) -> KeyValuePair(x, y |> List.ofSeq |> List.map snd))
-            |> (fun x -> ImmutableDictionary.CreateRange(HashIdentity.Reference, x))
+            |> Seq.map (fun (x, y) -> (x, y |> List.ofSeq |> List.map snd))
+            |> ImmutableMap.ofSeq
 
         let mutable alreadyVisited =
             ImmutableHashSet.Create<Value ref>(HashIdentity.Reference)
@@ -640,12 +640,6 @@ let analyzeLifetimes (irModule: Module) =
                             Users = [ Ref { Content = PhiInstruction _ } ] } -> true
                     | _ -> false)
 
-            copiesAtEnd
-            |> List.iter (fun instr ->
-                map
-                := (!map)
-                    .Add(instr, [ NotDone(terminatorIndex, terminatorIndex) ]))
-
             let copyEndIndex =
                 copiesAtEnd
                 |> List.tryHead
@@ -671,20 +665,20 @@ let analyzeLifetimes (irModule: Module) =
                             | None ->
                                 map
                                 := !map
-                                   |> ImmutableMap.add phi [ Done(copyStartIndex, copyEndIndex) ]
+                                   |> ImmutableMap.add phi [ NotDone(copyStartIndex, terminatorIndex) ]
                             | Some ([] as rest)
                             | Some (Done _ :: _ as rest) ->
 
                                 map
                                 := !map
-                                   |> ImmutableMap.add phi (Done(copyStartIndex, copyEndIndex) :: rest)
-                            | Some (NotDone _ as notDone :: rest) ->
+                                   |> ImmutableMap.add phi (NotDone(copyStartIndex, terminatorIndex) :: rest)
+                            | Some (NotDone (start, endV) :: rest) ->
                                 map
                                 := !map
                                    |> ImmutableMap.add
                                        phi
-                                          (notDone
-                                           :: Done(copyStartIndex, copyEndIndex) :: rest))))
+                                          (NotDone(min start copyStartIndex, max endV terminatorIndex)
+                                           :: rest))))
             |> ignore
 
         let revInstructions =
@@ -705,6 +699,8 @@ let analyzeLifetimes (irModule: Module) =
                      |> (!)
                      |> Value.index,
                      [ instr ])
+                | { Content = CopyInstruction { Source = value }
+                    Users = [ Ref { Content = PhiInstruction _ } ] } -> (!instr |> Value.index, [ value ])
                 | _ ->
                     (!instr |> Value.index,
                      (if Value.producesValue !instr then [ instr ] else [])
@@ -730,14 +726,17 @@ let analyzeLifetimes (irModule: Module) =
                        |> ImmutableMap.add instr [ NotDone(index, index) ])
 
             // turn the instr current range from NotDone into done
-            match (!map) |> ImmutableMap.tryFind instr with
-            | None
-            | Some []
-            | Some (Done _ :: _) -> ()
-            | Some (NotDone (start, endV) :: rest) ->
-                map
-                := !map
-                   |> ImmutableMap.add instr (Done(start, endV) :: rest))
+            match !instr with
+            | { Content = PhiInstruction _ } -> ()
+            | _ ->
+                match (!map) |> ImmutableMap.tryFind instr with
+                | None
+                | Some []
+                | Some (Done _ :: _) -> ()
+                | Some (NotDone (start, endV) :: rest) ->
+                    map
+                    := !map
+                       |> ImmutableMap.add instr (Done(start, endV) :: rest))
 
         // Handles loops. Iterate over all predecessors and check if any of them have a higher index, aka appear later
         // and are therefore connected over a back edge. We take the outer most loop of these and extend the lifetimes of
@@ -766,37 +765,37 @@ let analyzeLifetimes (irModule: Module) =
                    | value, (Done _ :: _ as lifetimes) -> (value, lifetimes)
                    | value, NotDone (start, _) :: rest -> (value, NotDone(start, rangeEnd) :: rest)))
 
-        prev
-        |> Option.filter (fun prev ->
-            !block
-            |> BasicBlock.successors
-            |> List.contains prev
-            |> not)
-        |> Option.iter (fun prev ->
-            // the previous block was not a successor of this block. If any uses appeared in the previous block
-            // that did not appear in this block then we have a lifetime hole. That means we need to set the start
-            // of the interval to the beginning of the previous block and make it Done
-            let prevStart =
-                !prev
-                |> Value.asBasicBlock
-                |> BasicBlock.instructions
-                |> List.tryHead
-                |> Option.map ((!) >> Value.index)
-
-            (revInstructions
-             |> List.tryHead
-             |> Option.map ((!) >> Value.index),
-             prevStart)
-            ||> Option.map2 (fun blockEnd prevStart ->
-                    map
-                    := !map
-                       |> ImmutableMap.map (function
-                           | value, ([] as lifeRange)
-                           | value, (Done _ :: _ as lifeRange) -> (value, lifeRange)
-                           | value, (NotDone (lastUse, _) :: _ as lifeRange) when lastUse <= blockEnd ->
-                               (value, lifeRange)
-                           | value, NotDone (_, endV) :: rest -> (value, Done(prevStart, endV) :: rest)))
-            |> ignore)
+    //        prev
+//        |> Option.filter (fun prev ->
+//            !block
+//            |> BasicBlock.successors
+//            |> List.contains prev
+//            |> not)
+//        |> Option.iter (fun prev ->
+//            // the previous block was not a successor of this block. If any uses appeared in the previous block
+//            // that did not appear in this block then we have a lifetime hole. That means we need to set the start
+//            // of the interval to the beginning of the previous block and make it Done
+//            let prevStart =
+//                !prev
+//                |> Value.asBasicBlock
+//                |> BasicBlock.instructions
+//                |> List.tryHead
+//                |> Option.map ((!) >> Value.index)
+//
+//            (revInstructions
+//             |> List.tryHead
+//             |> Option.map ((!) >> Value.index),
+//             prevStart)
+//            ||> Option.map2 (fun blockEnd prevStart ->
+//                    map
+//                    := !map
+//                       |> ImmutableMap.map (function
+//                           | value, ([] as lifeRange)
+//                           | value, (Done _ :: _ as lifeRange) -> (value, lifeRange)
+//                           | value, (NotDone (lastUse, _) :: _ as lifeRange) when lastUse <= blockEnd ->
+//                               (value, lifeRange)
+//                           | value, NotDone (_, endV) :: rest -> (value, Done(prevStart, endV) :: rest)))
+//            |> ignore)
 
     irModule
     |> Module.revBasicBlocks
