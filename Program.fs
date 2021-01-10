@@ -39,18 +39,19 @@ let main argv =
         |> Result.map Passes.deadCodeElimination
         |> Result.map Passes.instructionSimplify
         |> Result.map Passes.instructionCombine
+        |> Result.map (printModulePass "Before simplifyCFG:")
         |> Result.map Passes.simplifyCFG
         |> Result.map Passes.removeRedundantLoadStores
         |> Result.map (printModulePass "End of optimizations:")
-        |> Result.map Legalize.legalizeConstants
-        |> Result.map Legalize.destroyCriticalEdges
-        |> Result.map Legalize.genPhiMoves
-        |> Result.map (printModulePass "End of IR:")
-        |> Result.map Passes.numberAll
-        |> Result.map Passes.analyzeLifetimes
-        |> Result.map RegisterAllocator.allocateRegisters
-        |> Result.map GenAssembly.genAssembly
-        |> Result.map GenAssembly.removeRedundantLabels
-        |> Result.map Assembly.printAssembly
+    //        |> Result.map Legalize.legalizeConstants
+//        |> Result.map Legalize.destroyCriticalEdges
+//        |> Result.map Legalize.genPhiMoves
+//        |> Result.map (printModulePass "End of IR:")
+//        |> Result.map Passes.numberAll
+//        |> Result.map Passes.analyzeLifetimes
+//        |> Result.map RegisterAllocator.allocateRegisters
+//        |> Result.map GenAssembly.genAssembly
+//        |> Result.map GenAssembly.removeRedundantLabels
+//        |> Result.map Assembly.printAssembly
 
     0

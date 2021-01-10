@@ -95,7 +95,7 @@ let deadCodeElimination (irModule: Module ref) =
     let eliminate value =
         if not (Value.hasSideEffects !value)
            && 0 = Value.useCount !value then
-            value |> Value.eraseFromParent
+            value |> Value.destroy
 
     !irModule
     |> Module.instructions
@@ -111,7 +111,7 @@ let simplifyCFG (irModule: Module ref) =
         | { Content = BasicBlockValue block } ->
             // this optimization may be invalid if the basic block is used in a Phi. For now I'll be conservative and
             // not remove such basic blocks. As a future TODO I could check for semantic changes
-            match block |> BasicBlock.instructions with
+            match block |> BasicBlock.revInstructions with
             | [ Ref { Content = GotoInstruction { BasicBlock = destination } } ] when not
                                                                                           (List.exists (function
                                                                                               | Ref { Content = PhiInstruction _ } ->
@@ -119,12 +119,33 @@ let simplifyCFG (irModule: Module ref) =
                                                                                               | _ -> false)
                                                                                                (!blockValue).Users) ->
                 blockValue |> Value.replaceWith destination
+            | Ref { Content = GotoInstruction { BasicBlock = destination } } :: _ when (!destination
+                                                                                        |> BasicBlock.predecessors
+                                                                                        |> List.length =
+                                                                                           1)
+                                                                                       && (!destination
+                                                                                           |> Value.asBasicBlock
+                                                                                           |> BasicBlock.phis
+                                                                                           |> List.isEmpty) ->
+                let builder =
+                    Builder.fromModule irModule
+                    |> Builder.setInsertBlock (Some destination)
+                    |> Builder.setInsertPoint Start
+
+                !blockValue
+                |> Value.asBasicBlock
+                |> BasicBlock.revInstructions
+                |> List.skip 1
+                |> List.rev
+                |> List.iter (fun x -> builder |> Builder.insertValue x |> ignore)
+
+                blockValue |> Value.replaceWith destination
             | _ ->
                 if index <> 0
                    && !blockValue
                       |> BasicBlock.predecessors
                       |> List.isEmpty then
-                    blockValue |> Value.eraseFromParent
+                    blockValue |> Value.destroy
         | _ -> failwith "Internal Compiler Error"
 
     !irModule
@@ -151,7 +172,7 @@ let instructionCombine (irModule: Module ref) =
                                                                                         Value = passThrough }
                                                            Users = [ _ ] } as first } } ->
             instruction |> Value.replaceWith passThrough
-            first |> Value.eraseFromParent
+            first |> Value.destroy
         | Ref { Content = BinaryInstruction { Kind = Add
                                               Left = Ref { Content = Constant { Value = value1 } }
                                               Right = Ref { Content = BinaryInstruction { Kind = Add
@@ -219,7 +240,7 @@ let instructionCombine (irModule: Module ref) =
                 |> Builder.createCondBr Negative passThrough falseBranch trueBranch
 
             instruction |> Value.replaceWith newCond
-            neg |> Value.eraseFromParent
+            neg |> Value.destroy
         | _ -> ()
 
     !irModule
@@ -285,7 +306,7 @@ let removeRedundantLoadStores (irModule: Module ref) =
                 | _ -> false)
             |> List.rev
             |> safeTail
-            |> List.iter Value.eraseFromParent
+            |> List.iter Value.destroy
 
         block
         |> BasicBlock.instructions
@@ -521,7 +542,7 @@ let mem2reg (irModule: Module ref) =
                         match !x with
                         | { Content = StoreInstruction { Value = passThrough } } when loadStores
                                                                                       |> ImmutableSet.contains x ->
-                            x |> Value.eraseFromParent
+                            x |> Value.destroy
                             passThrough
                         | { Content = LoadInstruction _ } when loadStores |> ImmutableSet.contains x ->
                             x |> Value.replaceWith replacement
@@ -550,7 +571,7 @@ let mem2reg (irModule: Module ref) =
         |> Option.map (rename Value.UndefValue)
         |> ignore
 
-        alloca |> Value.eraseFromParent)
+        alloca |> Value.destroy)
 
     irModule
 

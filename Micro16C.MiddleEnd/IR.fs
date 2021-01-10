@@ -150,12 +150,15 @@ module Value =
 
     let lifeIntervals value = value.LifeIntervals
 
+    let tracksUsers value =
+        match value.Content with
+        | Constant _
+        | Register _
+        | Undef -> false
+        | _ -> true
+
     let internal addUser dependent operand =
-        match !operand with
-        | { Content = Constant _ } -> ()
-        | { Content = Register _ } -> ()
-        | { Content = Undef } -> ()
-        | _ ->
+        if !operand |> tracksUsers then
             operand
             := { !operand with
                      Users = dependent :: (!operand).Users }
@@ -284,9 +287,9 @@ module Value =
                                            | (j, (old, block)) when i / 2 = j && i % 2 = 0 ->
                                                old |> removeUser value
                                                (operand, block)
-                                           | (j, (value, old)) when i / 2 = j && i % 2 = 1 ->
+                                           | (j, (incoming, old)) when i / 2 = j && i % 2 = 1 ->
                                                old |> removeUser value
-                                               (value, operand)
+                                               (incoming, operand)
                                            | (_, x) -> x) } }
 
         | _ -> failwith "Internal Compiler Error"
@@ -338,7 +341,21 @@ module Value =
         | { Content = BasicBlockValue value } -> value
         | _ -> failwith "Internal Compiler Error: Value is not a BasicBlock"
 
-    let rec eraseFromParent value =
+    let removeFromParent value =
+        match (!value).ParentBlock with
+        | None -> ()
+        | Some (Ref { Content = BasicBlockValue block } as bb) ->
+            bb
+            := { !bb with
+                     Content =
+                         BasicBlockValue
+                             { block with
+                                   Instructions = block.Instructions |> List.filter ((<>) value) } }
+
+            value := { !value with ParentBlock = None }
+        | _ -> failwith "Internal Compiler Error"
+
+    let rec destroy value =
 
         // If we are removing a basic block we need to make sure every instruction does not have an operand that doesn't
         // use operands from other basic blocks nor have users from other blocks. We replace those with undefs
@@ -362,6 +379,25 @@ module Value =
             irModule
             := { !irModule with
                      BasicBlocks = (!irModule).BasicBlocks |> List.except [ value ] }
+
+            !value
+            |> users
+            |> List.iter (fun phi ->
+                match !phi with
+                | { Content = PhiInstruction ({ Incoming = list } as phiInstr) } ->
+
+                    let trueList, falseList =
+                        list |> List.partition (snd >> (<>) value)
+
+                    phi
+                    := { !phi with
+                             Content = PhiInstruction { phiInstr with Incoming = trueList } }
+
+                    falseList
+                    |> List.iter (fun (x, y) ->
+                        x |> removeUser phi
+                        y |> removeUser phi)
+                | _ -> ())
         | _ -> ()
 
         (!value)
@@ -370,16 +406,14 @@ module Value =
         |> List.map fst
         |> List.iter (fun i -> setOperand i Value.UndefValue value)
 
-        match (!value).ParentBlock with
-        | None -> ()
-        | Some (Ref { Content = BasicBlockValue block } as bb) ->
-            bb
-            := { !bb with
-                     Content =
-                         BasicBlockValue
-                             { block with
-                                   Instructions = block.Instructions |> List.filter ((<>) value) } }
-        | _ -> failwith "Internal Compiler Error"
+        value |> removeFromParent
+
+        assert (useCount !value = 0)
+
+        assert (!value
+                |> operands
+                |> List.exists ((!) >> tracksUsers)
+                |> not)
 
         value := !Value.UndefValue
 
@@ -403,7 +437,7 @@ module Value =
                     (!parentBlockValue |> asBasicBlock).Instructions
                     |> List.findIndex ((=) value)
 
-                eraseFromParent value
+                destroy value
 
                 let parentBlock = !parentBlockValue |> asBasicBlock
 
@@ -416,11 +450,7 @@ module Value =
                              BasicBlockValue
                                  { parentBlock with
                                        Instructions = first @ [ replacement ] @ second } }
-
-            value
-            := { !replacement with
-                     ParentBlock = (!value).ParentBlock }
-        | _ -> eraseFromParent value
+        | _ -> destroy value
 
 module BasicBlock =
 
@@ -684,6 +714,10 @@ module Builder =
 
             (value, builder)
         | _ -> failwith "Internal Compiler Error"
+
+    let insertValue value builder =
+        value |> Value.removeFromParent
+        builder |> addValue value
 
     let createBasicBlockAt (insertPoint: InsertPoint) name builder =
         let basicBlock =
