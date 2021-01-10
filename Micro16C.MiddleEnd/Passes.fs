@@ -53,11 +53,11 @@ let instructionSimplify (irModule: Module) =
                                          Value = Ref { Content = Constant { Value = constant } } } } ->
             value
             |> Value.replaceWith (Builder.createConstant ((constant |> uint16) >>> 1 |> int16))
-        | { Content = CondBrInstruction { Kind = NotZero
+        | { Content = CondBrInstruction { Kind = Zero
                                           Value = Ref { Content = Constant { Value = constant } }
                                           TrueBranch = trueBranch
                                           FalseBranch = falseBranch } } ->
-            if constant <> 0s then
+            if constant = 0s then
                 value
                 |> Value.replaceWith
                     (Builder.createGoto trueBranch Builder.Default
@@ -210,21 +210,23 @@ let instructionCombine (irModule: Module) =
             |> Value.replaceOperand oldOp (Builder.createConstant (value1 ||| value2))
 
             instruction |> Value.replaceWith first
-        | Ref { Content = CondBrInstruction { Kind = NotZero
+        | Ref { Content = CondBrInstruction { Kind = Zero
                                               Value = Ref { Users = [ _ ]
                                                             Content = BinaryInstruction { Right = Ref { Content = Constant { Value = 0x8000s } }
-                                                                                          Left = passThrough } } as neg
+                                                                                          Left = passThrough
+                                                                                          Kind = And } } as neg
                                               TrueBranch = trueBranch
                                               FalseBranch = falseBranch } }
-        | Ref { Content = CondBrInstruction { Kind = NotZero
+        | Ref { Content = CondBrInstruction { Kind = Zero
                                               Value = Ref { Users = [ _ ]
                                                             Content = BinaryInstruction { Left = Ref { Content = Constant { Value = 0x8000s } }
-                                                                                          Right = passThrough } } as neg
+                                                                                          Right = passThrough
+                                                                                          Kind = And } } as neg
                                               TrueBranch = trueBranch
                                               FalseBranch = falseBranch } } ->
             let newCond, _ =
                 Builder.Default
-                |> Builder.createCondBr Negative passThrough trueBranch falseBranch
+                |> Builder.createCondBr Negative passThrough falseBranch trueBranch
 
             instruction |> Value.replaceWith newCond
             neg |> Value.eraseFromParent

@@ -105,7 +105,7 @@ and StoreInstruction =
 and GotoInstruction = { BasicBlock: Value ref }
 
 and CondBrKind =
-    | NotZero
+    | Zero
     | Negative
 
 and CondBrInstruction =
@@ -599,7 +599,7 @@ type Module =
                          let opName =
                              match cr.Kind with
                              | Negative -> "< 0"
-                             | NotZero -> "!= 0"
+                             | Zero -> "== 0"
 
                          text
                          + sprintf "\tbr %s %s %s %s\n" (getName cr.Value) opName (getName cr.TrueBranch)

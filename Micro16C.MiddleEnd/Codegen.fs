@@ -198,7 +198,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
 
         let context =
             context
-            |> Context.createCondBr NotZero condition trueBranch falseBranch
+            |> Context.createCondBr Zero condition falseBranch trueBranch
             |> Context.setInsertPoint (Some trueBranch)
             |> visitStatement trueStatement
 
@@ -241,7 +241,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
             Context.createBasicBlock "doWhileContinue" context
 
         context
-        |> Context.createCondBr NotZero value body cont
+        |> Context.createCondBr Zero value cont body
         |> Context.setInsertPoint (Some cont)
     | Sema.WhileStatement statement ->
         let cond, context = Context.createBasicBlock "cond" context
@@ -259,7 +259,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
             Context.createBasicBlock "WhileBody" context
 
         context
-        |> Context.createCondBr NotZero value body cont
+        |> Context.createCondBr Zero value cont body
         |> Context.setInsertPoint (Some body)
         |> visitStatement statement.Statement
         |> Context.createGoto cond
