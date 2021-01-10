@@ -64,6 +64,7 @@ type Expression =
     | CommaExpression of Comma
     | ConstantExpression of Constant
     | ReferenceExpression of Reference
+    | RegisterExpression of Token
     | ConversionExpression of Conversion
     | ConditionalExpression of Conditional
     | AssignmentExpression of Assignment
@@ -156,7 +157,6 @@ and Statement =
 and Declaration =
     { Type: Type
       Name: Token
-      Register: Token option
       Initializer: Expression option }
 
 and CompoundItem =
@@ -174,6 +174,7 @@ module Expression =
         | ReferenceExpression expr -> expr.Type
         | ConversionExpression expr -> expr.Type
         | ConditionalExpression expr -> expr.Type
+        | RegisterExpression _ -> intType
         | AssignmentExpression expr -> getType expr.LValue
 
     let valueKind (expr: Expression) =
@@ -182,6 +183,7 @@ module Expression =
         | UnaryExpression { Kind = PreDecrement }
         | UnaryExpression { Kind = Dereference }
         | BinaryExpression { Kind = SubScript }
+        | RegisterExpression _
         | ReferenceExpression _ -> LValue
         | UnaryExpression _
         | BinaryExpression _
@@ -669,9 +671,8 @@ and visitUnaryExpression (context: Context) (expression: Parse.UnaryExpression):
             "Cannot take address of temporary value"
             |> context.SourceObject.emitError (ErrorTypeToken token)
             |> Error
-        | Ok (ReferenceExpression { Declaration = { Register = Some _
-                                                    Name = { Type = Identifier s } } }) ->
-            sprintf "Cannot take address of register variable '%s'" s
+        | Ok (RegisterExpression token) ->
+            sprintf "Cannot take address of register"
             |> context.SourceObject.emitError (ErrorTypeToken token)
             |> Error
         | _ ->
@@ -823,7 +824,7 @@ and visitPrimaryExpression (context: Context) (expression: Parse.PrimaryExpressi
             { Value = token |> Token.value
               Type = intType }
         |> Ok
-    | Parse.IdentifierPrimaryExpression token ->
+    | Parse.IdentifierPrimaryExpression ({ Type = Identifier _ } as token) ->
         let rec findIdentifier list =
             match list with
             | [] -> None
@@ -842,6 +843,7 @@ and visitPrimaryExpression (context: Context) (expression: Parse.PrimaryExpressi
         | Some decl ->
             ReferenceExpression { Declaration = decl; Type = decl.Type }
             |> Ok
+    | Parse.IdentifierPrimaryExpression token -> RegisterExpression token |> Ok
 
 let private applyDeclarator aType (declarator: Parse.Declarator) =
     [ 0 .. (declarator.PointerCount - 1) ]
@@ -1062,7 +1064,6 @@ and visitDeclaration (context: Context) (declaration: Parse.Declaration) =
                     let decl =
                         { Type = aType
                           Name = declarator.Identifier
-                          Register = declaration.DeclarationSpecifiers
                           Initializer = Some expr }
 
                     let context =
@@ -1076,7 +1077,6 @@ and visitDeclaration (context: Context) (declaration: Parse.Declaration) =
                     let decl =
                         { Type = aType
                           Name = declarator.Identifier
-                          Register = declaration.DeclarationSpecifiers
                           Initializer = None }
 
                     let context =

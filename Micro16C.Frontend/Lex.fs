@@ -49,7 +49,6 @@ type TokenType =
     | Colon
     | QuestionMark
     | IntKeyword
-    | RegisterKeyword
     | BreakKeyword
     | ContinueKeyword
     | DoKeyword
@@ -61,6 +60,19 @@ type TokenType =
     | OpenSquareBracket
     | CloseSquareBracket
     | GotoKeyword
+    | R0Keyword
+    | R1Keyword
+    | R2Keyword
+    | R3Keyword
+    | R4Keyword
+    | R5Keyword
+    | R6Keyword
+    | R7Keyword
+    | R8Keyword
+    | R9Keyword
+    | R10Keyword
+    | ACKeyword
+    | PCKeyword
 
 type Token =
     { Offset: int
@@ -343,7 +355,6 @@ let tokenize (input: string) =
             let tokenType =
                 match identifier with
                 | "int" -> IntKeyword
-                | "register" -> RegisterKeyword
                 | "break" -> BreakKeyword
                 | "continue" -> ContinueKeyword
                 | "do" -> DoKeyword
@@ -353,6 +364,19 @@ let tokenize (input: string) =
                 | "if" -> IfKeyword
                 | "goto" -> GotoKeyword
                 | "sizeof" -> SizeOfKeyword
+                | "R0" -> R0Keyword
+                | "R1" -> R1Keyword
+                | "R2" -> R2Keyword
+                | "R3" -> R3Keyword
+                | "R4" -> R4Keyword
+                | "R5" -> R5Keyword
+                | "R6" -> R6Keyword
+                | "R7" -> R7Keyword
+                | "R8" -> R8Keyword
+                | "R9" -> R9Keyword
+                | "R10" -> R10Keyword
+                | "AC" -> ACKeyword
+                | "PC" -> PCKeyword
                 | _ -> Identifier identifier
 
             comb

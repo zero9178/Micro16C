@@ -63,6 +63,7 @@ type Value =
 
 and ValueContent =
     | Constant of Constant
+    | Register of Register
     | AllocationInstruction of AllocationInstruction
     | BinaryInstruction of BinaryInstruction
     | UnaryInstruction of UnaryInstruction
@@ -77,9 +78,7 @@ and ValueContent =
 
 and Constant = { Value: int16 }
 
-and AllocationInstruction =
-    { Register: Register option
-      Aliased: bool option }
+and AllocationInstruction = { Aliased: bool option }
 
 and BinaryKind =
     | And
@@ -116,8 +115,7 @@ and CondBrInstruction =
       FalseBranch: Value ref }
 
 and PhiInstruction =
-    { Incoming: (Value ref * Value ref) list
-      Register: Register option }
+    { Incoming: (Value ref * Value ref) list }
 
 and MoveInstruction = { Source: Value ref }
 
@@ -153,6 +151,7 @@ module Value =
     let internal addUser dependent operand =
         match !operand with
         | { Content = Constant _ } -> ()
+        | { Content = Register _ } -> ()
         | { Content = Undef } -> ()
         | _ ->
             operand
@@ -167,6 +166,7 @@ module Value =
     let operands value =
         match value.Content with
         | Constant _
+        | Register _
         | BasicBlockValue _
         | Undef _
         | AllocationInstruction _ -> []
@@ -190,6 +190,7 @@ module Value =
 
         match (index, (!value).Content) with
         | (_, Constant _)
+        | (_, Register _)
         | (_, AllocationInstruction _) -> failwith "Internal Compiler Error: Invalid Operand Index"
         | (i, UnaryInstruction _)
         | (i, GotoInstruction _)
@@ -309,6 +310,7 @@ module Value =
     let isInstruction value =
         match value.Content with
         | Constant _
+        | Register _
         | Undef
         | BasicBlockValue _ -> false
         | _ -> true
@@ -494,6 +496,7 @@ type Module =
                 let getName (value: Value ref) =
                     match !value with
                     | { Content = Constant { Value = constant } } -> constant |> string
+                    | { Content = Register register } -> register.asString
                     | { Content = Undef } -> "undef"
                     | { Name = name } ->
                         match seenValues.TryGetValue !value with
@@ -561,12 +564,9 @@ type Module =
                  |> List.rev
                  |> List.fold (fun text instruction ->
                      match !instruction with
-                     | { Content = AllocationInstruction { Register = None } } ->
+                     | { Content = AllocationInstruction _ } ->
                          text
                          + sprintf "\t%s = alloca\n" (getName instruction)
-                     | { Content = AllocationInstruction { Register = Some reg } } ->
-                         text
-                         + sprintf "\t%s = alloca (%s)\n" (getName instruction) reg.asString
                      | { Content = GotoInstruction goto } ->
                          text
                          + sprintf "\tgoto %s\n" (getName goto.BasicBlock)
@@ -779,16 +779,19 @@ module Builder =
                   Name = value |> string
                   Content = Constant { Value = value } }
 
-    let createRegisterNamedAlloca register name builder =
+    let createRegister register =
+        ref
+            { Value.Default with
+                  Content = Register register }
+
+    let createNamedAlloca name builder =
         let value =
             ref
                 { Value.Default with
                       Name = name
-                      Content = AllocationInstruction { Register = register; Aliased = None } }
+                      Content = AllocationInstruction { Aliased = None } }
 
         builder |> addValue value
-
-    let createNamedAlloca = createRegisterNamedAlloca None
 
     let createAlloca = createNamedAlloca ""
 
@@ -896,15 +899,13 @@ module Builder =
 
         (value, builder |> addValue value |> snd)
 
-
-
     let createNamedPhi name incoming builder =
 
         let value =
             ref
                 { Value.Default with
                       Name = name
-                      Content = PhiInstruction { Incoming = incoming; Register = None } }
+                      Content = PhiInstruction { Incoming = incoming } }
 
         incoming
         |> List.iter (fun (x, y) ->

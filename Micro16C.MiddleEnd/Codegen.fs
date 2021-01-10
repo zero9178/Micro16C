@@ -27,12 +27,10 @@ module private Context =
         |> Builder.setInsertBlock basicBlock
         |> withBuilder context
 
-    let createRegisterNamedAlloca register name context =
+    let createNamedAlloca name context =
         context.Builder
-        |> Builder.createRegisterNamedAlloca register name
+        |> Builder.createNamedAlloca name
         |> retWithBuilder context
-
-    let createNamedAlloca = createRegisterNamedAlloca None
 
     let createAlloca = createNamedAlloca ""
 
@@ -173,37 +171,6 @@ module private Op =
             |> Context.setInsertPoint (Some modEnd)
             |> Context.createLoad acc
 
-let private registerTokenToRegister (token: Token) =
-    match token with
-    | { Type = Identifier "R0" }
-    | { Type = Identifier "r0" } -> R0
-    | { Type = Identifier "R1" }
-    | { Type = Identifier "r1" } -> R1
-    | { Type = Identifier "R2" }
-    | { Type = Identifier "r2" } -> R2
-    | { Type = Identifier "R3" }
-    | { Type = Identifier "r3" } -> R3
-    | { Type = Identifier "R4" }
-    | { Type = Identifier "r4" } -> R4
-    | { Type = Identifier "R5" }
-    | { Type = Identifier "r5" } -> R5
-    | { Type = Identifier "R6" }
-    | { Type = Identifier "r6" } -> R6
-    | { Type = Identifier "R7" }
-    | { Type = Identifier "r7" } -> R7
-    | { Type = Identifier "R8" }
-    | { Type = Identifier "r8" } -> R8
-    | { Type = Identifier "R9" }
-    | { Type = Identifier "r9" } -> R9
-    | { Type = Identifier "R10" }
-    | { Type = Identifier "r10" } -> R10
-    | { Type = Identifier "pc" }
-    | { Type = Identifier "PC" } -> PC
-    | { Type = Identifier "ac" }
-    | { Type = Identifier "AC" } -> AC
-    | { Type = Identifier s } -> failwithf "Unknown Register name %s" s
-    | _ -> failwith "Internal Compiler Error: Invalid Token Type"
-
 let rec visitCompoundStatement (compoundItems: Sema.CompoundItem list) (context: Context) =
     compoundItems
     |> List.fold (fun context x ->
@@ -335,11 +302,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
 
 and visitDeclaration (declaration: Sema.Declaration) (context: Context): Context =
     let value, context =
-        Context.createRegisterNamedAlloca
-            (declaration.Register
-             |> Option.map registerTokenToRegister)
-            (Token.identifier declaration.Name)
-            context
+        Context.createNamedAlloca (Token.identifier declaration.Name) context
 
     let context =
         { context with
@@ -448,6 +411,25 @@ and visitExpression (expression: Sema.Expression) (context: Context) =
         (List.head values, context)
     | Sema.ConstantExpression constant -> (Builder.createConstant constant.Value, context)
     | Sema.AssignmentExpression assignment -> visitAssignmentExpression assignment context
+    | Sema.RegisterExpression { Type = tokenType } ->
+        let register =
+            match tokenType with
+            | R0Keyword -> R0
+            | R1Keyword -> R1
+            | R2Keyword -> R2
+            | R3Keyword -> R3
+            | R4Keyword -> R4
+            | R5Keyword -> R5
+            | R6Keyword -> R6
+            | R7Keyword -> R7
+            | R8Keyword -> R8
+            | R9Keyword -> R9
+            | R10Keyword -> R10
+            | ACKeyword -> AC
+            | PCKeyword -> PC
+            | _ -> failwith "Internal Compiler Error: Not a valid token type"
+
+        (Builder.createRegister register, context)
     | _ -> failwith "TODO"
 
 let codegen (translationUnit: Sema.CompoundItem list) =

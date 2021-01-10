@@ -123,20 +123,26 @@ let allocateRegisters (irModule: Module) =
     let inUseRegisters = Array.init 13 (fun _ -> [])
     let lifeIntervalsOnRegister = Array.init 13 (fun _ -> [])
 
-    let findFreeRegister intervals =
-        let rec findFreeRegisterImpl startIndex =
-            if startIndex >= Array.length inUseRegisters then
-                None
-            else
-                match inUseRegisters
-                      |> Array.skip startIndex
-                      |> Array.tryFindIndex List.isEmpty with
-                | Some i when intervals
-                              |> intervalsFitIn lifeIntervalsOnRegister.[startIndex + i] -> Some(startIndex + i)
-                | Some i -> findFreeRegisterImpl (startIndex + i + 1)
-                | None -> findFreeRegisterImpl (startIndex + 1)
+    let findFreeRegisterWithPref preference intervals =
 
-        findFreeRegisterImpl 0
+        let isFree index =
+            List.isEmpty inUseRegisters.[index]
+            && intervals
+               |> intervalsFitIn lifeIntervalsOnRegister.[index]
+
+        let rec findFreeRegisterImpl startIndex =
+            if startIndex >= Array.length inUseRegisters
+            then None
+            else if isFree startIndex
+            then Some startIndex
+            else findFreeRegisterImpl (startIndex + 1)
+
+        match preference with
+        | Some preference when preference |> isFree -> Some preference
+        | Some _
+        | None -> findFreeRegisterImpl 0
+
+    let findFreeRegister = findFreeRegisterWithPref None
 
     irModule
     |> Module.instructions
@@ -183,7 +189,16 @@ let allocateRegisters (irModule: Module) =
 
             seq
             |> Seq.fold (fun map (value, plan) ->
-                match !value |> Value.lifeIntervals |> findFreeRegister with
+
+                let result =
+                    match !value with
+                    | { Content = LoadInstruction { Source = Ref { Content = Register reg } } } ->
+                        !value
+                        |> Value.lifeIntervals
+                        |> findFreeRegisterWithPref (reg |> registerToIndex |> Some)
+                    | _ -> !value |> Value.lifeIntervals |> findFreeRegister
+
+                match result with
                 | None -> failwith "Too many registers alive at once. Spilling to memory is not yet implemented"
                 | Some i ->
                     Array.set inUseRegisters i plan

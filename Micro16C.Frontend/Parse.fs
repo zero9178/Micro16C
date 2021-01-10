@@ -499,6 +499,19 @@ and parsePostFixExpression error (tokens: Token list) =
     let primary, tokens =
         match tokens with
         | { Type = Identifier _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = R0Keyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = R1Keyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = R2Keyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = R3Keyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = R4Keyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = R5Keyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = R6Keyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = R7Keyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = R8Keyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = R9Keyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = R10Keyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = ACKeyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
+        | { Type = PCKeyword _ } as t :: tokens -> (IdentifierPrimaryExpression t |> Ok, tokens)
         | { Type = Literal _ } as t :: tokens -> (LiteralPrimaryExpression t |> Ok, tokens)
         | { Type = OpenParentheses } :: tokens ->
             let expression, tokens = parseExpression error tokens
@@ -546,51 +559,7 @@ and parsePostFixExpression error (tokens: Token list) =
 
 let parseDeclarationSpecifiers error (tokens: Token list) =
     match tokens with
-    | { Type = IntKeyword } :: ({ Type = t } as head) :: tokens when t <> RegisterKeyword ->
-        (None |> Ok, head :: tokens)
-    | { Type = IntKeyword } :: { Type = RegisterKeyword } :: tokens ->
-        let error1, tokens =
-            expect OpenParentheses error tokens "Expected '(' after 'register'"
-
-        let s, tokens =
-            match tokens with
-            | { Type = Identifier _ } as t :: tokens -> (Ok t, tokens)
-            | t :: _ ->
-                (error (ErrorTypeToken t) "Expected register name after '(' in 'register'"
-                 |> Error,
-                 tokens)
-            | [] ->
-                (error ErrorTypeEnd "Expected register name after '(' in 'register'"
-                 |> Error,
-                 tokens)
-
-        let error2, tokens =
-            expect CloseParentheses error tokens "Expected ')' to match ')'"
-
-        (comb3 (fun _ _ -> Some) error1 error2 s, tokens)
-    | { Type = RegisterKeyword } :: tokens ->
-        let error1, tokens =
-            expect OpenParentheses error tokens "Expected '(' after 'register'"
-
-        let s, tokens =
-            match tokens with
-            | { Type = Identifier _ } as t :: tokens -> (Ok t, tokens)
-            | t :: _ ->
-                (error (ErrorTypeToken t) "Expected register name after '(' in 'register'"
-                 |> Error,
-                 tokens)
-            | [] ->
-                (error ErrorTypeEnd "Expected register name after '(' in 'register'"
-                 |> Error,
-                 tokens)
-
-        let error2, tokens =
-            expect CloseParentheses error tokens "Expected ')' to match ')'"
-
-        let error3, tokens =
-            expect IntKeyword error tokens "Expected 'int' in type specifiers"
-
-        (comb4 (fun _ _ _ -> Some) error1 error2 error3 s, tokens)
+    | { Type = IntKeyword } :: tokens -> (None |> Ok, tokens)
     | _ ->
         let error, tokens =
             expect IntKeyword error tokens "Expected 'int' in type specifiers"
@@ -730,8 +699,7 @@ let rec parseStatement error (tokens: Token list) =
 
         let first, tokens =
             match tokens with
-            | { Type = IntKeyword } :: _
-            | { Type = RegisterKeyword } :: _ ->
+            | { Type = IntKeyword } :: _ ->
                 let decl, tokens = parseDeclaration error tokens
                 (decl |> Result.map Declaration, tokens)
             | { Type = SemiColon } :: tokens -> (MaybeExpression None |> Ok, tokens)
@@ -822,8 +790,7 @@ let rec parseStatement error (tokens: Token list) =
 
 and parseCompoundItems error (tokens: Token list) =
     match tokens with
-    | { Type = IntKeyword } :: _
-    | { Type = RegisterKeyword } :: _ ->
+    | { Type = IntKeyword } :: _ ->
         let declaration, tokens = parseDeclaration error tokens
 
         let other, tokens = parseCompoundItems error tokens
@@ -836,6 +803,19 @@ and parseCompoundItems error (tokens: Token list) =
     | { Type = ContinueKeyword } :: _
     | { Type = GotoKeyword } :: _
     | { Type = Identifier _ } :: _
+    | { Type = R0Keyword } :: _
+    | { Type = R1Keyword } :: _
+    | { Type = R2Keyword } :: _
+    | { Type = R3Keyword } :: _
+    | { Type = R4Keyword } :: _
+    | { Type = R5Keyword } :: _
+    | { Type = R6Keyword } :: _
+    | { Type = R7Keyword } :: _
+    | { Type = R8Keyword } :: _
+    | { Type = R9Keyword } :: _
+    | { Type = R10Keyword } :: _
+    | { Type = ACKeyword } :: _
+    | { Type = PCKeyword } :: _
     | { Type = Literal _ } :: _
     | { Type = OpenParentheses } :: _
     | { Type = Increment } :: _

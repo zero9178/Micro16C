@@ -81,10 +81,10 @@ let instructionSimplify (irModule: Module) =
                 |> Value.replaceWith
                     (Builder.createGoto falseBranch Builder.Default
                      |> fst)
-        | { Content = PhiInstruction { Register = None; Incoming = list } } when list
-                                                                                 |> List.map fst
-                                                                                 |> List.distinct
-                                                                                 |> List.length = 1 ->
+        | { Content = PhiInstruction { Incoming = list } } when list
+                                                                |> List.map fst
+                                                                |> List.distinct
+                                                                |> List.length = 1 ->
             value
             |> Value.replaceWith (list |> List.head |> fst)
         | _ -> ()
@@ -499,19 +499,6 @@ let mem2reg (irModule: Module) =
                              |> BasicBlock.predecessors
                              |> List.map (fun x -> (Value.UndefValue, x)))
                         |> fst
-
-                    match !alloca with
-                    | { Content = AllocationInstruction { Register = Some r } } ->
-                        match !phi with
-                        | { Content = PhiInstruction phiInstruction } ->
-                            phi
-                            := { !phi with
-                                     Content =
-                                         PhiInstruction
-                                             { phiInstruction with
-                                                   Register = Some r } }
-                        | _ -> ()
-                    | _ -> ()
 
                     phi))
 

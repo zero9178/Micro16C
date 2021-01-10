@@ -65,6 +65,7 @@ let genAssembly (irModule: Module): AssemblyLine list =
         | { Content = Constant { Value = 0s } } -> Bus.Zero
         | { Content = Constant { Value = 1s } } -> Bus.One
         | { Content = Constant { Value = -1s } } -> Bus.NegOne
+        | { Content = Register reg } -> Register.toBus reg
         | _ ->
             !operand
             |> Value.register
@@ -118,7 +119,21 @@ let genAssembly (irModule: Module): AssemblyLine list =
                               ALU = Some ALU.ABus
                               Shifter = Some Shifter.Noop }
                         list
+            | { Content = LoadInstruction { Source = Ref { Content = Register _ } as op } }
             | { Content = CopyInstruction { Source = op } } ->
+                if operandToBus instr = operandToBus op then
+                    list
+                else
+                    prependOperation
+                        { Operation.Default with
+                              SBus = operandToBus instr |> Some
+                              ABus = operandToBus op |> Some
+                              AMux = Some AMux.ABus
+                              ALU = Some ALU.ABus
+                              Shifter = Some Shifter.Noop }
+                        list
+            | { Content = StoreInstruction { Destination = Ref { Content = Register _ } as instr
+                                             Value = op } } ->
                 if operandToBus instr = operandToBus op then
                     list
                 else

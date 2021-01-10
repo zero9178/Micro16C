@@ -9,8 +9,8 @@ let printModulePass title (irModule: IR.Module) =
 [<EntryPoint>]
 let main argv =
     let result =
-        Lex.tokenize "int r0 = 5;
-        int r1 = 20;
+        Lex.tokenize "int r0 = R0;
+        int r1 = R1;
         int mod;
         while(1)
         {
@@ -23,7 +23,7 @@ let main argv =
             }
         }
         end:;
-        register(R2) int r2 = r1;"
+        R2 = r1;"
         |> Result.bind Parse.parse
         |> Result.bind Sema.analyse
         |> Result.map Codegen.codegen
