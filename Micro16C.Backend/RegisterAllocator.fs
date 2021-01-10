@@ -87,9 +87,9 @@ let rec private intervalsFitIn (intervals: (int * int) list list) (newIntervals:
     |> not
 
 
-let allocateRegisters (irModule: Module) =
+let allocateRegisters irModule =
     let lifeIntervals =
-        irModule
+        !irModule
         |> Module.revInstructions
         |> List.map (associateWith ((!) >> Value.lifeIntervals))
         |> List.filter (snd >> List.isEmpty >> not)
@@ -144,7 +144,7 @@ let allocateRegisters (irModule: Module) =
 
     let findFreeRegister = findFreeRegisterWithPref None
 
-    irModule
+    !irModule
     |> Module.instructions
     |> List.indexed
     |> List.map fst
@@ -215,6 +215,5 @@ let allocateRegisters (irModule: Module) =
 
         ) (Map([]))
     |> ignore
-
 
     irModule

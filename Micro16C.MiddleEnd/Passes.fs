@@ -6,7 +6,10 @@ open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
 
 
-let instructionSimplify (irModule: Module) =
+let instructionSimplify (irModule: Module ref) =
+
+    let builder = Builder.fromModule irModule
+
     let simplify value =
         match !value with
         | { Content = BinaryInstruction { Kind = And
@@ -59,28 +62,20 @@ let instructionSimplify (irModule: Module) =
                                           FalseBranch = falseBranch } } ->
             if constant = 0s then
                 value
-                |> Value.replaceWith
-                    (Builder.createGoto trueBranch Builder.Default
-                     |> fst)
+                |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
             else
                 value
-                |> Value.replaceWith
-                    (Builder.createGoto falseBranch Builder.Default
-                     |> fst)
+                |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
         | { Content = CondBrInstruction { Kind = Negative
                                           Value = Ref { Content = Constant { Value = constant } }
                                           TrueBranch = trueBranch
                                           FalseBranch = falseBranch } } ->
             if constant < 0s then
                 value
-                |> Value.replaceWith
-                    (Builder.createGoto trueBranch Builder.Default
-                     |> fst)
+                |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
             else
                 value
-                |> Value.replaceWith
-                    (Builder.createGoto falseBranch Builder.Default
-                     |> fst)
+                |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
         | { Content = PhiInstruction { Incoming = list } } when list
                                                                 |> List.map fst
                                                                 |> List.distinct
@@ -89,27 +84,27 @@ let instructionSimplify (irModule: Module) =
             |> Value.replaceWith (list |> List.head |> fst)
         | _ -> ()
 
-    irModule
+    !irModule
     |> Module.instructions
     |> List.iter simplify
 
     irModule
 
-let deadCodeElimination (irModule: Module) =
+let deadCodeElimination (irModule: Module ref) =
 
     let eliminate value =
         if not (Value.hasSideEffects !value)
            && 0 = Value.useCount !value then
             value |> Value.eraseFromParent
 
-    irModule
+    !irModule
     |> Module.instructions
     |> List.rev
     |> List.iter eliminate
 
     irModule
 
-let simplifyCFG (irModule: Module) =
+let simplifyCFG (irModule: Module ref) =
 
     let simplifyBlock (index, blockValue) =
         match !blockValue with
@@ -124,27 +119,22 @@ let simplifyCFG (irModule: Module) =
                                                                                               | _ -> false)
                                                                                                (!blockValue).Users) ->
                 blockValue |> Value.replaceWith destination
-            | _ -> ()
-
-            if index <> 0
-               && !blockValue
-                  |> BasicBlock.predecessors
-                  |> List.isEmpty then
-                blockValue |> Value.eraseFromParent
-                false
-            else
-                true
+            | _ ->
+                if index <> 0
+                   && !blockValue
+                      |> BasicBlock.predecessors
+                      |> List.isEmpty then
+                    blockValue |> Value.eraseFromParent
         | _ -> failwith "Internal Compiler Error"
 
-
-    irModule
+    !irModule
     |> Module.basicBlocks
     |> List.indexed
-    |> List.filter simplifyBlock
-    |> List.map snd
-    |> Module.fromBasicBlocks
+    |> List.iter simplifyBlock
 
-let instructionCombine (irModule: Module) =
+    irModule
+
+let instructionCombine (irModule: Module ref) =
     let combine instruction =
 
         match instruction with
@@ -225,20 +215,20 @@ let instructionCombine (irModule: Module) =
                                               TrueBranch = trueBranch
                                               FalseBranch = falseBranch } } ->
             let newCond, _ =
-                Builder.Default
+                Builder.fromModule irModule
                 |> Builder.createCondBr Negative passThrough falseBranch trueBranch
 
             instruction |> Value.replaceWith newCond
             neg |> Value.eraseFromParent
         | _ -> ()
 
-    irModule
+    !irModule
     |> Module.instructions
     |> List.iter combine
 
     irModule
 
-let analyzeAlloc (irModule: Module) =
+let analyzeAlloc (irModule: Module ref) =
     let analyzeAlloc instr =
         match !instr with
         | { Content = AllocationInstruction ({ Aliased = None } as alloca)
@@ -258,13 +248,13 @@ let analyzeAlloc (irModule: Module) =
                                    Aliased = Some addressTaken } }
         | _ -> ()
 
-    irModule
+    !irModule
     |> Module.instructions
     |> List.iter analyzeAlloc
 
     irModule
 
-let removeRedundantLoadStores (irModule: Module) =
+let removeRedundantLoadStores (irModule: Module ref) =
     let removeRedundantLoadStoresInBlock blockValue =
         let block = !blockValue |> Value.asBasicBlock
 
@@ -315,23 +305,23 @@ let removeRedundantLoadStores (irModule: Module) =
             | _ -> failwith "Internal Compiler error")
         |> List.iter (snd >> simplifyLoadStoreSeries)
 
-    irModule
+    !irModule
     |> Module.basicBlocks
     |> List.iter removeRedundantLoadStoresInBlock
 
     irModule
 
-let analyzeDominance (irModule: Module) =
+let analyzeDominance (irModule: Module ref) =
     let map = Dictionary(HashIdentity.Reference)
 
-    irModule
+    !irModule
     |> Module.basicBlocks
     |> List.map (associateValue None)
     |> List.iter map.Add
 
     let order = Dictionary(HashIdentity.Reference)
 
-    irModule
+    !irModule
     |> Module.basicBlocks
     |> List.indexed
     |> List.map (fun (y, x) -> (x, y))
@@ -384,9 +374,9 @@ let analyzeDominance (irModule: Module) =
                      false do
             ()
 
-    irModule |> Module.basicBlocks |> processBlocks
+    !irModule |> Module.basicBlocks |> processBlocks
 
-    irModule
+    !irModule
     |> Module.basicBlocks
     |> List.iter (fun x ->
         let block = Value.asBasicBlock !x
@@ -400,16 +390,16 @@ let analyzeDominance (irModule: Module) =
 
     irModule
 
-let analyzeDominanceFrontiers (irModule: Module) =
+let analyzeDominanceFrontiers (irModule: Module ref) =
 
     let map = Dictionary(HashIdentity.Reference)
 
-    irModule
+    !irModule
     |> Module.basicBlocks
     |> List.map (associateValue (ImmutableHashSet.Create<Value ref>(HashIdentity.Reference)))
     |> List.iter map.Add
 
-    irModule
+    !irModule
     |> Module.basicBlocks
     |> List.choose (fun x ->
         match !x |> BasicBlock.predecessors with
@@ -441,7 +431,7 @@ let analyzeDominanceFrontiers (irModule: Module) =
             |> Seq.tryLast
             |> ignore))
 
-    irModule
+    !irModule
     |> Module.basicBlocks
     |> List.iter (fun x ->
         let block = Value.asBasicBlock !x
@@ -455,14 +445,13 @@ let analyzeDominanceFrontiers (irModule: Module) =
 
     irModule
 
-let mem2reg (irModule: Module) =
+let mem2reg (irModule: Module ref) =
 
-    irModule
+    !irModule
     |> Module.instructions
     |> List.choose (fun x ->
         match !x with
-        | { Content = AllocationInstruction { Aliased = Some false } } ->
-            Some(x, ImmutableHashSet.CreateRange(HashIdentity.Reference, (!x).Users))
+        | { Content = AllocationInstruction { Aliased = Some false } } -> Some(x, (!x).Users |> ImmutableSet.ofList)
         | _ -> None)
     |> List.iter (fun (alloca, loadStores) ->
         let s =
@@ -471,7 +460,7 @@ let mem2reg (irModule: Module) =
                 | Ref { Content = StoreInstruction _
                         ParentBlock = parentBlock } -> parentBlock
                 | _ -> None)
-            |> fun x -> ImmutableHashSet.CreateRange(HashIdentity.Reference, x)
+            |> ImmutableSet.ofSeq
 
         let dominanceFrontiers =
             Seq.map
@@ -479,35 +468,30 @@ let mem2reg (irModule: Module) =
                  >> Value.asBasicBlock
                  >> BasicBlock.dominanceFrontier)
             >> Seq.choose id
-            >> Seq.map (fun x -> ImmutableHashSet.CreateRange(HashIdentity.Reference, x))
-            >> Seq.reduce (fun x -> x.Union)
+            >> Seq.map ImmutableSet.ofList
+            >> ImmutableSet.unionMany
+
+        let builder = Builder.fromModule irModule
 
         let phis =
             Seq.unfold (fun (x: ImmutableHashSet<Value ref>) ->
-                let next = (s.Union x) |> dominanceFrontiers
-                if next.SetEquals(x) then None else Some(next, next)) s
+                let next =
+                    x |> ImmutableSet.union x |> dominanceFrontiers
+
+                if next |> ImmutableSet.equal x then None else Some(next, next)) s
             |> Seq.tryLast
             |> Option.map
                 (Seq.map (fun block ->
-                    let builder =
-                        Builder.Default
-                        |> Builder.setInsertBlock (Some block)
-                        |> Builder.setInsertPoint Start
-
-                    let phi =
-                        builder
-                        |> Builder.createPhi
-                            (!block
-                             |> BasicBlock.predecessors
-                             |> List.map (fun x -> (Value.UndefValue, x)))
-                        |> fst
-
-                    phi))
-
-        let phis =
-            phis
-            |> Option.map (fun s -> ImmutableHashSet.CreateRange(HashIdentity.Reference, s))
-            |> Option.defaultValue (ImmutableHashSet.Create())
+                    builder
+                    |> Builder.setInsertBlock (Some block)
+                    |> Builder.setInsertPoint Start
+                    |> Builder.createPhi
+                        (!block
+                         |> BasicBlock.predecessors
+                         |> List.map (fun x -> (Value.UndefValue, x)))
+                    |> fst))
+            |> Option.map ImmutableSet.ofSeq
+            |> Option.defaultValue ImmutableSet.empty
 
         let phiPredBlocks =
             phis
@@ -521,14 +505,13 @@ let mem2reg (irModule: Module) =
             |> Seq.map (fun (x, y) -> (x, y |> List.ofSeq |> List.map snd))
             |> ImmutableMap.ofSeq
 
-        let mutable alreadyVisited =
-            ImmutableHashSet.Create<Value ref>(HashIdentity.Reference)
+        let mutable alreadyVisited = ImmutableSet.empty
 
         let rec rename replacement blockValue =
-            if alreadyVisited.Contains blockValue then
+            if ImmutableSet.contains blockValue alreadyVisited then
                 ()
             else
-                alreadyVisited <- alreadyVisited.Add blockValue
+                alreadyVisited <- ImmutableSet.add blockValue alreadyVisited
 
                 let replacement =
                     !blockValue
@@ -536,13 +519,14 @@ let mem2reg (irModule: Module) =
                     |> BasicBlock.instructions
                     |> List.fold (fun replacement x ->
                         match !x with
-                        | { Content = StoreInstruction { Value = passThrough } } when loadStores.Contains x ->
+                        | { Content = StoreInstruction { Value = passThrough } } when loadStores
+                                                                                      |> ImmutableSet.contains x ->
                             x |> Value.eraseFromParent
                             passThrough
-                        | { Content = LoadInstruction _ } when loadStores.Contains x ->
+                        | { Content = LoadInstruction _ } when loadStores |> ImmutableSet.contains x ->
                             x |> Value.replaceWith replacement
                             replacement
-                        | { Content = PhiInstruction _ } when phis.Contains x -> x
+                        | { Content = PhiInstruction _ } when phis |> ImmutableSet.contains x -> x
                         | _ -> replacement) replacement
 
                 phiPredBlocks
@@ -560,7 +544,7 @@ let mem2reg (irModule: Module) =
                 |> BasicBlock.successors
                 |> List.iter (rename replacement)
 
-        irModule
+        !irModule
         |> Module.basicBlocks
         |> List.tryHead
         |> Option.map (rename Value.UndefValue)
@@ -570,14 +554,14 @@ let mem2reg (irModule: Module) =
 
     irModule
 
-let numberAll (irModule: Module) =
+let numberAll (irModule: Module ref) =
 
-    irModule
+    !irModule
     |> Module.instructions
     |> List.indexed
     |> List.iter (fun (index, value) -> value := { !value with Index = Some index })
 
-    irModule
+    !irModule
     |> Module.basicBlocks
     |> List.indexed
     |> List.iter (fun (index, value) -> value := { !value with Index = Some index })
@@ -604,7 +588,7 @@ let private tryMaxBy p list =
     | [] -> None
     | list -> list |> List.maxBy p |> Some
 
-let analyzeLifetimes (irModule: Module) =
+let analyzeLifetimes irModule =
 
     let map =
         ref (LifetimesDictionary.Empty.WithComparers HashIdentity.Reference)
@@ -786,7 +770,7 @@ let analyzeLifetimes (irModule: Module) =
 //                           | value, NotDone (_, endV) :: rest -> (value, Done(prevStart, endV) :: rest)))
 //            |> ignore)
 
-    irModule
+    !irModule
     |> Module.revBasicBlocks
     |> List.fold (fun x y ->
         match x with

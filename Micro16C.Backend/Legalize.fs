@@ -4,7 +4,9 @@ open System.Collections.Immutable
 open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
 
-let legalizeConstants (irModule: Module): Module =
+let legalizeConstants irModule =
+
+    let builder = Builder.fromModule irModule
 
     let checkOps instr =
         !instr
@@ -25,7 +27,7 @@ let legalizeConstants (irModule: Module): Module =
                     let pred =
                         !instr |> Value.operands |> List.item (i + 1)
 
-                    Builder.Default
+                    builder
                     |> Builder.setInsertBlock (Some pred)
                     |> Builder.setInsertPoint
                         ((!pred)
@@ -33,7 +35,7 @@ let legalizeConstants (irModule: Module): Module =
                          |> BasicBlock.terminator
                          |> Before)
                 | _ ->
-                    Builder.Default
+                    builder
                     |> Builder.setInsertBlock ((!instr).ParentBlock)
                     |> Builder.setInsertPoint (Before instr)
 
@@ -85,27 +87,28 @@ let legalizeConstants (irModule: Module): Module =
 
             instr |> Value.setOperand i c)
 
-    irModule
+    !irModule
     |> Module.instructions
     |> List.iter checkOps
 
     irModule
 
-let destroyCriticalEdges (irModule: Module) =
+let destroyCriticalEdges irModule =
 
-    let builder = Builder.fromModule irModule
-
-    irModule
+    !irModule
     |> Module.basicBlocks
-    |> List.map (fun x -> (x, !x |> BasicBlock.predecessors))
-    |> List.fold (fun builder (currBlock, preds) ->
+    |> List.map (associateWith ((!) >> BasicBlock.predecessors))
+    |> List.iter (fun (currBlock, preds) ->
         preds
-        |> List.fold (fun builder pred ->
+        |> List.iter (fun pred ->
             if preds |> List.length > 1
                && !pred |> BasicBlock.successors |> List.length > 1 then
                 // Destroy critical edges by inserting a block in between, in which we'll be able to place our
                 // copy operations
-                let block, builder =
+
+                let builder = Builder.fromModule irModule
+
+                let block =
                     builder
                     |> Builder.createBasicBlockAt (After pred) ""
 
@@ -128,82 +131,82 @@ let destroyCriticalEdges (irModule: Module) =
                 |> BasicBlock.phis
                 |> List.iter (Value.replaceOperand pred block)
 
-                (builder
-                 |> Builder.setInsertBlock (Some block)
-                 |> Builder.createGoto currBlock
-                 |> snd)
-            else
-                builder) builder) builder
-    |> Builder.finalize
+                builder
+                |> Builder.setInsertBlock (Some block)
+                |> Builder.createGoto currBlock
+                |> ignore))
 
-let genPhiMoves (irModule: Module): Module =
+    irModule
 
-    let builder = Builder.fromModule irModule
+let genPhiMoves irModule =
 
-    let builder =
-        irModule
-        |> Module.basicBlocks
-        |> List.map (fun x -> (x, !x |> BasicBlock.predecessors))
-        |> List.fold (fun builder (currBlock, preds) ->
-            preds
-            |> List.fold (fun builder pred ->
-                let builder =
-                    builder
-                    |> Builder.setInsertBlock (Some pred)
-                    |> Builder.setInsertPoint
-                        (!pred
-                         |> Value.asBasicBlock
-                         |> BasicBlock.terminator
-                         |> Before)
 
-                let startOfMoves = builder |> Builder.afterInstr
+    !irModule
+    |> Module.basicBlocks
+    |> List.map (fun x -> (x, !x |> BasicBlock.predecessors))
+    |> List.iter (fun (currBlock, preds) ->
+        preds
+        |> List.iter (fun pred ->
 
-                let phis =
-                    !currBlock
-                    |> Value.asBasicBlock
-                    |> BasicBlock.phis
 
-                let createdTemporaries =
-                    ref (ImmutableDictionary.Create<Value ref, Value ref>(HashIdentity.Reference))
+            let builder = Builder.fromModule irModule
 
-                phis
-                |> List.fold (fun builder phi ->
-                    let blockIndex =
-                        !phi
-                        |> Value.operands
-                        |> List.indexed
-                        |> List.findIndex (snd >> (=) pred)
+            let builder =
+                builder
+                |> Builder.setInsertBlock (Some pred)
+                |> Builder.setInsertPoint
+                    (!pred
+                     |> Value.asBasicBlock
+                     |> BasicBlock.terminator
+                     |> Before)
 
-                    let operand =
-                        !phi
-                        |> Value.operands
-                        |> List.item (blockIndex - 1)
+            let startOfMoves = builder |> Builder.afterInstr
 
-                    let copyOperand, builder =
-                        if phis |> List.contains operand then
-                            match !createdTemporaries
-                                  |> ImmutableMap.tryFind operand with
-                            | Some temporary -> (temporary, builder)
-                            | None ->
-                                let currPoint = builder |> Builder.beforeInstr
+            let phis =
+                !currBlock
+                |> Value.asBasicBlock
+                |> BasicBlock.phis
 
-                                let temp, builder =
-                                    builder
-                                    |> Builder.setInsertPoint startOfMoves
-                                    |> Builder.createCopy operand
+            let createdTemporaries =
+                ref (ImmutableDictionary.Create<Value ref, Value ref>(HashIdentity.Reference))
 
-                                createdTemporaries
-                                := !createdTemporaries
-                                   |> ImmutableMap.add operand temp
+            phis
+            |> List.iter (fun phi ->
+                let blockIndex =
+                    !phi
+                    |> Value.operands
+                    |> List.indexed
+                    |> List.findIndex (snd >> (=) pred)
 
-                                (temp, builder |> Builder.setInsertPoint currPoint)
-                        else
-                            (operand, builder)
+                let operand =
+                    !phi
+                    |> Value.operands
+                    |> List.item (blockIndex - 1)
 
-                    let copy, builder =
-                        builder |> Builder.createCopy copyOperand
+                let copyOperand, builder =
+                    if phis |> List.contains operand then
+                        match !createdTemporaries
+                              |> ImmutableMap.tryFind operand with
+                        | Some temporary -> (temporary, builder)
+                        | None ->
+                            let currPoint = builder |> Builder.beforeInstr
 
-                    phi |> Value.setOperand (blockIndex - 1) copy
-                    builder) builder) builder) builder
+                            let temp, builder =
+                                builder
+                                |> Builder.setInsertPoint startOfMoves
+                                |> Builder.createCopy operand
 
-    Builder.finalize builder
+                            createdTemporaries
+                            := !createdTemporaries
+                               |> ImmutableMap.add operand temp
+
+                            (temp, builder |> Builder.setInsertPoint currPoint)
+                    else
+                        (operand, builder)
+
+                let copy =
+                    builder |> Builder.createCopy copyOperand |> fst
+
+                phi |> Value.setOperand (blockIndex - 1) copy)))
+
+    irModule

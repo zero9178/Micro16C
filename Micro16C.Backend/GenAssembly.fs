@@ -7,7 +7,7 @@ open Micro16C.MiddleEnd.IR
 
 
 
-let genAssembly (irModule: Module): AssemblyLine list =
+let genAssembly irModule: AssemblyLine list =
 
     let mutable counter = 0
 
@@ -75,7 +75,7 @@ let genAssembly (irModule: Module): AssemblyLine list =
     let prependOperation operation list = (Operation operation) :: list
 
     let basicBlocks =
-        irModule |> Module.basicBlocks |> Array.ofList
+        !irModule |> Module.basicBlocks |> Array.ofList
 
     basicBlocks
     |> Array.indexed
@@ -216,14 +216,14 @@ let genAssembly (irModule: Module): AssemblyLine list =
                               Address = falseBranch |> getName |> Some
                               Condition = Some Cond.None }
                         list
-            | { Content = CondBrInstruction { Kind = NotZero
+            | { Content = CondBrInstruction { Kind = Zero
                                               Value = value
                                               FalseBranch = falseBranch
                                               TrueBranch = trueBranch } } ->
                 let list =
                     prependOperation
                         { Operation.Default with
-                              Address = falseBranch |> getName |> Some
+                              Address = trueBranch |> getName |> Some
                               AMux = Some AMux.ABus
                               Condition = Some Cond.Zero
                               ABus = value |> operandToBus |> Some
@@ -231,12 +231,12 @@ let genAssembly (irModule: Module): AssemblyLine list =
                               Shifter = None }
                         list
 
-                if Some trueBranch = Array.tryItem (bbIndex + 1) basicBlocks then
+                if Some falseBranch = Array.tryItem (bbIndex + 1) basicBlocks then
                     list
                 else
                     prependOperation
                         { Operation.Default with
-                              Address = trueBranch |> getName |> Some
+                              Address = falseBranch |> getName |> Some
                               Condition = Some Cond.None }
                         list
             | { Content = LoadInstruction { Source = value } } ->

@@ -84,6 +84,8 @@ module ImmutableSet =
 
     let unionMany (sets: seq<ImmutableHashSet<'Key>>) = sets |> Seq.reduce union
 
+    let equal (set1: ImmutableHashSet<'Key>) (set2: ImmutableHashSet<'Key>) = set1.SetEquals set2
+
 let associateValue v x = (x, v)
 
 let associateWith f x = (x, f x)

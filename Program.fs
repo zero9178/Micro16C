@@ -2,8 +2,8 @@
 open Micro16C.Frontend
 open Micro16C.MiddleEnd
 
-let printModulePass title (irModule: IR.Module) =
-    printf "%s\n%s\n" title (irModule.ToString())
+let printModulePass title (irModule: IR.Module ref) =
+    printf "%s\n%s\n" title ((!irModule) |> IR.Module.asText)
     irModule
 
 [<EntryPoint>]

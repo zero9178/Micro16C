@@ -122,12 +122,14 @@ and MoveInstruction = { Source: Value ref }
 and BasicBlock =
     { Instructions: Value ref list
       ImmediateDominator: Value ref option
-      DominanceFrontier: Value ref list option }
+      DominanceFrontier: Value ref list option
+      ParentModule: Module ref }
 
-    static member Default =
-        { Instructions = []
-          ImmediateDominator = None
-          DominanceFrontier = None }
+and Module =
+    internal
+        { BasicBlocks: Value ref list }
+
+        static member Default = { BasicBlocks = [] }
 
 let rec private filterOnce predicate list =
     match list with
@@ -341,7 +343,7 @@ module Value =
         // If we are removing a basic block we need to make sure every instruction does not have an operand that doesn't
         // use operands from other basic blocks nor have users from other blocks. We replace those with undefs
         match (!value) with
-        | { Content = BasicBlockValue block } ->
+        | { Content = BasicBlockValue ({ ParentModule = irModule } as block) } ->
             block.Instructions
             |> List.map (fun x ->
                 (x,
@@ -356,6 +358,10 @@ module Value =
 
             block.Instructions
             |> List.iter (replaceWith Value.UndefValue)
+
+            irModule
+            := { !irModule with
+                     BasicBlocks = (!irModule).BasicBlocks |> List.except [ value ] }
         | _ -> ()
 
         (!value)
@@ -418,6 +424,12 @@ module Value =
 
 module BasicBlock =
 
+    let createDefault parent =
+        { Instructions = []
+          ImmediateDominator = None
+          DominanceFrontier = None
+          ParentModule = parent }
+
     let revInstructions basicBlock = basicBlock.Instructions
 
     let instructions = revInstructions >> List.rev
@@ -474,150 +486,6 @@ module BasicBlock =
             | Ref { Content = PhiInstruction _ } -> true
             | _ -> false)
 
-
-[<NoComparison>]
-[<NoEquality>]
-type Module =
-    private
-        { BasicBlocks: Value ref list }
-        override this.ToString() =
-
-            let mutable counter = 0
-
-            let mutable seenValues =
-                Dictionary<Value, string>(HashIdentity.Reference)
-
-            let seenNames = ref Set.empty
-
-            this.BasicBlocks
-            |> List.rev
-            |> List.fold (fun text blockValue ->
-
-                let getName (value: Value ref) =
-                    match !value with
-                    | { Content = Constant { Value = constant } } -> constant |> string
-                    | { Content = Register register } -> register.asString
-                    | { Content = Undef } -> "undef"
-                    | { Name = name } ->
-                        match seenValues.TryGetValue !value with
-                        | (true, name) -> name
-                        | (false, _) ->
-                            match name with
-                            | "" ->
-                                counter <- counter + 1
-                                let name = "%" + ((counter - 1) |> string)
-                                seenValues.Add(!value, name)
-                                name
-                            | _ ->
-                                let rec uniqueName name =
-                                    if Set.contains name !seenNames then
-                                        match name
-                                              |> List.ofSeq
-                                              |> List.rev
-                                              |> List.takeWhile Char.IsDigit with
-                                        | [] -> uniqueName (name + "0")
-                                        | digits ->
-                                            let newInt =
-                                                digits
-                                                |> List.rev
-                                                |> List.toArray
-                                                |> String
-                                                |> int
-                                                |> ((+) 1)
-
-                                            let name =
-                                                name
-                                                |> List.ofSeq
-                                                |> List.rev
-                                                |> List.skip (List.length digits)
-                                                |> List.rev
-                                                |> List.toArray
-                                                |> String
-
-                                            uniqueName (name + (newInt |> string))
-                                    else
-                                        seenValues.Add(!value, name)
-                                        seenNames := Set.add name !seenNames
-                                        name
-
-                                uniqueName ("%" + name)
-
-                let block = !blockValue |> Value.asBasicBlock
-
-                let pred =
-                    !blockValue
-                    |> BasicBlock.predecessors
-                    |> List.map getName
-
-                let succ =
-                    !blockValue
-                    |> BasicBlock.successors
-                    |> List.map getName
-
-                let text =
-                    text + sprintf "; succ = %A pred = %A\n" succ pred
-
-                let text =
-                    text + sprintf "%s:\n" (getName blockValue)
-
-                (block.Instructions
-                 |> List.rev
-                 |> List.fold (fun text instruction ->
-                     match !instruction with
-                     | { Content = AllocationInstruction _ } ->
-                         text
-                         + sprintf "\t%s = alloca\n" (getName instruction)
-                     | { Content = GotoInstruction goto } ->
-                         text
-                         + sprintf "\tgoto %s\n" (getName goto.BasicBlock)
-                     | { Content = BinaryInstruction binary } ->
-                         let opName =
-                             match binary.Kind with
-                             | Add -> "add"
-                             | And -> "and"
-
-                         text
-                         + sprintf "\t%s = %s %s %s\n" (getName instruction) opName (getName binary.Left)
-                               (getName binary.Right)
-                     | { Content = UnaryInstruction unary } ->
-                         let opName =
-                             match unary.Kind with
-                             | Not -> "not"
-                             | Shl -> "shl"
-                             | Shr -> "shr"
-
-                         text
-                         + sprintf "\t%s = %s %s\n" (getName instruction) opName (getName unary.Value)
-                     | { Content = LoadInstruction load } ->
-                         text
-                         + sprintf "\t%s = load %s\n" (getName instruction) (getName load.Source)
-                     | { Content = CopyInstruction move } ->
-                         text
-                         + sprintf "\t%s = copy %s\n" (getName instruction) (getName move.Source)
-                     | { Content = CondBrInstruction cr } ->
-
-                         let opName =
-                             match cr.Kind with
-                             | Negative -> "< 0"
-                             | Zero -> "== 0"
-
-                         text
-                         + sprintf "\tbr %s %s %s %s\n" (getName cr.Value) opName (getName cr.TrueBranch)
-                               (getName cr.FalseBranch)
-                     | { Content = StoreInstruction store } ->
-                         text
-                         + sprintf "\tstore %s -> %s\n" (getName store.Value) (getName store.Destination)
-                     | { Content = PhiInstruction phi } ->
-                         let list =
-                             phi.Incoming
-                             |> List.map (fun (x, y) -> sprintf "(%s,%s)" (getName x) (getName y))
-                             |> List.reduce (fun x y -> x + " " + y)
-
-                         text
-                         + sprintf "\t%s = phi %s\n" (getName instruction) list
-                     | _ -> failwith "Internal Compiler Error") text)
-                + "\n") ""
-
 module Module =
 
     let basicBlocks irModule = irModule.BasicBlocks |> List.rev
@@ -634,22 +502,147 @@ module Module =
 
     let instructions = revInstructions >> List.rev
 
-    let fromBasicBlocks basicBlocks =
-        { BasicBlocks = basicBlocks |> List.rev }
+    let asText irModule =
+        let mutable counter = 0
+
+        let mutable seenValues =
+            Dictionary<Value, string>(HashIdentity.Reference)
+
+        let seenNames = ref Set.empty
+
+        irModule.BasicBlocks
+        |> List.rev
+        |> List.fold (fun text blockValue ->
+
+            let getName (value: Value ref) =
+                match !value with
+                | { Content = Constant { Value = constant } } -> constant |> string
+                | { Content = Register register } -> register.asString
+                | { Content = Undef } -> "undef"
+                | { Name = name } ->
+                    match seenValues.TryGetValue !value with
+                    | (true, name) -> name
+                    | (false, _) ->
+                        match name with
+                        | "" ->
+                            counter <- counter + 1
+                            let name = "%" + ((counter - 1) |> string)
+                            seenValues.Add(!value, name)
+                            name
+                        | _ ->
+                            let rec uniqueName name =
+                                if Set.contains name !seenNames then
+                                    match name
+                                          |> List.ofSeq
+                                          |> List.rev
+                                          |> List.takeWhile Char.IsDigit with
+                                    | [] -> uniqueName (name + "0")
+                                    | digits ->
+                                        let newInt =
+                                            digits
+                                            |> List.rev
+                                            |> List.toArray
+                                            |> String
+                                            |> int
+                                            |> ((+) 1)
+
+                                        let name =
+                                            name
+                                            |> List.ofSeq
+                                            |> List.rev
+                                            |> List.skip (List.length digits)
+                                            |> List.rev
+                                            |> List.toArray
+                                            |> String
+
+                                        uniqueName (name + (newInt |> string))
+                                else
+                                    seenValues.Add(!value, name)
+                                    seenNames := Set.add name !seenNames
+                                    name
+
+                            uniqueName ("%" + name)
+
+            let block = !blockValue |> Value.asBasicBlock
+
+            let pred =
+                !blockValue
+                |> BasicBlock.predecessors
+                |> List.map getName
+
+            let succ =
+                !blockValue
+                |> BasicBlock.successors
+                |> List.map getName
+
+            let text =
+                text + sprintf "; succ = %A pred = %A\n" succ pred
+
+            let text =
+                text + sprintf "%s:\n" (getName blockValue)
+
+            (block.Instructions
+             |> List.rev
+             |> List.fold (fun text instruction ->
+                 match !instruction with
+                 | { Content = AllocationInstruction _ } ->
+                     text
+                     + sprintf "\t%s = alloca\n" (getName instruction)
+                 | { Content = GotoInstruction goto } ->
+                     text
+                     + sprintf "\tgoto %s\n" (getName goto.BasicBlock)
+                 | { Content = BinaryInstruction binary } ->
+                     let opName =
+                         match binary.Kind with
+                         | Add -> "add"
+                         | And -> "and"
+
+                     text
+                     + sprintf "\t%s = %s %s %s\n" (getName instruction) opName (getName binary.Left)
+                           (getName binary.Right)
+                 | { Content = UnaryInstruction unary } ->
+                     let opName =
+                         match unary.Kind with
+                         | Not -> "not"
+                         | Shl -> "shl"
+                         | Shr -> "shr"
+
+                     text
+                     + sprintf "\t%s = %s %s\n" (getName instruction) opName (getName unary.Value)
+                 | { Content = LoadInstruction load } ->
+                     text
+                     + sprintf "\t%s = load %s\n" (getName instruction) (getName load.Source)
+                 | { Content = CopyInstruction move } ->
+                     text
+                     + sprintf "\t%s = copy %s\n" (getName instruction) (getName move.Source)
+                 | { Content = CondBrInstruction cr } ->
+
+                     let opName =
+                         match cr.Kind with
+                         | Negative -> "< 0"
+                         | Zero -> "== 0"
+
+                     text
+                     + sprintf "\tbr %s %s %s %s\n" (getName cr.Value) opName (getName cr.TrueBranch)
+                           (getName cr.FalseBranch)
+                 | { Content = StoreInstruction store } ->
+                     text
+                     + sprintf "\tstore %s -> %s\n" (getName store.Value) (getName store.Destination)
+                 | { Content = PhiInstruction phi } ->
+                     let list =
+                         phi.Incoming
+                         |> List.map (fun (x, y) -> sprintf "(%s,%s)" (getName x) (getName y))
+                         |> List.reduce (fun x y -> x + " " + y)
+
+                     text
+                     + sprintf "\t%s = phi %s\n" (getName instruction) list
+                 | _ -> failwith "Internal Compiler Error") text)
+            + "\n") ""
 
 type Builder =
     { InsertBlock: Value ref option
       InsertIndex: int
-      AllBlocks: Value ref list }
-
-    static member Default =
-        { InsertBlock = None
-          AllBlocks = []
-          InsertIndex = 0 }
-
-    static member fromModule irModule =
-        { Builder.Default with
-              AllBlocks = irModule.BasicBlocks }
+      Module: Module ref }
 
 type InsertPoint =
     | Before of Value ref
@@ -658,6 +651,16 @@ type InsertPoint =
     | End
 
 module Builder =
+
+    let fromModule irModule =
+        { InsertBlock = None
+          InsertIndex = 0
+          Module = irModule }
+
+    let private isBasicBlock =
+        function
+        | { Content = BasicBlockValue _ } -> true
+        | _ -> false
 
     let private addValue value builder =
         match builder.InsertBlock with
@@ -687,36 +690,47 @@ module Builder =
             ref
                 { Value.Default with
                       Name = name
-                      Content = BasicBlockValue BasicBlock.Default }
+                      Content = BasicBlockValue(BasicBlock.createDefault builder.Module) }
 
         match insertPoint with
         | End ->
-            (basicBlock,
-             { builder with
-                   AllBlocks = basicBlock :: builder.AllBlocks })
-        | Start ->
-            (basicBlock,
-             { builder with
-                   AllBlocks = builder.AllBlocks @ [ basicBlock ] })
-        | After ref ->
-            match builder.AllBlocks |> List.tryFindIndex ((=) ref) with
-            | None -> failwith "Internal Compiler Error: Failed to find Basic Block in block list"
-            | Some i ->
-                let (first, second) = builder.AllBlocks |> List.splitAt i
+            builder.Module
+            := { !builder.Module with
+                     BasicBlocks = basicBlock :: (!builder.Module).BasicBlocks }
 
-                (basicBlock,
-                 { builder with
-                       AllBlocks = first @ [ basicBlock ] @ second })
-        | Before ref ->
-            match builder.AllBlocks |> List.tryFindIndex ((=) ref) with
+            basicBlock
+        | Start ->
+            builder.Module
+            := { !builder.Module with
+                     BasicBlocks = (!builder.Module).BasicBlocks @ [ basicBlock ] }
+
+            basicBlock
+        | After ref ->
+            match (!builder.Module).BasicBlocks
+                  |> List.tryFindIndex ((=) ref) with
             | None -> failwith "Internal Compiler Error: Failed to find Basic Block in block list"
             | Some i ->
                 let (first, second) =
-                    builder.AllBlocks |> List.splitAt (i + 1)
+                    (!builder.Module).BasicBlocks |> List.splitAt i
 
-                (basicBlock,
-                 { builder with
-                       AllBlocks = first @ [ basicBlock ] @ second })
+                builder.Module
+                := { !builder.Module with
+                         BasicBlocks = first @ [ basicBlock ] @ second }
+
+                basicBlock
+        | Before ref ->
+            match (!builder.Module).BasicBlocks
+                  |> List.tryFindIndex ((=) ref) with
+            | None -> failwith "Internal Compiler Error: Failed to find Basic Block in block list"
+            | Some i ->
+                let (first, second) =
+                    (!builder.Module).BasicBlocks
+                    |> List.splitAt (i + 1)
+
+                builder.Module
+                := { BasicBlocks = first @ [ basicBlock ] @ second }
+
+                basicBlock
 
     let createBasicBlock = createBasicBlockAt End
 
@@ -749,6 +763,10 @@ module Builder =
                 |> Before
 
     let setInsertBlock basicBlock builder =
+        assert (basicBlock
+                |> Option.map ((!) >> isBasicBlock)
+                |> Option.defaultValue true)
+
         { builder with
               InsertBlock = basicBlock
               InsertIndex = 0 }
@@ -811,7 +829,6 @@ module Builder =
 
         builder |> addValue value
 
-
     let createBinary = createNamedBinary ""
 
     let createNamedUnary name kind value builder =
@@ -824,7 +841,6 @@ module Builder =
         value |> Value.addUser unary
 
         builder |> addValue unary
-
 
     let createUnary = createNamedUnary ""
 
@@ -869,9 +885,11 @@ module Builder =
         value |> Value.addUser store
         destination |> Value.addUser store
 
-        (store, builder |> addValue store |> snd)
+        builder |> addValue store
 
     let createGoto destination builder =
+
+        assert (!destination |> isBasicBlock)
 
         let value =
             ref
@@ -880,9 +898,13 @@ module Builder =
 
         destination |> Value.addUser value
 
-        (value, builder |> addValue value |> snd)
+        builder |> addValue value
 
     let createCondBr kind condition trueBranch falseBranch builder =
+
+        assert (!trueBranch |> isBasicBlock)
+        assert (!falseBranch |> isBasicBlock)
+
         let value =
             ref
                 { Value.Default with
@@ -897,7 +919,7 @@ module Builder =
         trueBranch |> Value.addUser value
         falseBranch |> Value.addUser value
 
-        (value, builder |> addValue value |> snd)
+        builder |> addValue value
 
     let createNamedPhi name incoming builder =
 
@@ -908,6 +930,10 @@ module Builder =
                       Content = PhiInstruction { Incoming = incoming } }
 
         incoming
+        |> List.map (snd >> (!) >> isBasicBlock)
+        |> List.iter (fun x -> assert x)
+
+        incoming
         |> List.iter (fun (x, y) ->
             x |> Value.addUser value
             y |> Value.addUser value)
@@ -915,5 +941,3 @@ module Builder =
         builder |> addValue value
 
     let createPhi = createNamedPhi ""
-
-    let finalize builder = { BasicBlocks = builder.AllBlocks }
