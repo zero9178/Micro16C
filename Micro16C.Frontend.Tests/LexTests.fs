@@ -74,12 +74,11 @@ let ``Simple identifiers`` () =
 
 [<Fact>]
 let ``Recognizing keywords`` () =
-    lexer "int register break continue do else for while goto"
+    lexer "int break continue do else for while goto"
     |> List.map (fun { Type = x } -> x)
     |> should
         equal
            [ IntKeyword
-             RegisterKeyword
              BreakKeyword
              ContinueKeyword
              DoKeyword
