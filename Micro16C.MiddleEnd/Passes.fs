@@ -306,6 +306,15 @@ let jumpThreading irModule =
 
         if instructionCount
            <= (block |> BasicBlock.revInstructions |> List.length) then
+
+            let shareSingleSuccessor =
+                !blockValue
+                |> BasicBlock.successors
+                |> List.distinctBy ((!) >> BasicBlock.successors)
+                |> (fun x ->
+                    x |> List.length = 1
+                    && !x.[0] |> BasicBlock.successors |> List.length = 1)
+
             if escapingValues |> List.isEmpty then
                 // If we have no escaping values then no phis need to be created in the successor and we can actually
                 // use the already optimized blocks we previously calculated instruction count with
@@ -317,7 +326,7 @@ let jumpThreading irModule =
                     |> Value.replaceOperand blockValue newBlock)
 
                 blockValue |> Value.destroy
-            else
+            else if shareSingleSuccessor then
                 // Otherwise we need to create phi nodes that will have the replacements for the escaping values as
                 // incoming values for the new blocks.
                 // Since due to constant folding or whatever optimizations that we applied to estimate instruction count
@@ -403,6 +412,8 @@ let jumpThreading irModule =
                     oldValue |> Value.replaceWith phi)
 
                 blockValue |> Value.destroy
+            else
+                copies |> List.iter (fst >> Value.destroy)
         else
             copies |> List.iter (fst >> Value.destroy)
 
@@ -420,13 +431,7 @@ let jumpThreading irModule =
         |> List.length = 2
         && !blockValue
            |> BasicBlock.predecessors
-           |> List.length = 2
-        && !blockValue
-           |> BasicBlock.successors
-           |> List.distinctBy ((!) >> BasicBlock.successors)
-           |> (fun succ ->
-               List.length succ = 1
-               && (!succ.[0] |> BasicBlock.successors |> List.length) = 1))
+           |> List.length = 2)
     |> List.iter jumpThreadingBlock
 
     irModule
