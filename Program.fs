@@ -12,17 +12,13 @@ let main argv =
         Lex.tokenize "int r0 = R0;
         int r1 = R1;
         int mod;
-        while(1)
+        do
         {
             mod = r0 % r1;
             r0 = r1;
             r1 = mod;
-            if (mod == 0)
-            {
-                goto end;
-            }
         }
-        end:;
+        while(mod > 0);
         R2 = r1;"
         |> Result.bind Parse.parse
         |> Result.bind Sema.analyse
@@ -37,16 +33,17 @@ let main argv =
         |> Result.map Passes.analyzeDominanceFrontiers
         |> Result.map Passes.mem2reg
         |> Result.map Passes.deadCodeElimination
+        |> Result.map (printModulePass "Before jump threading:")
         |> Result.map Passes.jumpThreading
         |> Result.map Passes.instructionSimplify
         |> Result.map Passes.instructionCombine
         |> Result.map Passes.simplifyCFG
         |> Result.map Passes.removeRedundantLoadStores
-        |> Result.map (printModulePass "End of optimizations:")
+        //|> Result.map (printModulePass "End of optimizations:")
         |> Result.map Legalize.legalizeConstants
         |> Result.map Legalize.destroyCriticalEdges
         |> Result.map Legalize.genPhiMoves
-        |> Result.map (printModulePass "End of IR:")
+        //|> Result.map (printModulePass "End of IR:")
         |> Result.map Passes.numberAll
         |> Result.map Passes.analyzeLifetimes
         |> Result.map RegisterAllocator.allocateRegisters

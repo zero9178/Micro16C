@@ -196,6 +196,45 @@ module private Op =
         |> Context.createPhi [ (Builder.createConstant 0s, isZero)
                                (Builder.createConstant 1s, isNotZero) ]
 
+    let equal lhs rhs context =
+        bitXor lhs rhs context ||> toBool ||> boolInvert
+
+    let notEqual lhs rhs context = bitXor lhs rhs context ||> toBool
+
+    let lessThan lhs rhs context =
+        let value, context = minus lhs rhs context
+
+        let isLess =
+            context |> Context.createBasicBlock "isLess"
+
+        let isGreaterOrEqual =
+            context
+            |> Context.createBasicBlock "isGreaterOrEqual"
+
+        let cont =
+            context |> Context.createBasicBlock "lessCont"
+
+        context
+        |> Context.createCondBr Negative value isLess isGreaterOrEqual
+        |> Context.setInsertPoint (Some isLess)
+        |> Context.createGoto cont
+        |> Context.setInsertPoint (Some isGreaterOrEqual)
+        |> Context.createGoto cont
+        |> Context.setInsertPoint (Some cont)
+        |> Context.createPhi [ (Builder.createConstant 1s, isLess)
+                               (Builder.createConstant 0s, isGreaterOrEqual) ]
+
+    let greaterThanOrEqual lhs rhs context = lessThan lhs rhs context ||> boolInvert
+
+    let greaterThan lhs rhs context =
+        let greaterOrEqual, context = greaterThanOrEqual lhs rhs context
+        let notEqual, context = notEqual lhs rhs context
+        bitAnd greaterOrEqual notEqual context
+
+    let lessThanOrEqual lhs rhs context =
+        greaterThan lhs rhs context ||> boolInvert
+
+
 let rec visitCompoundStatement (compoundItems: Sema.CompoundItem list) (context: Context) =
     compoundItems
     |> List.fold (fun context x ->
@@ -354,13 +393,14 @@ and visitBinaryExpression (expression: Sema.Binary) (context: Context) =
     | Sema.BitOr -> Op.bitOr lhs rhs context
     | Sema.BitXor -> Op.bitXor lhs rhs context
     | Sema.SubScript -> Op.plus lhs rhs context ||> Context.createLoad
-    | Sema.Equal ->
-        Op.bitXor lhs rhs context
-        ||> Op.toBool
-        ||> Op.boolInvert
-    | Sema.NotEqual -> Op.bitXor lhs rhs context ||> Op.toBool
+    | Sema.Equal -> Op.equal lhs rhs context
+    | Sema.NotEqual -> Op.notEqual lhs rhs context
     | Sema.Modulo -> Op.rem lhs rhs context
-    | _ -> failwith "TODO"
+    | Sema.GreaterThan -> Op.greaterThan lhs rhs context
+    | Sema.LessThan -> Op.lessThan lhs rhs context
+    | Sema.GreaterThanOrEqual -> Op.greaterThanOrEqual lhs rhs context
+    | Sema.LessThanOrEqual -> Op.lessThanOrEqual lhs rhs context
+    | _ -> failwith "Not yet implemented"
 
 and visitAssignmentExpression (expression: Sema.Assignment) (context: Context) =
     let lhs, context =
