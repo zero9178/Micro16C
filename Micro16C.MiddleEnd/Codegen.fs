@@ -116,85 +116,91 @@ module private Op =
         bitAnd lhs rhs context ||> bitNot
 
     let rem lhs rhs context =
-
-        let neg =
-            Context.createBasicBlock "modNeg" context
-
         match Context.insertPoint context with
         | None ->
             // if we are in dead code, this is all irrelevant and impossible to implement
             (Builder.createConstant 0s, context)
         | Some prev ->
-            let cont = Context.createBasicBlock "cont" context
 
-            let negated, context =
+            match !rhs with
+            | { Content = Constant { Value = value } } when (value &&& (value - 1s)) = 0s ->
+                (lhs, context) ||> bitAnd rhs
+            | _ ->
+                let neg =
+                    Context.createBasicBlock "modNeg" context
+
+                let cont = Context.createBasicBlock "cont" context
+
+                let negated, context =
+                    context
+                    |> Context.createCondBr Negative lhs neg cont
+                    |> Context.setInsertPoint (Some neg)
+                    |> pack2 lhs
+                    ||> negate
+
+                let context =
+                    context
+                    |> Context.createGoto cont
+                    |> Context.setInsertPoint (Some cont)
+
+                let phi, context =
+                    context
+                    |> Context.createPhi [ (negated, neg)
+                                           (lhs, prev) ]
+
+                let acc, context = Context.createAlloca context
+                let context = context |> Context.createStore acc phi
+
+                let rhs, context = (rhs, context) ||> negate
+
+                let body =
+                    Context.createBasicBlock "modBody" context
+
+                let context =
+                    context
+                    |> Context.createGoto body
+                    |> Context.setInsertPoint (Some body)
+
+
+                let value, context =
+                    (acc, context) ||> Context.createLoad ||> plus rhs
+
+                let modCont =
+                    Context.createBasicBlock "modCont" context
+
+                let modEnd =
+                    Context.createBasicBlock "modEnd" context
+
                 context
-                |> Context.createCondBr Negative lhs neg cont
-                |> Context.setInsertPoint (Some neg)
-                |> pack2 lhs
-                ||> negate
-
-            let context =
-                context
-                |> Context.createGoto cont
-                |> Context.setInsertPoint (Some cont)
-
-            let phi, context =
-                context
-                |> Context.createPhi [ (negated, neg)
-                                       (lhs, prev) ]
-
-            let acc, context = Context.createAlloca context
-            let context = context |> Context.createStore acc phi
-
-            let rhs, context = (rhs, context) ||> negate
-
-            let body =
-                Context.createBasicBlock "modBody" context
-
-            let context =
-                context
+                |> Context.createCondBr Negative value modEnd modCont
+                |> Context.setInsertPoint (Some modCont)
+                |> Context.createStore acc value
                 |> Context.createGoto body
-                |> Context.setInsertPoint (Some body)
-
-
-            let value, context =
-                (acc, context) ||> Context.createLoad ||> plus rhs
-
-            let modCont =
-                Context.createBasicBlock "modCont" context
-
-            let modEnd =
-                Context.createBasicBlock "modEnd" context
-
-            context
-            |> Context.createCondBr Negative value modEnd modCont
-            |> Context.setInsertPoint (Some modCont)
-            |> Context.createStore acc value
-            |> Context.createGoto body
-            |> Context.setInsertPoint (Some modEnd)
-            |> Context.createLoad acc
+                |> Context.setInsertPoint (Some modEnd)
+                |> Context.createLoad acc
 
     let toBool value context =
+        match context |> Context.insertPoint with
+        | None -> (Builder.createConstant 0s, context)
+        | Some _ ->
+            let isZero =
+                context |> Context.createBasicBlock "isZero"
 
-        let isZero =
-            context |> Context.createBasicBlock "isZero"
+            let isNotZero =
+                context |> Context.createBasicBlock "isNotZero"
 
-        let isNotZero =
-            context |> Context.createBasicBlock "isNotZero"
+            let cont =
+                context |> Context.createBasicBlock "boolCont"
 
-        let cont =
-            context |> Context.createBasicBlock "boolCont"
-
-        context
-        |> Context.createCondBr Zero value isZero isNotZero
-        |> Context.setInsertPoint (Some isZero)
-        |> Context.createGoto cont
-        |> Context.setInsertPoint (Some isNotZero)
-        |> Context.createGoto cont
-        |> Context.setInsertPoint (Some cont)
-        |> Context.createPhi [ (Builder.createConstant 0s, isZero)
-                               (Builder.createConstant 1s, isNotZero) ]
+            context
+            |> Context.createCondBr Zero value isZero isNotZero
+            |> Context.setInsertPoint (Some isZero)
+            |> Context.createGoto cont
+            |> Context.setInsertPoint (Some isNotZero)
+            |> Context.createGoto cont
+            |> Context.setInsertPoint (Some cont)
+            |> Context.createPhi [ (Builder.createConstant 0s, isZero)
+                                   (Builder.createConstant 1s, isNotZero) ]
 
     let equal lhs rhs context =
         bitXor lhs rhs context ||> toBool ||> boolInvert
@@ -202,27 +208,31 @@ module private Op =
     let notEqual lhs rhs context = bitXor lhs rhs context ||> toBool
 
     let lessThan lhs rhs context =
-        let value, context = minus lhs rhs context
 
-        let isLess =
-            context |> Context.createBasicBlock "isLess"
+        match context |> Context.insertPoint with
+        | None -> (Builder.createConstant 0s, context)
+        | Some _ ->
+            let value, context = minus lhs rhs context
 
-        let isGreaterOrEqual =
+            let isLess =
+                context |> Context.createBasicBlock "isLess"
+
+            let isGreaterOrEqual =
+                context
+                |> Context.createBasicBlock "isGreaterOrEqual"
+
+            let cont =
+                context |> Context.createBasicBlock "lessCont"
+
             context
-            |> Context.createBasicBlock "isGreaterOrEqual"
-
-        let cont =
-            context |> Context.createBasicBlock "lessCont"
-
-        context
-        |> Context.createCondBr Negative value isLess isGreaterOrEqual
-        |> Context.setInsertPoint (Some isLess)
-        |> Context.createGoto cont
-        |> Context.setInsertPoint (Some isGreaterOrEqual)
-        |> Context.createGoto cont
-        |> Context.setInsertPoint (Some cont)
-        |> Context.createPhi [ (Builder.createConstant 1s, isLess)
-                               (Builder.createConstant 0s, isGreaterOrEqual) ]
+            |> Context.createCondBr Negative value isLess isGreaterOrEqual
+            |> Context.setInsertPoint (Some isLess)
+            |> Context.createGoto cont
+            |> Context.setInsertPoint (Some isGreaterOrEqual)
+            |> Context.createGoto cont
+            |> Context.setInsertPoint (Some cont)
+            |> Context.createPhi [ (Builder.createConstant 1s, isLess)
+                                   (Builder.createConstant 0s, isGreaterOrEqual) ]
 
     let greaterThanOrEqual lhs rhs context = lessThan lhs rhs context ||> boolInvert
 

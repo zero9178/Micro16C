@@ -18,7 +18,7 @@ let main argv =
             r0 = r1;
             r1 = mod;
         }
-        while(mod > 0);
+        while(mod != 0);
         R2 = r1;"
         |> Result.bind Parse.parse
         |> Result.bind Sema.analyse
