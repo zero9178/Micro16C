@@ -97,6 +97,11 @@ module private Op =
     let bitNot value context =
         (value, context) ||> Context.createUnary Not
 
+    let boolInvert value context =
+        (value, context)
+        ||> bitNot
+        ||> bitAnd (Builder.createConstant 1s)
+
     let bitOr lhs rhs context =
         // R0 | R1 = ~(~R0 & ~R1)
         let lhs, context = bitNot lhs context
@@ -352,7 +357,7 @@ and visitBinaryExpression (expression: Sema.Binary) (context: Context) =
     | Sema.Equal ->
         Op.bitXor lhs rhs context
         ||> Op.toBool
-        ||> Op.bitNot
+        ||> Op.boolInvert
     | Sema.NotEqual -> Op.bitXor lhs rhs context ||> Op.toBool
     | Sema.Modulo -> Op.rem lhs rhs context
     | _ -> failwith "TODO"

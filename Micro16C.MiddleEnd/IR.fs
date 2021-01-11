@@ -2,6 +2,8 @@ module Micro16C.MiddleEnd.IR
 
 open System
 open System.Collections.Generic
+open System.Collections.Immutable
+open Micro16C.MiddleEnd.Util
 
 let (|Ref|) (ref: 'T ref) = ref.Value
 
@@ -115,7 +117,8 @@ and CondBrInstruction =
       FalseBranch: Value ref }
 
 and PhiInstruction =
-    { Incoming: (Value ref * Value ref) list }
+    { Incoming: (Value ref * Value ref) list
+      ValuesMemory: ImmutableDictionary<Value ref, Value ref> }
 
 and MoveInstruction = { Source: Value ref }
 
@@ -135,6 +138,34 @@ let rec private filterOnce predicate list =
     match list with
     | [] -> []
     | head :: list -> if not (predicate head) then list else head :: (filterOnce predicate list)
+
+module internal BasicBlockInternal =
+
+    let createDefault parent =
+        { Instructions = []
+          ImmediateDominator = None
+          DominanceFrontier = None
+          ParentModule = parent }
+
+    let revInstructions basicBlock = basicBlock.Instructions
+
+    let instructions = revInstructions >> List.rev
+
+    let immediateDominator basicBlock = basicBlock.ImmediateDominator
+
+    let dominanceFrontier basicBlock = basicBlock.DominanceFrontier
+
+    let phis =
+        instructions
+        >> List.takeWhile (function
+            | Ref { Content = PhiInstruction _ } -> true
+            | _ -> false)
+
+    let nonPhiInstructions =
+        instructions
+        >> List.skipWhile (function
+            | Ref { Content = PhiInstruction _ } -> true
+            | _ -> false)
 
 module Value =
 
@@ -157,151 +188,10 @@ module Value =
         | Undef -> false
         | _ -> true
 
-    let internal addUser dependent operand =
-        if !operand |> tracksUsers then
-            operand
-            := { !operand with
-                     Users = dependent :: (!operand).Users }
-
-    let private removeUser dependant operand =
-        operand
-        := { !operand with
-                 Users = (!operand).Users |> filterOnce ((<>) dependant) }
-
-    let operands value =
+    let isBasicBlock value =
         match value.Content with
-        | Constant _
-        | Register _
-        | BasicBlockValue _
-        | Undef _
-        | AllocationInstruction _ -> []
-        | BinaryInstruction { Left = lhs; Right = rhs } -> [ lhs; rhs ]
-        | GotoInstruction { BasicBlock = value }
-        | UnaryInstruction { Value = value }
-        | CopyInstruction { Source = value }
-        | LoadInstruction { Source = value } -> [ value ]
-        | StoreInstruction { Value = value
-                             Destination = destination } -> [ value; destination ]
-        | CondBrInstruction { Value = value
-                              TrueBranch = trueBranch
-                              FalseBranch = falseBranch } -> [ value; trueBranch; falseBranch ]
-        | PhiInstruction { Incoming = list } ->
-            list
-            |> List.fold (fun state (x, y) -> y :: x :: state) []
-            |> List.rev
-
-    let setOperand index operand value =
-        operand |> addUser value
-
-        match (index, (!value).Content) with
-        | (_, Constant _)
-        | (_, Register _)
-        | (_, AllocationInstruction _) -> failwith "Internal Compiler Error: Invalid Operand Index"
-        | (i, UnaryInstruction _)
-        | (i, GotoInstruction _)
-        | (i, CopyInstruction _)
-        | (i, LoadInstruction _) when i >= 1 -> failwith "Internal Compiler Error: Invalid Operand Index"
-        | (i, BinaryInstruction _)
-        | (i, StoreInstruction _) when i >= 2 -> failwith "Internal Compiler Error: Invalid Operand Index"
-        | (i, CondBrInstruction _) when i >= 3 -> failwith "Internal Compiler Error: Invalid Operand Index"
-        | (i, PhiInstruction instr) when i >= 2 * List.length instr.Incoming ->
-            failwith "Internal Compiler Error: Invalid Operand Index"
-        | (0, CondBrInstruction instr) ->
-            instr.Value |> removeUser value
-
-            value
-            := { !value with
-                     Content = CondBrInstruction { instr with Value = operand } }
-        | (1, CondBrInstruction instr) ->
-            instr.TrueBranch |> removeUser value
-
-            value
-            := { !value with
-                     Content = CondBrInstruction { instr with TrueBranch = operand } }
-        | (2, CondBrInstruction instr) ->
-            instr.FalseBranch |> removeUser value
-
-            value
-            := { !value with
-                     Content = CondBrInstruction { instr with FalseBranch = operand } }
-        | (0, UnaryInstruction instr) ->
-            instr.Value |> removeUser value
-
-            value
-            := { !value with
-                     Content = UnaryInstruction { instr with Value = operand } }
-        | (0, GotoInstruction instr) ->
-            instr.BasicBlock |> removeUser value
-
-            value
-            := { !value with
-                     Content = GotoInstruction { instr with BasicBlock = operand } }
-        | (0, LoadInstruction instr) ->
-            instr.Source |> removeUser value
-
-            value
-            := { !value with
-                     Content = LoadInstruction { instr with Source = operand } }
-        | (0, CopyInstruction instr) ->
-            instr.Source |> removeUser value
-
-            value
-            := { !value with
-                     Content = CopyInstruction { instr with Source = operand } }
-        | (0, BinaryInstruction instr) ->
-            instr.Left |> removeUser value
-
-            value
-            := { !value with
-                     Content = BinaryInstruction { instr with Left = operand } }
-        | (1, BinaryInstruction instr) ->
-            instr.Right |> removeUser value
-
-            value
-            := { !value with
-                     Content = BinaryInstruction { instr with Right = operand } }
-        | (0, StoreInstruction instr) ->
-            instr.Value |> removeUser value
-
-            value
-            := { !value with
-                     Content = StoreInstruction { instr with Value = operand } }
-        | (1, StoreInstruction instr) ->
-            instr.Destination |> removeUser value
-
-            value
-            := { !value with
-                     Content = StoreInstruction { instr with Destination = operand } }
-        | (i, PhiInstruction instr) ->
-
-            value
-            := { !value with
-                     Content =
-                         PhiInstruction
-                             { instr with
-                                   Incoming =
-                                       instr.Incoming
-                                       |> List.indexed
-                                       |> List.map (fun pair ->
-                                           match pair with
-                                           | (j, (old, block)) when i / 2 = j && i % 2 = 0 ->
-                                               old |> removeUser value
-                                               (operand, block)
-                                           | (j, (incoming, old)) when i / 2 = j && i % 2 = 1 ->
-                                               old |> removeUser value
-                                               (incoming, operand)
-                                           | (_, x) -> x) } }
-
-        | _ -> failwith "Internal Compiler Error"
-
-    // Careful, in an instruction with multiple operands this will delete all occurrences
-    let replaceOperand operand replacement value =
-        !value
-        |> operands
-        |> List.indexed
-        |> List.filter (snd >> ((=) operand))
-        |> List.map fst
-        |> List.iter (fun i -> setOperand i replacement value)
+        | BasicBlockValue _ -> true
+        | _ -> false
 
     let useCount = users >> List.length
 
@@ -341,6 +231,223 @@ module Value =
         | { Content = BasicBlockValue value } -> value
         | _ -> failwith "Internal Compiler Error: Value is not a BasicBlock"
 
+    let rec private addToPhis basicBlock successor =
+        !successor
+        |> asBasicBlock
+        |> BasicBlockInternal.phis
+        |> List.iter (fun phiValue ->
+            match phiValue with
+            | Ref { Content = PhiInstruction ({ Incoming = list } as phi) } ->
+                if list |> List.exists (snd >> (=) basicBlock) |> not then
+                    let value =
+                        phi.ValuesMemory
+                        |> ImmutableMap.tryFind basicBlock
+                        |> Option.defaultValue Value.UndefValue
+
+                    value |> addUser phiValue
+                    basicBlock |> addUser phiValue
+
+                    phiValue
+                    := { !phiValue with
+                             Content =
+                                 PhiInstruction
+                                     { phi with
+                                           Incoming = (value, basicBlock) :: list } }
+            | _ -> failwith "Internal Compiler Error")
+
+    and internal addUser dependent operand =
+        if !operand |> tracksUsers then
+            operand
+            := { !operand with
+                     Users = dependent :: (!operand).Users }
+
+            match !dependent |> parentBlock with
+            | Some pred when !dependent |> isTerminating
+                             && !operand |> isBasicBlock -> addToPhis pred operand
+            | _ -> ()
+
+    let rec private removeFromPhis basicBlock successor =
+        !successor
+        |> asBasicBlock
+        |> BasicBlockInternal.phis
+        |> List.iter (fun phiValue ->
+            match phiValue with
+            | Ref { Content = PhiInstruction ({ Incoming = list } as phi) } ->
+                let trueList, falseList =
+                    list |> List.partition (snd >> (<>) (basicBlock))
+
+                phiValue
+                := { !phiValue with
+                         Content =
+                             PhiInstruction
+                                 { phi with
+                                       Incoming = trueList
+                                       ValuesMemory =
+                                           falseList
+                                           |> List.fold (fun map (value, bb) -> map |> ImmutableMap.add bb value)
+                                                  phi.ValuesMemory } }
+
+                falseList
+                |> List.iter (fun (x, y) ->
+                    x |> removeUser phiValue
+                    y |> removeUser phiValue)
+            | _ -> failwith "Internal Compiler Error")
+
+    and private removeUser dependent operand =
+        operand
+        := { !operand with
+                 Users = (!operand).Users |> filterOnce ((<>) dependent) }
+
+        match !dependent |> parentBlock with
+        | Some pred when !dependent |> isTerminating
+                         && !operand |> isBasicBlock -> removeFromPhis pred operand
+        | _ -> ()
+
+    let private changeUser oldDependant operand dependent =
+        if !operand |> tracksUsers then
+            operand
+            := { !operand with
+                     Users = (dependent :: (!operand).Users) }
+
+        oldDependant
+        := { !oldDependant with
+                 Users =
+                     (!oldDependant).Users
+                     |> filterOnce ((<>) dependent) }
+
+    let operands value =
+        match value.Content with
+        | Constant _
+        | Register _
+        | BasicBlockValue _
+        | Undef _
+        | AllocationInstruction _ -> []
+        | BinaryInstruction { Left = lhs; Right = rhs } -> [ lhs; rhs ]
+        | GotoInstruction { BasicBlock = value }
+        | UnaryInstruction { Value = value }
+        | CopyInstruction { Source = value }
+        | LoadInstruction { Source = value } -> [ value ]
+        | StoreInstruction { Value = value
+                             Destination = destination } -> [ destination; value ]
+        | CondBrInstruction { Value = value
+                              TrueBranch = trueBranch
+                              FalseBranch = falseBranch } -> [ value; trueBranch; falseBranch ]
+        | PhiInstruction { Incoming = list } ->
+            list
+            |> List.fold (fun state (x, y) -> y :: x :: state) []
+            |> List.rev
+
+    let setOperand index operand value =
+        match (index, (!value).Content) with
+        | (_, Constant _)
+        | (_, Register _)
+        | (_, AllocationInstruction _) -> failwith "Internal Compiler Error: Invalid Operand Index"
+        | (i, UnaryInstruction _)
+        | (i, GotoInstruction _)
+        | (i, CopyInstruction _)
+        | (i, LoadInstruction _) when i >= 1 -> failwith "Internal Compiler Error: Invalid Operand Index"
+        | (i, BinaryInstruction _)
+        | (i, StoreInstruction _) when i >= 2 -> failwith "Internal Compiler Error: Invalid Operand Index"
+        | (i, CondBrInstruction _) when i >= 3 -> failwith "Internal Compiler Error: Invalid Operand Index"
+        | (i, PhiInstruction instr) when i >= 2 * List.length instr.Incoming ->
+            failwith "Internal Compiler Error: Invalid Operand Index"
+        | (0, CondBrInstruction instr) ->
+            changeUser instr.Value operand value
+
+            value
+            := { !value with
+                     Content = CondBrInstruction { instr with Value = operand } }
+        | (1, CondBrInstruction instr) ->
+            changeUser instr.TrueBranch operand value
+
+            value
+            := { !value with
+                     Content = CondBrInstruction { instr with TrueBranch = operand } }
+        | (2, CondBrInstruction instr) ->
+            changeUser instr.FalseBranch operand value
+
+            value
+            := { !value with
+                     Content = CondBrInstruction { instr with FalseBranch = operand } }
+        | (0, UnaryInstruction instr) ->
+            changeUser instr.Value operand value
+
+            value
+            := { !value with
+                     Content = UnaryInstruction { instr with Value = operand } }
+        | (0, GotoInstruction instr) ->
+            changeUser instr.BasicBlock operand value
+
+            value
+            := { !value with
+                     Content = GotoInstruction { instr with BasicBlock = operand } }
+        | (0, LoadInstruction instr) ->
+            changeUser instr.Source operand value
+
+            value
+            := { !value with
+                     Content = LoadInstruction { instr with Source = operand } }
+        | (0, CopyInstruction instr) ->
+            changeUser instr.Source operand value
+
+            value
+            := { !value with
+                     Content = CopyInstruction { instr with Source = operand } }
+        | (0, BinaryInstruction instr) ->
+            changeUser instr.Left operand value
+
+            value
+            := { !value with
+                     Content = BinaryInstruction { instr with Left = operand } }
+        | (1, BinaryInstruction instr) ->
+            changeUser instr.Right operand value
+
+            value
+            := { !value with
+                     Content = BinaryInstruction { instr with Right = operand } }
+        | (0, StoreInstruction instr) ->
+            changeUser instr.Destination operand value
+
+            value
+            := { !value with
+                     Content = StoreInstruction { instr with Destination = operand } }
+        | (1, StoreInstruction instr) ->
+            changeUser instr.Value operand value
+
+            value
+            := { !value with
+                     Content = StoreInstruction { instr with Value = operand } }
+        | (i, PhiInstruction instr) ->
+
+            value
+            := { !value with
+                     Content =
+                         PhiInstruction
+                             { instr with
+                                   Incoming =
+                                       instr.Incoming
+                                       |> List.indexed
+                                       |> List.map (fun pair ->
+                                           match pair with
+                                           | (j, (old, block)) when i / 2 = j && i % 2 = 0 ->
+                                               changeUser old operand value
+                                               (operand, block)
+                                           | (j, (incoming, old)) when i / 2 = j && i % 2 = 1 ->
+                                               changeUser old operand value
+                                               (incoming, operand)
+                                           | (_, x) -> x) } }
+
+        | _ -> failwith "Internal Compiler Error"
+
+    // Careful, in an instruction with multiple operands this will delete all occurrences
+    let replaceOperand operand replacement value =
+        !value
+        |> operands
+        |> List.indexed
+        |> List.filter (snd >> ((=) operand))
+        |> List.map fst
+        |> List.iter (fun i -> setOperand i replacement value)
+
     let removeFromParent value =
         match (!value).ParentBlock with
         | None -> ()
@@ -357,63 +464,22 @@ module Value =
 
     let rec destroy value =
 
-        // If we are removing a basic block we need to make sure every instruction does not have an operand that doesn't
-        // use operands from other basic blocks nor have users from other blocks. We replace those with undefs
+        // If we are removing a basic block we need to destroy all it's instructions as well
         match (!value) with
         | { Content = BasicBlockValue ({ ParentModule = irModule } as block) } ->
-            block.Instructions
-            |> List.map (fun x ->
-                (x,
-                 !x
-                 |> operands
-                 |> List.indexed
-                 |> List.filter (fun (_, o) -> (!o).ParentBlock <> (!x).ParentBlock)
-                 |> List.map fst))
-            |> List.iter (fun (x, list) ->
-                list
-                |> List.iter (fun i -> setOperand i Value.UndefValue x))
-
-            block.Instructions
-            |> List.iter (replaceWith Value.UndefValue)
+            block.Instructions |> List.iter destroy
 
             irModule
             := { !irModule with
                      BasicBlocks = (!irModule).BasicBlocks |> List.except [ value ] }
+        | _ ->
+            (!value)
+            |> operands
+            |> List.iter (removeUser value)
 
-            !value
-            |> users
-            |> List.iter (fun phi ->
-                match !phi with
-                | { Content = PhiInstruction ({ Incoming = list } as phiInstr) } ->
-
-                    let trueList, falseList =
-                        list |> List.partition (snd >> (<>) value)
-
-                    phi
-                    := { !phi with
-                             Content = PhiInstruction { phiInstr with Incoming = trueList } }
-
-                    falseList
-                    |> List.iter (fun (x, y) ->
-                        x |> removeUser phi
-                        y |> removeUser phi)
-                | _ -> ())
-        | _ -> ()
-
-        (!value)
-        |> operands
-        |> List.indexed
-        |> List.map fst
-        |> List.iter (fun i -> setOperand i Value.UndefValue value)
-
-        value |> removeFromParent
+            value |> removeFromParent
 
         assert (useCount !value = 0)
-
-        assert (!value
-                |> operands
-                |> List.exists ((!) >> tracksUsers)
-                |> not)
 
         value := !Value.UndefValue
 
@@ -450,23 +516,25 @@ module Value =
                              BasicBlockValue
                                  { parentBlock with
                                        Instructions = first @ [ replacement ] @ second } }
+
+                if !replacement |> isTerminating then
+                    !replacement
+                    |> operands
+                    |> List.filter ((!) >> isBasicBlock)
+                    |> List.iter (addToPhis parentBlockValue)
         | _ -> destroy value
 
 module BasicBlock =
 
-    let createDefault parent =
-        { Instructions = []
-          ImmediateDominator = None
-          DominanceFrontier = None
-          ParentModule = parent }
+    let createDefault = BasicBlockInternal.createDefault
 
-    let revInstructions basicBlock = basicBlock.Instructions
+    let revInstructions = BasicBlockInternal.revInstructions
 
-    let instructions = revInstructions >> List.rev
+    let instructions = BasicBlockInternal.instructions
 
-    let immediateDominator basicBlock = basicBlock.ImmediateDominator
+    let immediateDominator = BasicBlockInternal.immediateDominator
 
-    let dominanceFrontier basicBlock = basicBlock.DominanceFrontier
+    let dominanceFrontier = BasicBlockInternal.dominanceFrontier
 
     let successors =
         Value.asBasicBlock
@@ -504,17 +572,9 @@ module BasicBlock =
 
     let terminator = tryTerminator >> Option.get
 
-    let phis =
-        instructions
-        >> List.takeWhile (function
-            | Ref { Content = PhiInstruction _ } -> true
-            | _ -> false)
+    let phis = BasicBlockInternal.phis
 
-    let nonPhiInstructions =
-        instructions
-        >> List.skipWhile (function
-            | Ref { Content = PhiInstruction _ } -> true
-            | _ -> false)
+    let nonPhiInstructions = BasicBlockInternal.nonPhiInstructions
 
 module Module =
 
@@ -716,8 +776,11 @@ module Builder =
         | _ -> failwith "Internal Compiler Error"
 
     let insertValue value builder =
-        value |> Value.removeFromParent
-        builder |> addValue value
+        if !value |> Value.isInstruction then
+            value |> Value.removeFromParent
+            builder |> addValue value
+        else
+            (value, builder)
 
     let createBasicBlockAt (insertPoint: InsertPoint) name builder =
         let basicBlock =
@@ -930,9 +993,10 @@ module Builder =
                 { Value.Default with
                       Content = GotoInstruction { BasicBlock = destination } }
 
-        destination |> Value.addUser value
+        builder |> addValue value |> ignore
 
-        builder |> addValue value
+        destination |> Value.addUser value
+        (value, builder)
 
     let createCondBr kind condition trueBranch falseBranch builder =
 
@@ -949,11 +1013,14 @@ module Builder =
                                 TrueBranch = trueBranch
                                 FalseBranch = falseBranch } }
 
+        builder |> addValue value |> ignore
+
         condition |> Value.addUser value
         trueBranch |> Value.addUser value
         falseBranch |> Value.addUser value
 
-        builder |> addValue value
+        (value, builder)
+
 
     let createNamedPhi name incoming builder =
 
@@ -961,7 +1028,10 @@ module Builder =
             ref
                 { Value.Default with
                       Name = name
-                      Content = PhiInstruction { Incoming = incoming } }
+                      Content =
+                          PhiInstruction
+                              { Incoming = incoming
+                                ValuesMemory = ImmutableMap.empty } }
 
         incoming
         |> List.map (snd >> (!) >> isBasicBlock)
@@ -975,3 +1045,90 @@ module Builder =
         builder |> addValue value
 
     let createPhi = createNamedPhi ""
+
+    let copy value operands builder =
+        if !value |> Value.isInstruction |> not then
+            assert (operands |> List.isEmpty)
+            (value, builder)
+        else
+            match (!value).Content with
+            | AllocationInstruction _ -> builder |> createAlloca
+            | BinaryInstruction { Kind = kind } ->
+                assert (operands |> List.length = 2)
+
+                builder
+                |> createBinary operands.[0] kind operands.[1]
+            | UnaryInstruction { Kind = kind } ->
+                assert (operands |> List.length = 1)
+                builder |> createUnary kind operands.[0]
+            | CopyInstruction _ ->
+                assert (operands |> List.length = 1)
+                builder |> createCopy operands.[0]
+            | StoreInstruction _ ->
+                assert (operands |> List.length = 2)
+                builder |> createStore operands.[0] operands.[1]
+            | GotoInstruction _ ->
+                assert (operands |> List.length = 1)
+                builder |> createGoto operands.[0]
+            | CondBrInstruction { Kind = kind } ->
+                assert (operands |> List.length = 3)
+
+                builder
+                |> createCondBr kind operands.[0] operands.[1] operands.[2]
+            | PhiInstruction _ ->
+                assert ((operands |> List.length) % 2 = 0)
+                builder |> createPhi (operands |> List.pairwise)
+            | _ -> failwith "Internal Compiler Error"
+
+    let copyInstructionsStructure replacements instructions builder =
+        let structure =
+            instructions
+            |> List.fold (fun structure instr ->
+                match replacements |> ImmutableMap.tryFind instr with
+                | Some repl -> structure |> ImmutableMap.add instr repl
+                | None ->
+                    let result =
+                        builder
+                        |> copy
+                            instr
+                               (!instr
+                                |> Value.operands
+                                |> List.map (fun op ->
+                                    match structure |> ImmutableMap.tryFind op with
+                                    | Some op -> op
+                                    | None -> op))
+                        |> fst
+
+                    match (!result, !instr) with
+                    | { ParentBlock = Some parentBlock }, { ParentBlock = Some oldParent } when !result
+                                                                                                |> Value.isTerminating ->
+                        !result
+                        |> Value.operands
+                        |> List.filter ((!) >> Value.isBasicBlock)
+                        |> List.iter (fun succ ->
+                            !succ
+                            |> Value.asBasicBlock
+                            |> BasicBlock.phis
+                            |> List.iter (fun phi ->
+                                let oldValue =
+                                    !phi
+                                    |> Value.operands
+                                    |> List.pairwise
+                                    |> List.find (snd >> (=) oldParent)
+                                    |> fst
+
+                                let index =
+                                    (!phi
+                                     |> Value.operands
+                                     |> List.findIndex ((=) parentBlock))
+                                    - 1
+
+                                match structure |> ImmutableMap.tryFind oldValue with
+                                | None -> phi |> Value.setOperand index oldValue
+                                | Some repl -> phi |> Value.setOperand index repl))
+                    | _ -> ()
+
+
+                    structure |> ImmutableMap.add instr result) ImmutableMap.empty
+
+        structure

@@ -107,8 +107,16 @@ let deadCodeElimination (irModule: Module ref) =
 let simplifyCFG (irModule: Module ref) =
 
     let simplifyBlock (index, blockValue) =
-        match !blockValue with
-        | { Content = BasicBlockValue block } ->
+        if index <> 0
+           && !blockValue
+              |> BasicBlock.predecessors
+              |> List.isEmpty then
+            blockValue |> Value.destroy
+        else if !blockValue |> Value.isBasicBlock |> not then
+            // As we may delete a successor this case could occur
+            ()
+        else
+            let block = !blockValue |> Value.asBasicBlock
             // this optimization may be invalid if the basic block is used in a Phi. For now I'll be conservative and
             // not remove such basic blocks. As a future TODO I could check for semantic changes
             match block |> BasicBlock.revInstructions with
@@ -119,39 +127,118 @@ let simplifyCFG (irModule: Module ref) =
                                                                                               | _ -> false)
                                                                                                (!blockValue).Users) ->
                 blockValue |> Value.replaceWith destination
-            | Ref { Content = GotoInstruction { BasicBlock = destination } } :: _ when (!destination
-                                                                                        |> BasicBlock.predecessors
-                                                                                        |> List.length =
-                                                                                           1)
-                                                                                       && (!destination
-                                                                                           |> Value.asBasicBlock
-                                                                                           |> BasicBlock.phis
-                                                                                           |> List.isEmpty) ->
+            | Ref { Content = GotoInstruction { BasicBlock = destination } } as terminator :: _ when (!destination
+                                                                                                      |> BasicBlock.predecessors
+                                                                                                      |> List.length =
+                                                                                                         1)
+                                                                                                     && (!destination
+                                                                                                         |> Value.asBasicBlock
+                                                                                                         |> BasicBlock.phis
+                                                                                                         |> List.isEmpty) ->
+                terminator |> Value.destroy
+
                 let builder =
                     Builder.fromModule irModule
-                    |> Builder.setInsertBlock (Some destination)
-                    |> Builder.setInsertPoint Start
+                    |> Builder.setInsertBlock (Some blockValue)
+                    |> Builder.setInsertPoint End
 
-                !blockValue
+                !destination
                 |> Value.asBasicBlock
-                |> BasicBlock.revInstructions
-                |> List.skip 1
-                |> List.rev
+                |> BasicBlock.instructions
                 |> List.iter (fun x -> builder |> Builder.insertValue x |> ignore)
 
-                blockValue |> Value.replaceWith destination
-            | _ ->
-                if index <> 0
-                   && !blockValue
-                      |> BasicBlock.predecessors
-                      |> List.isEmpty then
-                    blockValue |> Value.destroy
-        | _ -> failwith "Internal Compiler Error"
+                destination |> Value.replaceWith blockValue
+            | _ -> ()
 
     !irModule
     |> Module.basicBlocks
     |> List.indexed
     |> List.iter simplifyBlock
+
+    irModule
+
+let jumpThreading irModule =
+
+    let builder = Builder.fromModule irModule
+
+    let jumpThreadingBlock blockValue =
+        let block = !blockValue |> Value.asBasicBlock
+
+        let cond =
+            match block |> BasicBlock.terminator with
+            | Ref { Content = CondBrInstruction { Value = cond } } -> cond
+            | _ -> failwith "Internal Compiler Error"
+
+        let split =
+            !blockValue
+            |> BasicBlock.predecessors
+            |> List.exists (fun pred ->
+                Seq.unfold (fun values ->
+                    match values with
+                    | [] -> Some(true, [])
+                    | Ref { Content = PhiInstruction { Incoming = list }
+                            ParentBlock = Some parentBlock } :: tail when parentBlock = blockValue ->
+                        let incoming =
+                            list |> List.find (snd >> (=) pred) |> fst
+
+                        if !incoming |> Value.isInstruction then None else Some(false, tail)
+                    | Ref { ParentBlock = Some parentBlock } as head :: tail when parentBlock = blockValue ->
+                        let operands =
+                            !head
+                            |> Value.operands
+                            |> List.filter ((!) >> Value.isInstruction)
+
+                        Some(false, operands @ tail)
+                    | _ -> None) [ cond ]
+                |> Seq.skipWhile (not)
+                |> Seq.isEmpty
+                |> not)
+
+        if split then
+
+            let phis = block |> BasicBlock.phis
+
+            !blockValue
+            |> BasicBlock.predecessors
+            |> List.iter (fun pred ->
+                let newBlock =
+                    builder
+                    |> Builder.createBasicBlockAt (After pred) ((!blockValue |> Value.name) + ".copy")
+
+                let replacements =
+                    phis
+                    |> List.map (fun phi ->
+                        (phi,
+                         !phi
+                         |> Value.operands
+                         |> List.pairwise
+                         |> List.find (snd >> (=) pred)
+                         |> fst))
+                    |> ImmutableMap.ofList
+
+
+                builder
+                |> Builder.setInsertBlock (Some newBlock)
+                |> Builder.copyInstructionsStructure replacements (block |> BasicBlock.instructions)
+                |> ignore
+
+                !pred
+                |> Value.asBasicBlock
+                |> BasicBlock.terminator
+                |> Value.replaceOperand blockValue newBlock)
+
+            blockValue |> Value.destroy
+
+    !irModule
+    |> Module.basicBlocks
+    |> List.filter (fun blockValue ->
+        !blockValue
+        |> BasicBlock.successors
+        |> List.length = 2
+        && !blockValue
+           |> BasicBlock.predecessors
+           |> List.length = 2)
+    |> List.iter jumpThreadingBlock
 
     irModule
 
