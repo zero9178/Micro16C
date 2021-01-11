@@ -64,7 +64,8 @@ module ImmutableSet =
 
     let intersect (set1: ImmutableHashSet<'Key>) (set2: ImmutableHashSet<'Key>) = set1.Intersect set2
 
-    let intersectMany (sets: seq<ImmutableHashSet<'Key>>) = sets |> Seq.reduce intersect
+    let intersectMany (sets: seq<ImmutableHashSet<'Key>>) =
+        if sets |> Seq.isEmpty then empty else sets |> Seq.reduce intersect
 
     let isEmpty (set: ImmutableHashSet<'Key>) = set.IsEmpty
 
