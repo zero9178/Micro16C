@@ -5,88 +5,87 @@ open System.Collections.Immutable
 open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
 
+let private singleInstructionSimplify builder value =
+    match !value with
+    | { Content = BinaryInstruction { Kind = And
+                                      Left = Ref { Content = Constant { Value = 0s } }
+                                      Right = _ } }
+    | { Content = BinaryInstruction { Kind = And
+                                      Right = Ref { Content = Constant { Value = 0s } }
+                                      Left = _ } } ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+    | { Content = BinaryInstruction { Kind = Add
+                                      Left = Ref { Content = Constant { Value = 0s } }
+                                      Right = passThrough } }
+    | { Content = BinaryInstruction { Kind = Add
+                                      Right = Ref { Content = Constant { Value = 0s } }
+                                      Left = passThrough } } -> value |> Value.replaceWith passThrough
+    | { Content = BinaryInstruction { Kind = And
+                                      Left = Ref { Content = Constant { Value = 0xFFFFs } }
+                                      Right = passThrough } }
+    | { Content = BinaryInstruction { Kind = And
+                                      Right = Ref { Content = Constant { Value = 0xFFFFs } }
+                                      Left = passThrough } } -> value |> Value.replaceWith passThrough
+    | { Content = BinaryInstruction { Kind = Add
+                                      Left = Ref { Content = Constant { Value = lhs } }
+                                      Right = Ref { Content = Constant { Value = rhs } } } } ->
+        value
+        |> Value.replaceWith (Builder.createConstant (lhs + rhs))
+    | { Content = BinaryInstruction { Kind = And
+                                      Left = Ref { Content = Constant { Value = lhs } }
+                                      Right = Ref { Content = Constant { Value = rhs } } } } ->
+        value
+        |> Value.replaceWith (Builder.createConstant (lhs &&& rhs))
+    | { Content = BinaryInstruction { Kind = And; Left = lhs; Right = rhs } } when lhs = rhs ->
+        value |> Value.replaceWith lhs
+    | { Content = UnaryInstruction { Kind = Not
+                                     Value = Ref { Content = Constant { Value = rhs } } } } ->
+        value
+        |> Value.replaceWith (Builder.createConstant (~~~rhs))
+    | { Content = UnaryInstruction { Kind = Shl
+                                     Value = Ref { Content = Constant { Value = constant } } } } ->
+        value
+        |> Value.replaceWith (Builder.createConstant (constant <<< 1))
+    | { Content = UnaryInstruction { Kind = Shr
+                                     Value = Ref { Content = Constant { Value = constant } } } } ->
+        value
+        |> Value.replaceWith (Builder.createConstant ((constant |> uint16) >>> 1 |> int16))
+    | { Content = CondBrInstruction { Kind = Zero
+                                      Value = Ref { Content = Constant { Value = constant } }
+                                      TrueBranch = trueBranch
+                                      FalseBranch = falseBranch } } ->
+        if constant = 0s then
+            value
+            |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
+        else
+            value
+            |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
+    | { Content = CondBrInstruction { Kind = Negative
+                                      Value = Ref { Content = Constant { Value = constant } }
+                                      TrueBranch = trueBranch
+                                      FalseBranch = falseBranch } } ->
+        if constant < 0s then
+            value
+            |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
+        else
+            value
+            |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
+    | { Content = PhiInstruction { Incoming = list } } when list
+                                                            |> List.map fst
+                                                            |> List.distinct
+                                                            |> List.length = 1 ->
+        value
+        |> Value.replaceWith (list |> List.head |> fst)
+    | _ -> ()
 
 let instructionSimplify (irModule: Module ref) =
 
     let builder = Builder.fromModule irModule
 
-    let simplify value =
-        match !value with
-        | { Content = BinaryInstruction { Kind = And
-                                          Left = Ref { Content = Constant { Value = 0s } }
-                                          Right = _ } }
-        | { Content = BinaryInstruction { Kind = And
-                                          Right = Ref { Content = Constant { Value = 0s } }
-                                          Left = _ } } ->
-            value
-            |> Value.replaceWith (Builder.createConstant 0s)
-        | { Content = BinaryInstruction { Kind = Add
-                                          Left = Ref { Content = Constant { Value = 0s } }
-                                          Right = passThrough } }
-        | { Content = BinaryInstruction { Kind = Add
-                                          Right = Ref { Content = Constant { Value = 0s } }
-                                          Left = passThrough } } -> value |> Value.replaceWith passThrough
-        | { Content = BinaryInstruction { Kind = And
-                                          Left = Ref { Content = Constant { Value = 0xFFFFs } }
-                                          Right = passThrough } }
-        | { Content = BinaryInstruction { Kind = And
-                                          Right = Ref { Content = Constant { Value = 0xFFFFs } }
-                                          Left = passThrough } } -> value |> Value.replaceWith passThrough
-        | { Content = BinaryInstruction { Kind = Add
-                                          Left = Ref { Content = Constant { Value = lhs } }
-                                          Right = Ref { Content = Constant { Value = rhs } } } } ->
-            value
-            |> Value.replaceWith (Builder.createConstant (lhs + rhs))
-        | { Content = BinaryInstruction { Kind = And
-                                          Left = Ref { Content = Constant { Value = lhs } }
-                                          Right = Ref { Content = Constant { Value = rhs } } } } ->
-            value
-            |> Value.replaceWith (Builder.createConstant (lhs &&& rhs))
-        | { Content = BinaryInstruction { Kind = And; Left = lhs; Right = rhs } } when lhs = rhs ->
-            value |> Value.replaceWith lhs
-        | { Content = UnaryInstruction { Kind = Not
-                                         Value = Ref { Content = Constant { Value = rhs } } } } ->
-            value
-            |> Value.replaceWith (Builder.createConstant (~~~rhs))
-        | { Content = UnaryInstruction { Kind = Shl
-                                         Value = Ref { Content = Constant { Value = constant } } } } ->
-            value
-            |> Value.replaceWith (Builder.createConstant (constant <<< 1))
-        | { Content = UnaryInstruction { Kind = Shr
-                                         Value = Ref { Content = Constant { Value = constant } } } } ->
-            value
-            |> Value.replaceWith (Builder.createConstant ((constant |> uint16) >>> 1 |> int16))
-        | { Content = CondBrInstruction { Kind = Zero
-                                          Value = Ref { Content = Constant { Value = constant } }
-                                          TrueBranch = trueBranch
-                                          FalseBranch = falseBranch } } ->
-            if constant = 0s then
-                value
-                |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
-            else
-                value
-                |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
-        | { Content = CondBrInstruction { Kind = Negative
-                                          Value = Ref { Content = Constant { Value = constant } }
-                                          TrueBranch = trueBranch
-                                          FalseBranch = falseBranch } } ->
-            if constant < 0s then
-                value
-                |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
-            else
-                value
-                |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
-        | { Content = PhiInstruction { Incoming = list } } when list
-                                                                |> List.map fst
-                                                                |> List.distinct
-                                                                |> List.length = 1 ->
-            value
-            |> Value.replaceWith (list |> List.head |> fst)
-        | _ -> ()
-
     !irModule
     |> Module.instructions
-    |> List.iter simplify
+    |> List.iter (singleInstructionSimplify builder)
 
     irModule
 
@@ -157,6 +156,89 @@ let simplifyCFG (irModule: Module ref) =
 
     irModule
 
+let private singleInstructionCombine builder value =
+    match value with
+    | Ref { Content = UnaryInstruction { Kind = Shr
+                                         Value = Ref { Content = UnaryInstruction { Kind = Shl; Value = passThrough }
+                                                       Users = [ _ ] } as first } }
+    | Ref { Content = UnaryInstruction { Kind = Shl
+                                         Value = Ref { Content = UnaryInstruction { Kind = Shr; Value = passThrough }
+                                                       Users = [ _ ] } as first } }
+    | Ref { Content = UnaryInstruction { Kind = Not
+                                         Value = Ref { Content = UnaryInstruction { Kind = Not; Value = passThrough }
+                                                       Users = [ _ ] } as first } } ->
+        value |> Value.replaceWith passThrough
+        first |> Value.destroy
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = Ref { Content = Constant { Value = value1 } }
+                                          Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                      Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                        Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = Ref { Content = Constant { Value = value1 } }
+                                          Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                      Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                        Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Right = Ref { Content = Constant { Value = value1 } }
+                                          Left = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                     Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                       Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Right = Ref { Content = Constant { Value = value1 } }
+                                          Left = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                     Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                       Users = [ _ ] } as first } } ->
+        first
+        |> Value.replaceOperand oldOp (Builder.createConstant (value1 + value2))
+
+        value |> Value.replaceWith first
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Left = Ref { Content = Constant { Value = value1 } }
+                                          Right = Ref { Content = BinaryInstruction { Kind = And
+                                                                                      Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                        Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Left = Ref { Content = Constant { Value = value1 } }
+                                          Right = Ref { Content = BinaryInstruction { Kind = And
+                                                                                      Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                        Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Right = Ref { Content = Constant { Value = value1 } }
+                                          Left = Ref { Content = BinaryInstruction { Kind = And
+                                                                                     Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                       Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Right = Ref { Content = Constant { Value = value1 } }
+                                          Left = Ref { Content = BinaryInstruction { Kind = And
+                                                                                     Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                       Users = [ _ ] } as first } } ->
+        first
+        |> Value.replaceOperand oldOp (Builder.createConstant (value1 ||| value2))
+
+        value |> Value.replaceWith first
+    | Ref { Content = CondBrInstruction { Kind = Zero
+                                          Value = Ref { Users = [ _ ]
+                                                        Content = BinaryInstruction { Right = Ref { Content = Constant { Value = 0x8000s } }
+                                                                                      Left = passThrough
+                                                                                      Kind = And } } as neg
+                                          TrueBranch = trueBranch
+                                          FalseBranch = falseBranch } }
+    | Ref { Content = CondBrInstruction { Kind = Zero
+                                          Value = Ref { Users = [ _ ]
+                                                        Content = BinaryInstruction { Left = Ref { Content = Constant { Value = 0x8000s } }
+                                                                                      Right = passThrough
+                                                                                      Kind = And } } as neg
+                                          TrueBranch = trueBranch
+                                          FalseBranch = falseBranch } } ->
+        let newCond, _ =
+            builder
+            |> Builder.createCondBr Negative passThrough falseBranch trueBranch
+
+        value |> Value.replaceWith newCond
+        neg |> Value.destroy
+    | _ -> ()
+
 let jumpThreading irModule =
 
     let builder = Builder.fromModule irModule
@@ -164,43 +246,21 @@ let jumpThreading irModule =
     let jumpThreadingBlock blockValue =
         let block = !blockValue |> Value.asBasicBlock
 
-        let cond =
-            match block |> BasicBlock.terminator with
-            | Ref { Content = CondBrInstruction { Value = cond } } -> cond
-            | _ -> failwith "Internal Compiler Error"
+        let phis = block |> BasicBlock.phis
 
-        let split =
+        let escapingValues =
+            block
+            |> BasicBlock.revInstructions
+            |> List.filter ((!) >> Value.producesValue)
+            |> List.filter
+                ((!)
+                 >> Value.users
+                 >> List.exists ((!) >> Value.parentBlock >> (<>) (Some blockValue)))
+
+        let copies =
             !blockValue
             |> BasicBlock.predecessors
-            |> List.exists (fun pred ->
-                Seq.unfold (fun values ->
-                    match values with
-                    | [] -> Some(true, [])
-                    | Ref { Content = PhiInstruction { Incoming = list }
-                            ParentBlock = Some parentBlock } :: tail when parentBlock = blockValue ->
-                        let incoming =
-                            list |> List.find (snd >> (=) pred) |> fst
-
-                        if !incoming |> Value.isInstruction then None else Some(false, tail)
-                    | Ref { ParentBlock = Some parentBlock } as head :: tail when parentBlock = blockValue ->
-                        let operands =
-                            !head
-                            |> Value.operands
-                            |> List.filter ((!) >> Value.isInstruction)
-
-                        Some(false, operands @ tail)
-                    | _ -> None) [ cond ]
-                |> Seq.skipWhile (not)
-                |> Seq.isEmpty
-                |> not)
-
-        if split then
-
-            let phis = block |> BasicBlock.phis
-
-            !blockValue
-            |> BasicBlock.predecessors
-            |> List.iter (fun pred ->
+            |> List.map (fun pred ->
                 let newBlock =
                     builder
                     |> Builder.createBasicBlockAt (After pred) ((!blockValue |> Value.name) + ".copy")
@@ -216,19 +276,142 @@ let jumpThreading irModule =
                          |> fst))
                     |> ImmutableMap.ofList
 
-
                 builder
                 |> Builder.setInsertBlock (Some newBlock)
                 |> Builder.copyInstructionsStructure replacements (block |> BasicBlock.instructions)
                 |> ignore
 
-                !pred
+                !newBlock
                 |> Value.asBasicBlock
-                |> BasicBlock.terminator
-                |> Value.replaceOperand blockValue newBlock)
+                |> BasicBlock.instructions
+                |> List.iter (singleInstructionSimplify builder)
 
-            blockValue |> Value.destroy
+                !newBlock
+                |> Value.asBasicBlock
+                |> BasicBlock.instructions
+                |> List.iter (singleInstructionCombine builder)
 
+                (newBlock, pred))
+
+        let instructionCount =
+            (copies
+             |> List.sumBy
+                 (fst
+                  >> (!)
+                  >> Value.asBasicBlock
+                  >> BasicBlock.revInstructions
+                  >> List.length))
+            - List.length copies
+        // doing -1 for each block as worst case scenario one terminator can always be removed
+
+        if instructionCount
+           <= (block |> BasicBlock.revInstructions |> List.length) then
+            if escapingValues |> List.isEmpty then
+                // If we have no escaping values then no phis need to be created in the successor and we can actually
+                // use the already optimized blocks we previously calculated instruction count with
+                copies
+                |> List.iter (fun (newBlock, pred) ->
+                    !pred
+                    |> Value.asBasicBlock
+                    |> BasicBlock.terminator
+                    |> Value.replaceOperand blockValue newBlock)
+
+                blockValue |> Value.destroy
+            else
+                // Otherwise we need to create phi nodes that will have the replacements for the escaping values as
+                // incoming values for the new blocks.
+                // Since due to constant folding or whatever optimizations that we applied to estimate instruction count
+                // after jump threading, the
+                // replacement value may have been destroyed and it's too hard to track we are simply going to redo the
+                // process, not optimize this time and link the replacement into the phi we'll be creating in the
+                // successor of the new block which are distinct as assured in the filter below
+
+                copies |> List.iter (fst >> Value.destroy)
+
+                let copies =
+                    !blockValue
+                    |> BasicBlock.predecessors
+                    |> List.map (fun pred ->
+                        let newBlock =
+                            builder
+                            |> Builder.createBasicBlockAt (After pred) ((!blockValue |> Value.name) + ".copy")
+
+                        let replacements =
+                            phis
+                            |> List.map (fun phi ->
+                                (phi,
+                                 !phi
+                                 |> Value.operands
+                                 |> List.pairwise
+                                 |> List.find (snd >> (=) pred)
+                                 |> fst))
+                            |> ImmutableMap.ofList
+
+                        let replacements =
+                            builder
+                            |> Builder.setInsertBlock (Some newBlock)
+                            |> Builder.copyInstructionsStructure replacements (block |> BasicBlock.instructions)
+
+                        !pred
+                        |> Value.asBasicBlock
+                        |> BasicBlock.terminator
+                        |> Value.replaceOperand blockValue newBlock
+
+                        (newBlock, replacements))
+
+                let mergeBlock =
+                    !blockValue
+                    |> BasicBlock.successors
+                    |> List.head
+                    |> (!)
+                    |> BasicBlock.successors
+                    |> List.exactlyOne
+
+
+
+                escapingValues
+                |> List.iter (fun oldValue ->
+                    let incomingList =
+                        copies
+                        |> List.map (fun (block, replacements) -> (replacements |> ImmutableMap.find oldValue, block))
+
+                    let mergeIncoming =
+                        !blockValue
+                        |> BasicBlock.successors
+                        |> List.map (fun bb ->
+                            let phi =
+                                builder
+                                |> Builder.setInsertBlock (Some bb)
+                                |> Builder.setInsertPoint Start
+                                |> Builder.createPhi incomingList
+                                |> fst
+
+                            !oldValue
+                            |> Value.users
+                            |> List.filter ((!) >> Value.parentBlock >> (=) (Some bb))
+                            |> List.iter (Value.replaceOperand oldValue phi)
+
+                            (phi, bb))
+
+                    let phi =
+                        builder
+                        |> Builder.setInsertBlock (Some mergeBlock)
+                        |> Builder.setInsertPoint Start
+                        |> Builder.createPhi mergeIncoming
+                        |> fst
+
+                    oldValue |> Value.replaceWith phi)
+
+                blockValue |> Value.destroy
+        else
+            copies |> List.iter (fst >> Value.destroy)
+
+
+    // I am very new to this and therefore conservative. For now only solving diamond problems where we have 2
+    // predecessors, 2 successors and the 2 successors both have the exact same successor as well. Without thinking
+    // much about it, restricting it to 2 successors and 2 predecessors, instead of the same amount of successors
+    // and predecessors is a bit counter intuitive but I want to be conservative for now. It's also primarily here for
+    // optimizing boolean algebra which has binary decisions all the time
     !irModule
     |> Module.basicBlocks
     |> List.filter (fun blockValue ->
@@ -237,102 +420,24 @@ let jumpThreading irModule =
         |> List.length = 2
         && !blockValue
            |> BasicBlock.predecessors
-           |> List.length = 2)
+           |> List.length = 2
+        && !blockValue
+           |> BasicBlock.successors
+           |> List.distinctBy ((!) >> BasicBlock.successors)
+           |> (fun succ ->
+               List.length succ = 1
+               && (!succ.[0] |> BasicBlock.successors |> List.length) = 1))
     |> List.iter jumpThreadingBlock
 
     irModule
 
 let instructionCombine (irModule: Module ref) =
-    let combine instruction =
 
-        match instruction with
-        | Ref { Content = UnaryInstruction { Kind = Shr
-                                             Value = Ref { Content = UnaryInstruction { Kind = Shl
-                                                                                        Value = passThrough }
-                                                           Users = [ _ ] } as first } }
-        | Ref { Content = UnaryInstruction { Kind = Shl
-                                             Value = Ref { Content = UnaryInstruction { Kind = Shr
-                                                                                        Value = passThrough }
-                                                           Users = [ _ ] } as first } }
-        | Ref { Content = UnaryInstruction { Kind = Not
-                                             Value = Ref { Content = UnaryInstruction { Kind = Not
-                                                                                        Value = passThrough }
-                                                           Users = [ _ ] } as first } } ->
-            instruction |> Value.replaceWith passThrough
-            first |> Value.destroy
-        | Ref { Content = BinaryInstruction { Kind = Add
-                                              Left = Ref { Content = Constant { Value = value1 } }
-                                              Right = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                          Left = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                            Users = [ _ ] } as first } }
-        | Ref { Content = BinaryInstruction { Kind = Add
-                                              Left = Ref { Content = Constant { Value = value1 } }
-                                              Right = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                          Right = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                            Users = [ _ ] } as first } }
-        | Ref { Content = BinaryInstruction { Kind = Add
-                                              Right = Ref { Content = Constant { Value = value1 } }
-                                              Left = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                         Right = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                           Users = [ _ ] } as first } }
-        | Ref { Content = BinaryInstruction { Kind = Add
-                                              Right = Ref { Content = Constant { Value = value1 } }
-                                              Left = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                         Left = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                           Users = [ _ ] } as first } } ->
-            first
-            |> Value.replaceOperand oldOp (Builder.createConstant (value1 + value2))
-
-            instruction |> Value.replaceWith first
-        | Ref { Content = BinaryInstruction { Kind = And
-                                              Left = Ref { Content = Constant { Value = value1 } }
-                                              Right = Ref { Content = BinaryInstruction { Kind = And
-                                                                                          Left = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                            Users = [ _ ] } as first } }
-        | Ref { Content = BinaryInstruction { Kind = And
-                                              Left = Ref { Content = Constant { Value = value1 } }
-                                              Right = Ref { Content = BinaryInstruction { Kind = And
-                                                                                          Right = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                            Users = [ _ ] } as first } }
-        | Ref { Content = BinaryInstruction { Kind = And
-                                              Right = Ref { Content = Constant { Value = value1 } }
-                                              Left = Ref { Content = BinaryInstruction { Kind = And
-                                                                                         Right = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                           Users = [ _ ] } as first } }
-        | Ref { Content = BinaryInstruction { Kind = And
-                                              Right = Ref { Content = Constant { Value = value1 } }
-                                              Left = Ref { Content = BinaryInstruction { Kind = And
-                                                                                         Left = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                           Users = [ _ ] } as first } } ->
-            first
-            |> Value.replaceOperand oldOp (Builder.createConstant (value1 ||| value2))
-
-            instruction |> Value.replaceWith first
-        | Ref { Content = CondBrInstruction { Kind = Zero
-                                              Value = Ref { Users = [ _ ]
-                                                            Content = BinaryInstruction { Right = Ref { Content = Constant { Value = 0x8000s } }
-                                                                                          Left = passThrough
-                                                                                          Kind = And } } as neg
-                                              TrueBranch = trueBranch
-                                              FalseBranch = falseBranch } }
-        | Ref { Content = CondBrInstruction { Kind = Zero
-                                              Value = Ref { Users = [ _ ]
-                                                            Content = BinaryInstruction { Left = Ref { Content = Constant { Value = 0x8000s } }
-                                                                                          Right = passThrough
-                                                                                          Kind = And } } as neg
-                                              TrueBranch = trueBranch
-                                              FalseBranch = falseBranch } } ->
-            let newCond, _ =
-                Builder.fromModule irModule
-                |> Builder.createCondBr Negative passThrough falseBranch trueBranch
-
-            instruction |> Value.replaceWith newCond
-            neg |> Value.destroy
-        | _ -> ()
+    let builder = Builder.fromModule irModule
 
     !irModule
     |> Module.instructions
-    |> List.iter combine
+    |> List.iter (singleInstructionCombine builder)
 
     irModule
 
