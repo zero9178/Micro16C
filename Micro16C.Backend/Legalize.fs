@@ -62,25 +62,42 @@ let legalizeConstants irModule =
                 |> Seq.fold (fun (op, builder) bitPair ->
                     match bitPair with
                     | 0b00s ->
-                        builder
-                        |> Builder.createBinary op Add op
-                        ||> Builder.createUnary Shl
+                        match !op with
+                        | { Content = Constant { Value = 0s } } -> (op, builder)
+                        | _ ->
+                            builder
+                            |> Builder.createBinary op Add op
+                            ||> Builder.createUnary Shl
                     | 0b01s ->
-                        (op, builder)
-                        ||> Builder.createUnary Shl
-                        ||> Builder.createUnary Shl
-                        ||> Builder.createBinary (Builder.createConstant 1s) Add
+                        match !op with
+                        | { Content = Constant { Value = 0s } } -> (Builder.createConstant 1s, builder)
+                        | _ ->
+                            (op, builder)
+                            ||> Builder.createUnary Shl
+                            ||> Builder.createUnary Shl
+                            ||> Builder.createBinary (Builder.createConstant 1s) Add
                     | 0b10s ->
-                        (op, builder)
-                        ||> Builder.createUnary Shl
-                        ||> Builder.createBinary (Builder.createConstant 1s) Add
-                        ||> Builder.createUnary Shl
+                        match !op with
+                        | { Content = Constant { Value = 0s } } ->
+                            (Builder.createConstant 1s, builder)
+                            ||> Builder.createUnary Shl
+                        | _ ->
+                            (op, builder)
+                            ||> Builder.createUnary Shl
+                            ||> Builder.createBinary (Builder.createConstant 1s) Add
+                            ||> Builder.createUnary Shl
                     | 0b11s ->
-                        (op, builder)
-                        ||> Builder.createBinary (Builder.createConstant 1s) Add
-                        ||> Builder.createUnary Shl
-                        ||> Builder.createBinary (Builder.createConstant 1s) Add
-                        ||> Builder.createUnary Shl
+                        match !op with
+                        | { Content = Constant { Value = 0s } } ->
+                            (Builder.createConstant 1s, builder)
+                            ||> Builder.createUnary Shl
+                            ||> Builder.createBinary (Builder.createConstant 1s) Add
+                        | _ ->
+                            (op, builder)
+                            ||> Builder.createUnary Shl
+                            ||> Builder.createBinary (Builder.createConstant 1s) Add
+                            ||> Builder.createUnary Shl
+                            ||> Builder.createBinary (Builder.createConstant 1s) Add
                     | _ -> failwithf "Internal Compiler Error: Invalid bit pair %d" bitPair)
                        (Builder.createConstant start, builder)
                 |> fst

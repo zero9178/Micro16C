@@ -88,7 +88,8 @@ module ImmutableSet =
 
     let union (set1: ImmutableHashSet<'Key>) (set2: ImmutableHashSet<'Key>) = set1.Union set2
 
-    let unionMany (sets: seq<ImmutableHashSet<'Key>>) = sets |> Seq.reduce union
+    let unionMany (sets: seq<ImmutableHashSet<'Key>>) =
+        if sets |> Seq.isEmpty then empty else sets |> Seq.reduce union
 
     let equal (set1: ImmutableHashSet<'Key>) (set2: ImmutableHashSet<'Key>) = set1.SetEquals set2
 
