@@ -20,6 +20,8 @@ module ImmutableMap =
         | (false, _) -> None
         | (true, value) -> Some value
 
+    let find value (map: ImmutableDictionary<'Key, 'Value>) = tryFind value map |> Option.get
+
     let inline add key value (map: ImmutableDictionary<'Key, 'Value>) = map.SetItem(key, value)
 
     let inline map (f: ('Key * 'Value -> 'Key2 * 'Value2)) (map: ImmutableDictionary<'Key, 'Value>) =
