@@ -25,7 +25,7 @@ do
     r0 = mod;
 }
 while(mod != 0);
-R2 = mod;
+R2 = r1;
 ```
 
 Due to the common need to accept input in specific registers and outputting them to others, the Keywords R0 to R10, AC
@@ -61,7 +61,6 @@ R1 <- R3
 R2 <- R4
 goto .doWhileBody
 :doWhileContinue
-R2 <- R4
 ```
 
 Memory access can be simply done through pointers:
@@ -133,7 +132,7 @@ The IR of the Euclid program above serialized as text is:
 
 ; succ = [] pred = ["%modEnd"]
 %doWhileContinue:
-        store %4 -> R2
+        store %2 -> R2
 ```
 
 ## Things left to do
