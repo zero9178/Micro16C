@@ -1,5 +1,6 @@
 module Micro16C.Backend.RegisterAllocator
 
+open System
 open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
 
@@ -93,6 +94,19 @@ let allocateRegisters irModule =
         |> Module.revInstructions
         |> List.map (associateWith ((!) >> Value.lifeIntervals))
         |> List.filter (snd >> List.isEmpty >> not)
+        // Don't allocate registers for values whose only usage is in conditional branches, these can be be folded
+        // and done in parallel in Assembly. Let's only do so though if the conditional branch is right after the
+        // the definition of the condition. A separate pass should be responsible to increasing data locality if need be.
+        //
+        // Exception to the above is shift operations. The Control Unit of the Micro16 reads from the ALU, the shifter
+        // is separate and placed after the ALU. Results from shift operations need to be stored in a register.
+        |> List.filter (function
+            | Ref { Content = UnaryInstruction { Kind = kind } }, _ when kind = Shl || kind = Shl -> true
+            | Ref { Users = [ Ref { Content = CondBrInstruction _
+                                    Index = Some condIndex } ]
+                    Index = Some index },
+              _ when condIndex = index + 1 -> false
+            | _ -> true)
         |> ImmutableMap.ofList
 
     let valueStarts =

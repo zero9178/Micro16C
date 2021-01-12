@@ -62,15 +62,14 @@ let genAssembly irModule: AssemblyLine list =
 
     let operandToBus operand =
         match !operand with
-        | { Content = Constant { Value = 0s } } -> Bus.Zero
-        | { Content = Constant { Value = 1s } } -> Bus.One
-        | { Content = Constant { Value = -1s } } -> Bus.NegOne
-        | { Content = Register reg } -> Register.toBus reg
+        | { Content = Constant { Value = 0s } } -> Bus.Zero |> Some
+        | { Content = Constant { Value = 1s } } -> Bus.One |> Some
+        | { Content = Constant { Value = -1s } } -> Bus.NegOne |> Some
+        | { Content = Register reg } -> Register.toBus reg |> Some
         | _ ->
             !operand
             |> Value.register
-            |> Option.get
-            |> Register.toBus
+            |> Option.map Register.toBus
 
     let prependOperation operation list = (Operation operation) :: list
 
@@ -89,23 +88,6 @@ let genAssembly irModule: AssemblyLine list =
         |> List.fold (fun list instr ->
 
             match !instr with
-            | { Content = BinaryInstruction { Left = Ref { Content = Constant { Value = 0x8000s } }
-                                              Right = op
-                                              Kind = And } }
-            | { Content = BinaryInstruction { Right = Ref { Content = Constant { Value = 0x8000s } }
-                                              Left = op
-                                              Kind = And } } ->
-                if operandToBus instr = operandToBus op then
-                    list
-                else
-                    prependOperation
-                        { Operation.Default with
-                              SBus = operandToBus instr |> Some
-                              ABus = operandToBus op |> Some
-                              AMux = Some AMux.ABus
-                              ALU = Some ALU.ABus
-                              Shifter = Some Shifter.Noop }
-                        list
             | { Content = CopyInstruction { Source = op }
                 Users = [ Ref { Content = PhiInstruction _ } as phi ] } ->
                 if operandToBus phi = operandToBus op then
@@ -113,8 +95,8 @@ let genAssembly irModule: AssemblyLine list =
                 else
                     prependOperation
                         { Operation.Default with
-                              SBus = operandToBus phi |> Some
-                              ABus = operandToBus op |> Some
+                              SBus = operandToBus phi
+                              ABus = operandToBus op
                               AMux = Some AMux.ABus
                               ALU = Some ALU.ABus
                               Shifter = Some Shifter.Noop }
@@ -126,8 +108,8 @@ let genAssembly irModule: AssemblyLine list =
                 else
                     prependOperation
                         { Operation.Default with
-                              SBus = operandToBus instr |> Some
-                              ABus = operandToBus op |> Some
+                              SBus = operandToBus instr
+                              ABus = operandToBus op
                               AMux = Some AMux.ABus
                               ALU = Some ALU.ABus
                               Shifter = Some Shifter.Noop }
@@ -139,8 +121,8 @@ let genAssembly irModule: AssemblyLine list =
                 else
                     prependOperation
                         { Operation.Default with
-                              SBus = operandToBus instr |> Some
-                              ABus = operandToBus op |> Some
+                              SBus = operandToBus instr
+                              ABus = operandToBus op
                               AMux = Some AMux.ABus
                               ALU = Some ALU.ABus
                               Shifter = Some Shifter.Noop }
@@ -149,9 +131,9 @@ let genAssembly irModule: AssemblyLine list =
                 prependOperation
                     { Operation.Default with
                           AMux = Some AMux.ABus
-                          SBus = instr |> operandToBus |> Some
-                          ABus = lhs |> operandToBus |> Some
-                          BBus = rhs |> operandToBus |> Some
+                          SBus = instr |> operandToBus
+                          ABus = lhs |> operandToBus
+                          BBus = rhs |> operandToBus
                           ALU = Some(if kind = Add then ALU.Add else ALU.And)
                           Shifter = Some Shifter.Noop }
                     list
@@ -159,8 +141,8 @@ let genAssembly irModule: AssemblyLine list =
                 prependOperation
                     { Operation.Default with
                           AMux = Some AMux.ABus
-                          SBus = instr |> operandToBus |> Some
-                          ABus = value |> operandToBus |> Some
+                          SBus = instr |> operandToBus
+                          ABus = value |> operandToBus
                           ALU = Some ALU.Neg
                           Shifter = Some Shifter.Noop }
                     list
@@ -168,8 +150,8 @@ let genAssembly irModule: AssemblyLine list =
                 prependOperation
                     { Operation.Default with
                           AMux = Some AMux.ABus
-                          SBus = instr |> operandToBus |> Some
-                          ABus = value |> operandToBus |> Some
+                          SBus = instr |> operandToBus
+                          ABus = value |> operandToBus
                           ALU = Some ALU.ABus
                           Shifter = Some Shifter.Left }
                     list
@@ -177,8 +159,8 @@ let genAssembly irModule: AssemblyLine list =
                 prependOperation
                     { Operation.Default with
                           AMux = Some AMux.ABus
-                          SBus = instr |> operandToBus |> Some
-                          ABus = value |> operandToBus |> Some
+                          SBus = instr |> operandToBus
+                          ABus = value |> operandToBus
                           ALU = Some ALU.ABus
                           Shifter = Some Shifter.Left }
                     list
@@ -193,20 +175,27 @@ let genAssembly irModule: AssemblyLine list =
                         list
                 else
                     list
-            | { Content = CondBrInstruction { Kind = Negative
-                                              Value = value
+            | { Content = CondBrInstruction { Kind = kind
+                                              Value = Ref { Users = [ _ ]
+                                                            Index = Some condIndex
+                                                            Register = None }
                                               FalseBranch = falseBranch
-                                              TrueBranch = trueBranch } } ->
+                                              TrueBranch = trueBranch }
+                Index = Some brIndex } when condIndex + 1 = brIndex ->
+                // Case: conditions only use is as condition in the branch instruction and it is immediately before
+                // the branch instruction. No register should have been allocated for it and we need to add the
+                // conditional branch to them instruction.
                 let list =
-                    prependOperation
-                        { Operation.Default with
-                              Address = trueBranch |> getName |> Some
-                              AMux = Some AMux.ABus
-                              Condition = Some Cond.Neg
-                              ABus = value |> operandToBus |> Some
-                              ALU = Some ALU.ABus
-                              Shifter = None }
+                    match list |> List.tryHead with
+                    | Some (Label _)
+                    | None -> failwith "Internal Compiler Error: Did not compute condition before branch"
+                    | Some (Operation operation) ->
                         list
+                        |> List.tail
+                        |> prependOperation
+                            { operation with
+                                  Address = trueBranch |> getName |> Some
+                                  Condition = if kind = Negative then Some Cond.Neg else Some Cond.Zero }
 
                 if Some falseBranch = Array.tryItem (bbIndex + 1) basicBlocks then
                     list
@@ -216,7 +205,7 @@ let genAssembly irModule: AssemblyLine list =
                               Address = falseBranch |> getName |> Some
                               Condition = Some Cond.None }
                         list
-            | { Content = CondBrInstruction { Kind = Zero
+            | { Content = CondBrInstruction { Kind = kind
                                               Value = value
                                               FalseBranch = falseBranch
                                               TrueBranch = trueBranch } } ->
@@ -225,8 +214,8 @@ let genAssembly irModule: AssemblyLine list =
                         { Operation.Default with
                               Address = trueBranch |> getName |> Some
                               AMux = Some AMux.ABus
-                              Condition = Some Cond.Zero
-                              ABus = value |> operandToBus |> Some
+                              Condition = if kind = Negative then Some Cond.Neg else Some Cond.Zero
+                              ABus = value |> operandToBus
                               ALU = Some ALU.ABus
                               Shifter = None }
                         list
@@ -245,7 +234,7 @@ let genAssembly irModule: AssemblyLine list =
                         { Operation.Default with
                               MemoryAccess = Some MemoryAccess.Read
                               MARWrite = Some true
-                              BBus = value |> operandToBus |> Some }
+                              BBus = value |> operandToBus }
                         list
 
                 let list =
@@ -257,7 +246,7 @@ let genAssembly irModule: AssemblyLine list =
 
                 prependOperation
                     { Operation.Default with
-                          SBus = operandToBus instr |> Some
+                          SBus = operandToBus instr
                           AMux = Some AMux.MBR
                           ALU = Some ALU.ABus
                           Shifter = Some Shifter.Noop }
@@ -270,8 +259,8 @@ let genAssembly irModule: AssemblyLine list =
                               MemoryAccess = Some MemoryAccess.Write
                               MARWrite = Some true
                               MBRWrite = Some true
-                              BBus = destination |> operandToBus |> Some
-                              ABus = value |> operandToBus |> Some
+                              BBus = destination |> operandToBus
+                              ABus = value |> operandToBus
                               ALU = Some ALU.ABus
                               AMux = Some AMux.ABus
                               Shifter = Some Shifter.Noop }
