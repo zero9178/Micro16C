@@ -76,7 +76,7 @@ and ValueContent =
     | PhiInstruction of PhiInstruction
     | BasicBlockValue of BasicBlock
     | Undef
-    | CopyInstruction of MoveInstruction
+    | CopyInstruction of CopyInstruction
 
 and Constant = { Value: int16 }
 
@@ -120,7 +120,7 @@ and PhiInstruction =
     { Incoming: (Value ref * Value ref) list
       ValuesMemory: ImmutableDictionary<Value ref, Value ref> }
 
-and MoveInstruction = { Source: Value ref }
+and CopyInstruction = { Source: Value ref }
 
 and BasicBlock =
     { Instructions: Value ref list

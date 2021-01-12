@@ -10,7 +10,6 @@
 
     <ItemGroup>
         <Compile Include="LexTests.fs"/>
-        <Compile Include="Program.fs"/>
     </ItemGroup>
 
     <ItemGroup>

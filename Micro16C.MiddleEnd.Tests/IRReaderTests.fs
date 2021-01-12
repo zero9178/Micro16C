@@ -1,4 +1,4 @@
-module Tests
+module Micro16C.MiddleEnd.Tests.IRReaderTests
 
 open Micro16C.MiddleEnd
 open Micro16C.MiddleEnd.IR
@@ -6,7 +6,7 @@ open Xunit
 open FsUnit.Xunit
 
 [<Fact>]
-let IRReader () =
+let ``IRReader is lossless`` () =
 
     let result =
         """; succ = ["%doWhileBody"] pred = []
@@ -55,6 +55,22 @@ let IRReader () =
         ; succ = [] pred = ["%modEnd"]
         %doWhileContinue:
                 store %2 -> R2"""
+        |> IRReader.fromString
+        |> (!)
+        |> Module.asText
+
+    result
+    |> IRReader.fromString
+    |> (!)
+    |> Module.asText
+    |> should equal result
+
+    let result =
+        """%entry:
+                %0 = alloca
+                %1 = load %0
+                %2 = and 5 %1
+                store %2 -> %0"""
         |> IRReader.fromString
         |> (!)
         |> Module.asText

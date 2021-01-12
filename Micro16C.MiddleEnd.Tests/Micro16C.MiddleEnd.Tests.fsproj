@@ -8,8 +8,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="Tests.fs"/>
-        <Compile Include="Program.fs"/>
+        <Compile Include="IRReaderTests.fs"/>
+        <Compile Include="PassesTests.fs"/>
     </ItemGroup>
 
     <ItemGroup>

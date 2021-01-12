@@ -259,13 +259,6 @@ let private parseBasicBlock tokens =
             let value, tokens = parseValue tokens
             let result, tokens = parseInstruction tokens
             (Goto value :: result, tokens)
-        | Identifier "br" :: LessThan :: tokens ->
-            let _, tokens = require (TokenType.Constant 0s) tokens
-            let cond, tokens = parseOperand tokens
-            let trueBranch, tokens = parseValue tokens
-            let falseBranch, tokens = parseValue tokens
-            let result, tokens = parseInstruction tokens
-            (BrNeg(cond, trueBranch, falseBranch) :: result, tokens)
         | Identifier "br" :: tokens ->
             let cond, tokens = parseOperand tokens
 
