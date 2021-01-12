@@ -5,7 +5,6 @@ open FsUnit
 open Micro16C.MiddleEnd
 open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
-open NHamcrest
 open NHamcrest.Core
 open Xunit
 
@@ -141,7 +140,6 @@ let private structurallyEquivalentToImpl string irModule =
         (!expectedModule |> Module.basicBlocks)
     |> fst
 
-
 let structurallyEquivalentTo source =
     CustomMatcher<obj>
         (source,
@@ -268,4 +266,32 @@ let ``Instruction Simplify: Add patterns`` () =
     %0 = load R0
     %1 = shl %0
     store %1 -> R1
+    """)
+
+[<Fact>]
+let ``Instruction Simplify: Shift patterns`` () =
+    """%entry:
+    %0 = shl 3
+    store %0 -> R1
+"""
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    store 6 -> R1
+    """)
+
+    """%entry:
+    %0 = shr 3
+    store %0 -> R1
+"""
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    store 1 -> R1
     """)
