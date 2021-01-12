@@ -5,6 +5,7 @@ open FsUnit
 open Micro16C.MiddleEnd
 open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
+open NHamcrest
 open NHamcrest.Core
 open Xunit
 
@@ -143,16 +144,91 @@ let private structurallyEquivalentToImpl string irModule =
 
 let structurallyEquivalentTo source =
     CustomMatcher<obj>
-        ("structurally equivalent to",
+        (source,
          Func<obj, bool>(fun x ->
              x :?> Module ref
              |> structurallyEquivalentToImpl source))
 
 [<Fact>]
-let ``Instruction Simplify`` () =
+let ``Instruction Simplify: And patterns`` () =
     """%entry:
     %0 = load R0
     %1 = and 0 %0
+    store %1 -> R1
+    """
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+    %entry:
+        %0 = load R0
+        store 0 -> R1
+    """)
+
+    """%entry:
+        %0 = load R0
+        %1 = and %0 0
+        store %1 -> R1
+    """
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+    %entry:
+        %0 = load R0
+        store 0 -> R1
+    """)
+
+    """%entry:
+        %0 = load R0
+        %1 = and %0 -1
+        store %1 -> R1
+    """
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+    %entry:
+        %0 = load R0
+        store %0 -> R1
+    """)
+
+    """%entry:
+        %1 = and 17 5
+        store %1 -> R1
+    """
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+    %entry:
+        store 1 -> R1
+    """)
+
+    """%entry:
+        %0 = load R0
+        %1 = and %0 %0
+        store %1 -> R1
+    """
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+    %entry:
+        %0 = load R0
+        store %0 -> R1
+    """)
+
+[<Fact>]
+let ``Instruction Simplify: Add patterns`` () =
+    """%entry:
+    %0 = load R0
+    %1 = add %0 0
     store %1 -> R1
 """
     |> IRReader.fromString
@@ -162,20 +238,34 @@ let ``Instruction Simplify`` () =
            (structurallyEquivalentTo """
 %entry:
     %0 = load R0
-    store 0 -> R1
-""")
+    store %0 -> R1
+    """)
 
-"""%entry:
+    """%entry:
+        %1 = add 6 17
+        store %1 -> R1
+    """
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+    %entry:
+        store 23 -> R1
+    """)
+
+    """%entry:
     %0 = load R0
-    %1 = and %0 0
+    %1 = add %0 %0
     store %1 -> R1
 """
-|> IRReader.fromString
-|> Passes.instructionSimplify
-|> should
-    be
-       (structurallyEquivalentTo """
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
 %entry:
     %0 = load R0
-    store 0 -> R1
-""")
+    %1 = shl %0
+    store %1 -> R1
+    """)

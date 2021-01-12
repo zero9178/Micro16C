@@ -12,6 +12,7 @@ PERCENT = "%"
 EQUALS = "="
 LESS_THAN = "<"
 ARROW = "->"
+MINUS = "-"
 OPEN_PARENTHESES = "("
 CLOSE_PARENTHESES = ")"
 COLON = ":"
@@ -21,12 +22,13 @@ COMMENT = ";.*"
 *)
 
 type private TokenType =
-    | Constant of int16
+    | Constant of int
     | Identifier of string
     | Percent
     | Equals
     | LessThan
     | Arrow
+    | Minus
     | OpenParentheses
     | CloseParentheses
     | Colon
@@ -42,7 +44,7 @@ let rec private tokenize chars =
         (number
          |> Array.ofList
          |> String
-         |> int16
+         |> int
          |> Constant)
         :: tokenize chars
     | c :: _ when Char.IsLetter c || c = '_' || c = '$' || c = '.' ->
@@ -60,6 +62,7 @@ let rec private tokenize chars =
         (identifier |> Array.ofList |> String |> Identifier)
         :: tokenize chars
     | '-' :: '>' :: rest -> Arrow :: tokenize rest
+    | '-' :: rest -> Minus :: tokenize rest
     | '%' :: rest -> Percent :: tokenize rest
     | '=' :: rest -> Equals :: tokenize rest
     | '<' :: rest -> LessThan :: tokenize rest
@@ -76,7 +79,7 @@ Grammar:
 
 <Value> ::= '%' CONSTANT | '%' IDENTIFIER
 
-<Operand> ::= <Value> | CONSTANT | "undef" | "R0" | "R1" | "R2" | "R3" | "R4" | "R5" | "R6" | "R7" | "R8" | "R9" | "R10" | "AC" | "PC"
+<Operand> ::= <Value> | [MINUS] CONSTANT | "undef" | "R0" | "R1" | "R2" | "R3" | "R4" | "R5" | "R6" | "R7" | "R8" | "R9" | "R10" | "AC" | "PC"
 
 <Label> ::= <Value> ':'
 
@@ -148,7 +151,7 @@ let private require tokenType =
 
 let private parseValue tokens =
     match tokens |> require Percent |> snd with
-    | TokenType.Constant c :: rest -> (UnnamedValue c, rest)
+    | TokenType.Constant c :: rest -> (c |> int16 |> UnnamedValue, rest)
     | TokenType.Identifier s :: rest -> (NamedValue s, rest)
     | _ -> failwith "Expected Identifier or Constant after '%'"
 
@@ -157,7 +160,8 @@ let private parseOperand =
     | Percent :: _ as tokens ->
         let value, tokens = parseValue tokens
         (value |> ValueOperand, tokens)
-    | TokenType.Constant c :: tokens -> (Constant c, tokens)
+    | TokenType.Constant c :: tokens -> (c |> int16 |> Constant, tokens)
+    | Minus :: TokenType.Constant c :: tokens -> (-c |> int16 |> Constant, tokens)
     | Identifier "undef" :: tokens -> (Undef, tokens)
     | Identifier "R0" :: tokens -> (R0, tokens)
     | Identifier "R1" :: tokens -> (R1, tokens)
@@ -269,7 +273,7 @@ let private parseBasicBlock tokens =
                 | t :: _ -> failwithf "Expected '=' or '<' instead of %A" t
                 | [] -> failwith "Expected '=' or '<'"
 
-            let _, tokens = require (TokenType.Constant 0s) tokens
+            let _, tokens = require (TokenType.Constant 0) tokens
             let trueBranch, tokens = parseValue tokens
             let falseBranch, tokens = parseValue tokens
             let result, tokens = parseInstruction tokens

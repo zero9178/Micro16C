@@ -39,6 +39,9 @@ let private singleInstructionSimplify builder value =
         |> Value.replaceWith (Builder.createConstant (lhs &&& rhs))
     | { Content = BinaryInstruction { Kind = And; Left = lhs; Right = rhs } } when lhs = rhs ->
         value |> Value.replaceWith lhs
+    | { Content = BinaryInstruction { Kind = Add; Left = lhs; Right = rhs } } when lhs = rhs ->
+        value
+        |> Value.replaceWith (builder |> Builder.createUnary Shl lhs |> fst)
     | { Content = UnaryInstruction { Kind = Not
                                      Value = Ref { Content = Constant { Value = rhs } } } } ->
         value
