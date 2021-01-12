@@ -15,27 +15,27 @@ module ImmutableMap =
         ImmutableDictionary<'Key, 'Value>
             .Empty.WithComparers(HashIdentity.Reference)
 
-    let tryFind value (map: ImmutableDictionary<'Key, 'Value>) =
+    let tryFind value (map: ImmutableDictionary<_, _>) =
         match map.TryGetValue value with
         | (false, _) -> None
         | (true, value) -> Some value
 
-    let find value (map: ImmutableDictionary<'Key, 'Value>) = tryFind value map |> Option.get
+    let find value (map: ImmutableDictionary<_, _>) = tryFind value map |> Option.get
 
-    let inline add key value (map: ImmutableDictionary<'Key, 'Value>) = map.SetItem(key, value)
+    let inline add key value (map: ImmutableDictionary<_, _>) = map.SetItem(key, value)
 
-    let inline map (f: ('Key * 'Value -> 'Key2 * 'Value2)) (map: ImmutableDictionary<'Key, 'Value>) =
+    let inline map f (map: ImmutableDictionary<_, _>) =
         map
-        |> Seq.map (fun kv -> f (kv.Deconstruct()))
+        |> Seq.map (fun kv -> kv.Deconstruct() ||> f)
         |> ofSeq
 
     let iter f =
-        Seq.iter (fun (kv: KeyValuePair<'U, 'V>) -> kv.Deconstruct() |> f)
+        Seq.iter (fun (kv: KeyValuePair<_, _>) -> kv.Deconstruct() ||> f)
 
-    let isEmpty (map: ImmutableDictionary<'Key, 'Value>) = map.IsEmpty
+    let isEmpty (map: ImmutableDictionary<_, _>) = map.IsEmpty
 
     let filter p =
-        Seq.filter (fun (kv: KeyValuePair<'U, 'V>) -> kv.Deconstruct() |> p)
+        Seq.filter (fun (kv: KeyValuePair<_, _>) -> kv.Deconstruct() ||> p)
         >> (fun x -> ImmutableDictionary.CreateRange(HashIdentity.Reference, x))
 
 module ImmutableSet =

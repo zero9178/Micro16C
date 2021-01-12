@@ -951,7 +951,8 @@ let analyzeLifetimes irModule =
 
             map
             := !map
-               |> ImmutableMap.map (function
+               |> ImmutableMap.map (fun value lifetimes ->
+                   match value, lifetimes with
                    | value, ([] as lifetimes)
                    | value, (Done _ :: _ as lifetimes) -> (value, lifetimes)
                    | value, NotDone (start, _) :: rest -> (value, NotDone(start, rangeEnd) :: rest)))
@@ -998,7 +999,7 @@ let analyzeLifetimes irModule =
     |> List.iter analyzeLifetimesInBlock
 
     !map
-    |> ImmutableMap.iter (fun (value, lifetimes) ->
+    |> ImmutableMap.iter (fun value lifetimes ->
         value
         := { !value with
                  LifeIntervals =
