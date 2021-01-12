@@ -32,6 +32,12 @@ module ImmutableMap =
     let iter f =
         Seq.iter (fun (kv: KeyValuePair<'U, 'V>) -> kv.Deconstruct() |> f)
 
+    let isEmpty (map: ImmutableDictionary<'Key, 'Value>) = map.IsEmpty
+
+    let filter p =
+        Seq.filter (fun (kv: KeyValuePair<'U, 'V>) -> kv.Deconstruct() |> p)
+        >> (fun x -> ImmutableDictionary.CreateRange(HashIdentity.Reference, x))
+
 module ImmutableSet =
 
     let ofList (list: 'Key list): ImmutableHashSet<'Key> =

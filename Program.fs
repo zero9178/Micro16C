@@ -12,7 +12,7 @@ let debugModulePasses title (irModule: IR.Module ref) =
 [<EntryPoint>]
 let main argv =
     if argv |> Array.isEmpty then
-        fprintfn stderr "Expected file name as first parameter"
+        eprintfn "Expected file name as first parameter"
         -1
     else
         let fileName = argv.[0]

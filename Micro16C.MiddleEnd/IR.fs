@@ -710,7 +710,7 @@ module Module =
                      let opName =
                          match cr.Kind with
                          | Negative -> "< 0"
-                         | Zero -> "== 0"
+                         | Zero -> "= 0"
 
                      text
                      + sprintf "\tbr %s %s %s %s\n" (getName cr.Value) opName (getName cr.TrueBranch)
@@ -747,9 +747,10 @@ module Builder =
           InsertIndex = 0
           Module = irModule }
 
-    let private isBasicBlock =
+    let private isBasicBlockOrUndef =
         function
         | { Content = BasicBlockValue _ } -> true
+        | { Content = Undef _ } -> true
         | _ -> false
 
     let private addValue value builder =
@@ -861,7 +862,7 @@ module Builder =
 
     let setInsertBlock basicBlock builder =
         assert (basicBlock
-                |> Option.map ((!) >> isBasicBlock)
+                |> Option.map ((!) >> isBasicBlockOrUndef)
                 |> Option.defaultValue true)
 
         { builder with
@@ -986,7 +987,7 @@ module Builder =
 
     let createGoto destination builder =
 
-        assert (!destination |> isBasicBlock)
+        assert (!destination |> isBasicBlockOrUndef)
 
         let value =
             ref
@@ -1000,8 +1001,8 @@ module Builder =
 
     let createCondBr kind condition trueBranch falseBranch builder =
 
-        assert (!trueBranch |> isBasicBlock)
-        assert (!falseBranch |> isBasicBlock)
+        assert (!trueBranch |> isBasicBlockOrUndef)
+        assert (!falseBranch |> isBasicBlockOrUndef)
 
         let value =
             ref
@@ -1034,7 +1035,7 @@ module Builder =
                                 ValuesMemory = ImmutableMap.empty } }
 
         incoming
-        |> List.map (snd >> (!) >> isBasicBlock)
+        |> List.map (snd >> (!) >> isBasicBlockOrUndef)
         |> List.iter (fun x -> assert x)
 
         incoming
