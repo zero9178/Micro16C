@@ -35,6 +35,7 @@ let private structurallyEquivalentToImpl string irModule =
         | { Content = StoreInstruction _ }, { Content = StoreInstruction _ } -> true
         | { Content = GotoInstruction _ }, { Content = GotoInstruction _ } -> true
         | { Content = CopyInstruction _ }, { Content = CopyInstruction _ } -> true
+        | { Content = BasicBlockValue _ }, { Content = BasicBlockValue _ } -> true
         | _ -> false
 
     let operandEqual (operandEqual, actualToExpected) actualOperand expectedOperand =
@@ -294,4 +295,91 @@ let ``Instruction Simplify: Shift patterns`` () =
            (structurallyEquivalentTo """
 %entry:
     store 1 -> R1
+    """)
+
+[<Fact>]
+let ``Instruction Simplify: Not patterns`` () =
+
+    """%entry:
+    %0 = not 3
+    store %0 -> R1
+"""
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    store -4 -> R1
+    """)
+
+[<Fact>]
+let ``Instruction Simplify: Branch patterns`` () =
+    """%entry:
+    br 0 = 0 %true %false
+%true:
+    store 3 -> R0
+%false:
+    store 5 -> R0
+"""
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    goto %true
+%true:
+    store 3 -> R0
+%false:
+    store 5 -> R0
+    """)
+
+    """%entry:
+    br 0 < 0 %true %false
+%true:
+    store 3 -> R0
+%false:
+    store 5 -> R0
+"""
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    goto %false
+%true:
+    store 3 -> R0
+%false:
+    store 5 -> R0
+    """)
+
+[<Fact>]
+let ``Instruction Simplify: Phi Instruction`` () =
+    """%entry:
+    %0 = load R0
+    br %0 = 0 %true %false
+%true:
+    goto %cont
+%false:
+    goto %cont
+%cont:
+    %1 = phi (1,%true) (1,%false)
+    store %1 -> R0
+"""
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R0
+    br %0 = 0 %true %false
+%true:
+    goto %cont
+%false:
+    goto %cont
+%cont:
+    store 1 -> R0
     """)

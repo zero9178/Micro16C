@@ -889,11 +889,22 @@ module Builder =
                 | None -> failwith "Internal Compiler Error: Failed to find Before instruction in insert block"
                 | Some i -> { builder with InsertIndex = i + 1 }
 
+    let private constantCache = ref Map.empty<int16, Value ref>
+
     let createConstant value =
-        ref
-            { Value.Default with
-                  Name = value |> string
-                  Content = Constant { Value = value } }
+        match !constantCache |> Map.tryFind value with
+        | None ->
+            let ref =
+                ref
+                    { Value.Default with
+                          Name = value |> string
+                          Content = Constant { Value = value } }
+
+            constantCache
+            := !constantCache |> Map.add value ref
+
+            ref
+        | Some ref -> ref
 
     let createRegister register =
         ref
@@ -1021,7 +1032,6 @@ module Builder =
         falseBranch |> Value.addUser value
 
         (value, builder)
-
 
     let createNamedPhi name incoming builder =
 
