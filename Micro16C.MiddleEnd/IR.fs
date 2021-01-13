@@ -41,6 +41,7 @@ type Register =
 
 [<NoComparison>]
 [<ReferenceEquality>]
+[<StructuredFormatDisplay("{Name}")>]
 type Value =
     { Users: Value ref list
       Name: string
@@ -134,6 +135,133 @@ and Module =
 
         static member Default = { BasicBlocks = [] }
 
+        override this.ToString() =
+            let mutable counter = 0
+
+            let mutable seenValues =
+                Dictionary<Value, string>(HashIdentity.Reference)
+
+            let seenNames = ref Set.empty
+
+            this.BasicBlocks
+            |> Seq.rev
+            |> Seq.fold (fun text blockValue ->
+
+                let getName (value: Value ref) =
+                    match !value with
+                    | { Content = Constant { Value = constant } } -> constant |> string
+                    | { Content = Register register } -> register.asString
+                    | { Content = Undef } -> "undef"
+                    | { Name = name } ->
+                        match seenValues.TryGetValue !value with
+                        | (true, name) -> name
+                        | (false, _) ->
+                            match name with
+                            | "" ->
+                                counter <- counter + 1
+                                let name = "%" + ((counter - 1) |> string)
+                                seenValues.Add(!value, name)
+                                name
+                            | _ ->
+                                let rec uniqueName name =
+                                    if Set.contains name !seenNames then
+                                        match name
+                                              |> List.ofSeq
+                                              |> List.rev
+                                              |> List.takeWhile Char.IsDigit with
+                                        | [] -> uniqueName (name + "0")
+                                        | digits ->
+                                            let newInt =
+                                                digits
+                                                |> List.rev
+                                                |> List.toArray
+                                                |> String
+                                                |> int
+                                                |> ((+) 1)
+
+                                            let name =
+                                                name
+                                                |> List.ofSeq
+                                                |> List.rev
+                                                |> List.skip (List.length digits)
+                                                |> List.rev
+                                                |> List.toArray
+                                                |> String
+
+                                            uniqueName (name + (newInt |> string))
+                                    else
+                                        seenValues.Add(!value, name)
+                                        seenNames := Set.add name !seenNames
+                                        name
+
+                                uniqueName ("%" + name)
+
+                let block =
+                    match (!blockValue).Content with
+                    | BasicBlockValue block -> block
+                    | _ -> failwith "Internal Compiler Error"
+
+                let text =
+                    text + sprintf "%s:\n" (getName blockValue)
+
+                (block.Instructions
+                 |> List.rev
+                 |> List.fold (fun text instruction ->
+                     match !instruction with
+                     | { Content = AllocationInstruction _ } ->
+                         text
+                         + sprintf "\t%s = alloca\n" (getName instruction)
+                     | { Content = GotoInstruction goto } ->
+                         text
+                         + sprintf "\tgoto %s\n" (getName goto.BasicBlock)
+                     | { Content = BinaryInstruction binary } ->
+                         let opName =
+                             match binary.Kind with
+                             | Add -> "add"
+                             | And -> "and"
+
+                         text
+                         + sprintf "\t%s = %s %s %s\n" (getName instruction) opName (getName binary.Left)
+                               (getName binary.Right)
+                     | { Content = UnaryInstruction unary } ->
+                         let opName =
+                             match unary.Kind with
+                             | Not -> "not"
+                             | Shl -> "shl"
+                             | Shr -> "shr"
+
+                         text
+                         + sprintf "\t%s = %s %s\n" (getName instruction) opName (getName unary.Value)
+                     | { Content = LoadInstruction load } ->
+                         text
+                         + sprintf "\t%s = load %s\n" (getName instruction) (getName load.Source)
+                     | { Content = CopyInstruction move } ->
+                         text
+                         + sprintf "\t%s = copy %s\n" (getName instruction) (getName move.Source)
+                     | { Content = CondBrInstruction cr } ->
+
+                         let opName =
+                             match cr.Kind with
+                             | Negative -> "< 0"
+                             | Zero -> "= 0"
+
+                         text
+                         + sprintf "\tbr %s %s %s %s\n" (getName cr.Value) opName (getName cr.TrueBranch)
+                               (getName cr.FalseBranch)
+                     | { Content = StoreInstruction store } ->
+                         text
+                         + sprintf "\tstore %s -> %s\n" (getName store.Value) (getName store.Destination)
+                     | { Content = PhiInstruction phi } ->
+                         let list =
+                             phi.Incoming
+                             |> List.map (fun (x, y) -> sprintf "(%s,%s)" (getName x) (getName y))
+                             |> List.reduce (fun x y -> x + " " + y)
+
+                         text
+                         + sprintf "\t%s = phi %s\n" (getName instruction) list
+                     | _ -> failwith "Internal Compiler Error") text)
+                + "\n") ""
+
 let rec private filterOnce predicate list =
     match list with
     | [] -> []
@@ -224,6 +352,11 @@ module Value =
         match value.Content with
         | GotoInstruction _
         | CondBrInstruction _ -> true
+        | _ -> false
+
+    let isUnconditional value =
+        match value.Content with
+        | GotoInstruction _ -> true
         | _ -> false
 
     let asBasicBlock =
@@ -592,142 +725,7 @@ module Module =
 
     let instructions = revInstructions >> List.rev
 
-    let asText irModule =
-        let mutable counter = 0
-
-        let mutable seenValues =
-            Dictionary<Value, string>(HashIdentity.Reference)
-
-        let seenNames = ref Set.empty
-
-        irModule.BasicBlocks
-        |> List.rev
-        |> List.fold (fun text blockValue ->
-
-            let getName (value: Value ref) =
-                match !value with
-                | { Content = Constant { Value = constant } } -> constant |> string
-                | { Content = Register register } -> register.asString
-                | { Content = Undef } -> "undef"
-                | { Name = name } ->
-                    match seenValues.TryGetValue !value with
-                    | (true, name) -> name
-                    | (false, _) ->
-                        match name with
-                        | "" ->
-                            counter <- counter + 1
-                            let name = "%" + ((counter - 1) |> string)
-                            seenValues.Add(!value, name)
-                            name
-                        | _ ->
-                            let rec uniqueName name =
-                                if Set.contains name !seenNames then
-                                    match name
-                                          |> List.ofSeq
-                                          |> List.rev
-                                          |> List.takeWhile Char.IsDigit with
-                                    | [] -> uniqueName (name + "0")
-                                    | digits ->
-                                        let newInt =
-                                            digits
-                                            |> List.rev
-                                            |> List.toArray
-                                            |> String
-                                            |> int
-                                            |> ((+) 1)
-
-                                        let name =
-                                            name
-                                            |> List.ofSeq
-                                            |> List.rev
-                                            |> List.skip (List.length digits)
-                                            |> List.rev
-                                            |> List.toArray
-                                            |> String
-
-                                        uniqueName (name + (newInt |> string))
-                                else
-                                    seenValues.Add(!value, name)
-                                    seenNames := Set.add name !seenNames
-                                    name
-
-                            uniqueName ("%" + name)
-
-            let block = !blockValue |> Value.asBasicBlock
-
-            let pred =
-                !blockValue
-                |> BasicBlock.predecessors
-                |> List.map getName
-
-            let succ =
-                !blockValue
-                |> BasicBlock.successors
-                |> List.map getName
-
-            let text =
-                text + sprintf "; succ = %A pred = %A\n" succ pred
-
-            let text =
-                text + sprintf "%s:\n" (getName blockValue)
-
-            (block.Instructions
-             |> List.rev
-             |> List.fold (fun text instruction ->
-                 match !instruction with
-                 | { Content = AllocationInstruction _ } ->
-                     text
-                     + sprintf "\t%s = alloca\n" (getName instruction)
-                 | { Content = GotoInstruction goto } ->
-                     text
-                     + sprintf "\tgoto %s\n" (getName goto.BasicBlock)
-                 | { Content = BinaryInstruction binary } ->
-                     let opName =
-                         match binary.Kind with
-                         | Add -> "add"
-                         | And -> "and"
-
-                     text
-                     + sprintf "\t%s = %s %s %s\n" (getName instruction) opName (getName binary.Left)
-                           (getName binary.Right)
-                 | { Content = UnaryInstruction unary } ->
-                     let opName =
-                         match unary.Kind with
-                         | Not -> "not"
-                         | Shl -> "shl"
-                         | Shr -> "shr"
-
-                     text
-                     + sprintf "\t%s = %s %s\n" (getName instruction) opName (getName unary.Value)
-                 | { Content = LoadInstruction load } ->
-                     text
-                     + sprintf "\t%s = load %s\n" (getName instruction) (getName load.Source)
-                 | { Content = CopyInstruction move } ->
-                     text
-                     + sprintf "\t%s = copy %s\n" (getName instruction) (getName move.Source)
-                 | { Content = CondBrInstruction cr } ->
-
-                     let opName =
-                         match cr.Kind with
-                         | Negative -> "< 0"
-                         | Zero -> "= 0"
-
-                     text
-                     + sprintf "\tbr %s %s %s %s\n" (getName cr.Value) opName (getName cr.TrueBranch)
-                           (getName cr.FalseBranch)
-                 | { Content = StoreInstruction store } ->
-                     text
-                     + sprintf "\tstore %s -> %s\n" (getName store.Value) (getName store.Destination)
-                 | { Content = PhiInstruction phi } ->
-                     let list =
-                         phi.Incoming
-                         |> List.map (fun (x, y) -> sprintf "(%s,%s)" (getName x) (getName y))
-                         |> List.reduce (fun x y -> x + " " + y)
-
-                     text
-                     + sprintf "\t%s = phi %s\n" (getName instruction) list
-                 | _ -> failwith "Internal Compiler Error") text)
-            + "\n") ""
+    let asText (irModule: Module) = irModule.ToString()
 
 type Builder =
     { InsertBlock: Value ref option
@@ -1075,6 +1073,9 @@ module Builder =
             | CopyInstruction _ ->
                 assert (operands |> List.length = 1)
                 builder |> createCopy operands.[0]
+            | LoadInstruction _ ->
+                assert (operands |> List.length = 1)
+                builder |> createLoad operands.[0]
             | StoreInstruction _ ->
                 assert (operands |> List.length = 2)
                 builder |> createStore operands.[0] operands.[1]

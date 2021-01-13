@@ -19,6 +19,9 @@ module private Context =
     let createBasicBlock name context =
         Builder.createBasicBlock name context.Builder
 
+    let createBasicBlockAt point name context =
+        Builder.createBasicBlockAt point name context.Builder
+
     let insertPoint (context: Context) = context.Builder.InsertBlock
 
     let setInsertPoint basicBlock context =
@@ -269,7 +272,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
         let falseBranch =
             match falseStatement with
             | None -> continueBranch
-            | Some _ -> Context.createBasicBlock "ifFalse" context
+            | Some _ -> Context.createBasicBlockAt (Before continueBranch) "ifFalse" context
 
         let context =
             context

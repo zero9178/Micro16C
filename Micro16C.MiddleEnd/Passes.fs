@@ -74,6 +74,10 @@ let private singleInstructionSimplify builder value =
         else
             value
             |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
+    | { Content = CondBrInstruction { TrueBranch = trueBranch
+                                      FalseBranch = falseBranch } } when trueBranch = falseBranch ->
+        value
+        |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
     | { Content = PhiInstruction { Incoming = list } } when list
                                                             |> List.map fst
                                                             |> List.distinct
@@ -100,8 +104,7 @@ let deadCodeElimination (irModule: Module ref) =
             value |> Value.destroy
 
     !irModule
-    |> Module.instructions
-    |> List.rev
+    |> Module.revInstructions
     |> List.iter eliminate
 
     irModule
@@ -290,6 +293,12 @@ let jumpThreading irModule =
 
         let phis = block |> BasicBlock.phis
 
+        let escapeExcept =
+            Some blockValue
+            :: (!blockValue
+                |> BasicBlock.successors
+                |> List.map Some)
+
         let escapingValues =
             block
             |> BasicBlock.revInstructions
@@ -297,31 +306,48 @@ let jumpThreading irModule =
             |> List.filter
                 ((!)
                  >> Value.users
-                 >> List.exists ((!) >> Value.parentBlock >> (<>) (Some blockValue)))
+                 >> List.exists
+                     ((!)
+                      >> Value.parentBlock
+                      >> (fun x -> List.contains x escapeExcept)
+                      >> not))
+
+        let createCopies pred =
+            let newBlock =
+                builder
+                |> Builder.createBasicBlockAt (After pred) ((!blockValue |> Value.name) + ".copy")
+
+            let replacements =
+                phis
+                |> List.map (fun phi ->
+                    (phi,
+                     Seq.unfold (function
+                         | Ref { Content = PhiInstruction _ } as phi ->
+                             let replacement =
+                                 !phi
+                                 |> Value.operands
+                                 |> List.pairwise
+                                 |> List.find (snd >> (=) pred)
+                                 |> fst
+
+                             Some(replacement, replacement)
+                         | _ -> None) phi
+                     |> Seq.skipWhile ((!) >> Value.parentBlock >> (=) (Some blockValue))
+                     |> Seq.head))
+                |> ImmutableMap.ofList
+
+            let replacement =
+                builder
+                |> Builder.setInsertBlock (Some newBlock)
+                |> Builder.copyInstructionsStructure replacements (block |> BasicBlock.instructions)
+
+            (newBlock, replacement)
 
         let copies =
             !blockValue
             |> BasicBlock.predecessors
             |> List.map (fun pred ->
-                let newBlock =
-                    builder
-                    |> Builder.createBasicBlockAt (After pred) ((!blockValue |> Value.name) + ".copy")
-
-                let replacements =
-                    phis
-                    |> List.map (fun phi ->
-                        (phi,
-                         !phi
-                         |> Value.operands
-                         |> List.pairwise
-                         |> List.find (snd >> (=) pred)
-                         |> fst))
-                    |> ImmutableMap.ofList
-
-                builder
-                |> Builder.setInsertBlock (Some newBlock)
-                |> Builder.copyInstructionsStructure replacements (block |> BasicBlock.instructions)
-                |> ignore
+                let newBlock, _ = createCopies pred
 
                 !newBlock
                 |> Value.asBasicBlock
@@ -336,26 +362,55 @@ let jumpThreading irModule =
                 (newBlock, pred))
 
         let instructionCount =
-            (copies
-             |> List.sumBy
-                 (fst
-                  >> (!)
-                  >> Value.asBasicBlock
-                  >> BasicBlock.revInstructions
-                  >> List.length))
-            - List.length copies
+            lazy
+                ((copies
+                  |> List.sumBy
+                      (fst
+                       >> (!)
+                       >> Value.asBasicBlock
+                       >> BasicBlock.revInstructions
+                       >> List.length))
+                 - List.length copies
+                 + ((1
+                     + (!blockValue
+                        |> BasicBlock.successors
+                        |> List.length))
+                    * List.length escapingValues))
         // doing -1 for each block as worst case scenario one terminator can always be removed
+        // also + 1 * (amount of successors + 1) for every value that escapes due to having to create phis in every
+        // successor and having to merge them as well. (worst case scenario really)
 
-        if instructionCount
-           <= (block |> BasicBlock.revInstructions |> List.length) then
+        let killedConditional =
+            block
+            |> BasicBlock.tryTerminator
+            |> Option.map ((!) >> Value.isUnconditional >> not)
+            |> Option.defaultValue false
+            && copies
+               |> List.exists
+                   (fst
+                    >> (!)
+                    >> Value.asBasicBlock
+                    >> BasicBlock.tryTerminator
+                    >> Option.filter (function
+                        | Ref { Content = GotoInstruction _ } -> false
+                        | _ -> true)
+                    >> Option.isNone)
+
+        if killedConditional
+           || instructionCount.Force()
+              <= (block |> BasicBlock.revInstructions |> List.length) then
 
             let shareSingleSuccessor =
-                !blockValue
-                |> BasicBlock.successors
-                |> List.distinctBy ((!) >> BasicBlock.successors)
-                |> (fun x ->
-                    x |> List.length = 1
-                    && !x.[0] |> BasicBlock.successors |> List.length = 1)
+                lazy
+                    (!blockValue
+                     |> BasicBlock.successors
+                     |> List.length = 1
+                     || !blockValue
+                        |> BasicBlock.successors
+                        |> List.distinctBy ((!) >> BasicBlock.successors)
+                        |> (fun x ->
+                            x |> List.length = 1
+                            && !x.[0] |> BasicBlock.successors |> List.length = 1))
 
             if escapingValues |> List.isEmpty then
                 // If we have no escaping values then no phis need to be created in the successor and we can actually
@@ -368,7 +423,7 @@ let jumpThreading irModule =
                     |> Value.replaceOperand blockValue newBlock)
 
                 blockValue |> Value.destroy
-            else if shareSingleSuccessor then
+            else if shareSingleSuccessor.Force() then
                 // Otherwise we need to create phi nodes that will have the replacements for the escaping values as
                 // incoming values for the new blocks.
                 // Since due to constant folding or whatever optimizations that we applied to estimate instruction count
@@ -383,25 +438,7 @@ let jumpThreading irModule =
                     !blockValue
                     |> BasicBlock.predecessors
                     |> List.map (fun pred ->
-                        let newBlock =
-                            builder
-                            |> Builder.createBasicBlockAt (After pred) ((!blockValue |> Value.name) + ".copy")
-
-                        let replacements =
-                            phis
-                            |> List.map (fun phi ->
-                                (phi,
-                                 !phi
-                                 |> Value.operands
-                                 |> List.pairwise
-                                 |> List.find (snd >> (=) pred)
-                                 |> fst))
-                            |> ImmutableMap.ofList
-
-                        let replacements =
-                            builder
-                            |> Builder.setInsertBlock (Some newBlock)
-                            |> Builder.copyInstructionsStructure replacements (block |> BasicBlock.instructions)
+                        let newBlock, replacements = createCopies pred
 
                         !pred
                         |> Value.asBasicBlock
@@ -417,8 +454,6 @@ let jumpThreading irModule =
                     |> (!)
                     |> BasicBlock.successors
                     |> List.exactlyOne
-
-
 
                 escapingValues
                 |> List.iter (fun oldValue ->
@@ -460,21 +495,20 @@ let jumpThreading irModule =
             copies |> List.iter (fst >> Value.destroy)
 
 
-    // I am very new to this and therefore conservative. For now only solving diamond problems where we have 2
-    // predecessors, 2 successors and the 2 successors both have the exact same successor as well. Without thinking
-    // much about it, restricting it to 2 successors and 2 predecessors, instead of the same amount of successors
-    // and predecessors is a bit counter intuitive but I want to be conservative for now. It's also primarily here for
-    // optimizing boolean algebra which has binary decisions all the time
+    // Only run on basic blocks that have more than one predecessor and contain a phi. Without phis this could only
+    // generate more code
     !irModule
     |> Module.basicBlocks
-    |> List.filter (fun blockValue ->
+    |> Seq.filter (fun blockValue ->
         !blockValue
-        |> BasicBlock.successors
-        |> List.length = 2
+        |> BasicBlock.predecessors
+        |> List.length > 1
         && !blockValue
-           |> BasicBlock.predecessors
-           |> List.length = 2)
-    |> List.iter jumpThreadingBlock
+           |> Value.asBasicBlock
+           |> BasicBlock.phis
+           |> List.isEmpty
+           |> not)
+    |> Seq.iter jumpThreadingBlock
 
     irModule
 

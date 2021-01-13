@@ -145,8 +145,10 @@ let structurallyEquivalentTo source =
     CustomMatcher<obj>
         (source,
          Func<obj, bool>(fun x ->
-             x :?> Module ref
-             |> structurallyEquivalentToImpl source))
+             try
+                 x :?> Module ref
+                 |> structurallyEquivalentToImpl source
+             with _ -> false))
 
 [<Fact>]
 let ``Instruction Simplify: And patterns`` () =
@@ -355,6 +357,26 @@ let ``Instruction Simplify: Branch patterns`` () =
     store 5 -> R0
     """)
 
+    """%entry:
+    br 0 < 0 %true %true
+%true:
+    store 3 -> R0
+%false:
+    store 5 -> R0
+"""
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    goto %true
+%true:
+    store 3 -> R0
+%false:
+    store 5 -> R0
+    """)
+
 [<Fact>]
 let ``Instruction Simplify: Phi Instruction`` () =
     """%entry:
@@ -511,4 +533,186 @@ let ``Instruction Combine`` () =
     %1 = not %0
     %2 = add %1 1
     store 0 -> R1
+    """)
+
+[<Fact>]
+let ``Dead code elimination`` () =
+    """
+%entry:
+    %0 = load R1
+    %1 = not %0
+    %2 = add %1 1
+    store 0 -> R1
+    """
+    |> IRReader.fromString
+    |> Passes.deadCodeElimination
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    store 0 -> R1
+""")
+
+[<Fact>]
+let ``Simplify Control Flow Graph`` () =
+    """
+%entry:
+    %0 = load R1
+    goto %next
+
+%next:
+    store %0 -> R2
+    """
+    |> IRReader.fromString
+    |> Passes.simplifyCFG
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    store %0 -> R2
+    """)
+
+    """
+%entry:
+    %0 = load R1
+    br %0 = 0 %true %next
+
+%true:
+    store 0 -> R2
+
+%next:
+    goto %false
+
+%false:
+    store 1 -> R2
+    """
+    |> IRReader.fromString
+    |> Passes.simplifyCFG
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    br %0 = 0 %true %false
+
+%true:
+    store 0 -> R2
+
+%false:
+    store 1 -> R2
+    """)
+
+[<Fact>]
+let ``Jump threading`` () =
+    """
+%entry:
+    %0 = load R1
+    br %0 = 0 %isZero %isNotZero
+
+%isZero:
+    goto %boolCont
+
+%isNotZero:
+    goto %boolCont
+
+%boolCont:
+    %1 = phi (0,%isZero) (1,%isNotZero)
+    %2 = load R0
+    br %1 = 0 %isTrue %isFalse
+
+%isTrue:
+    goto %final
+
+%isFalse:
+    goto %final
+
+%final:
+    %3 = phi (0,%isTrue) (%2,%isFalse)
+    store %3 -> PC
+    """
+    |> IRReader.fromString
+    |> Passes.jumpThreading
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+	%0 = load R1
+	br %0 = 0 %isZero %isNotZero
+
+%isZero:
+	goto %boolCont.copy
+
+%boolCont.copy:
+	%1 = load R0
+	br 0 = 0 %isTrue.copy %isFalse.copy
+
+%isFalse.copy:
+	goto %final.copy
+
+%final.copy:
+	store %1 -> PC
+
+%isTrue.copy:
+	goto %final.copy0
+
+%final.copy0:
+	store 0 -> PC
+
+%isNotZero:
+	goto %boolCont.copy0
+
+%boolCont.copy0:
+	%2 = load R0
+	br 1 = 0 %isTrue.copy0 %isFalse.copy0
+
+%isFalse.copy0:
+	goto %final.copy1
+
+%final.copy1:
+	store %2 -> PC
+
+%isTrue.copy0:
+	goto %final.copy2
+
+%final.copy2:
+	store 0 -> PC
+    """)
+
+    """
+%entry:
+    %0 = load R1
+    br %0 = 0 %isZero %isNotZero
+
+%isZero:
+    goto %boolCont
+
+%isNotZero:
+    goto %boolCont
+
+%boolCont:
+    %1 = phi (0,%isZero) (1,%isNotZero)
+    store %1 -> R1
+    """
+    |> IRReader.fromString
+    |> Passes.jumpThreading
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    br %0 = 0 %isZero %isNotZero
+
+%isZero:
+    goto %boolCont.copy0
+
+%boolCont.copy0:
+    store 0 -> R1
+
+%isNotZero:
+    goto %boolCont.copy1
+
+%boolCont.copy1:
+    store 1 -> R1
+
     """)

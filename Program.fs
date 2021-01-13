@@ -38,6 +38,10 @@ let main argv =
             |> Result.map Passes.instructionCombine
             |> Result.map Passes.deadCodeElimination
             |> Result.map Passes.simplifyCFG
+            |> Result.map Passes.instructionSimplify
+            |> Result.map Passes.instructionCombine
+            |> Result.map Passes.deadCodeElimination
+            |> Result.map Passes.simplifyCFG
             |> Result.map Passes.removeRedundantLoadStores
             |> Result.map (debugModulePasses "End of optimizations:")
             |> Result.map Legalize.legalizeConstants
