@@ -716,3 +716,34 @@ let ``Jump threading`` () =
     store 1 -> R1
 
     """)
+
+
+[<Fact>]
+let ``BasicBlock reordering`` () =
+    """%entry:
+    %0 = load R1
+    br %0 = 0 %isZero %isNotZero
+
+%isZero:
+    store 1 -> R2
+
+%isNotZero:
+    store 0 -> R2
+"""
+    |> IRReader.fromString
+    |> Passes.numberAll
+    |> Passes.reorderBasicBlocks
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    br %0 = 0 %isZero %isNotZero
+
+%isNotZero:
+    store 0 -> R2
+
+%isZero:
+    store 1 -> R2
+
+    """)

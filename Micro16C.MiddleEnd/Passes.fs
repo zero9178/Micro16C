@@ -125,12 +125,13 @@ let simplifyCFG (irModule: Module ref) =
             // this optimization may be invalid if the basic block is used in a Phi. For now I'll be conservative and
             // not remove such basic blocks. As a future TODO I could check for semantic changes
             match block |> BasicBlock.revInstructions with
-            | [ Ref { Content = GotoInstruction { BasicBlock = destination } } ] when not
-                                                                                          (List.exists (function
-                                                                                              | Ref { Content = PhiInstruction _ } ->
-                                                                                                  true
-                                                                                              | _ -> false)
-                                                                                               (!blockValue).Users) ->
+            | [ Ref { Content = GotoInstruction { BasicBlock = destination } } ] when !blockValue
+                                                                                      |> Value.users
+                                                                                      |> List.exists (function
+                                                                                          | Ref { Content = PhiInstruction _ } ->
+                                                                                              true
+                                                                                          | _ -> false)
+                                                                                      |> not ->
                 blockValue |> Value.replaceWith destination
             | Ref { Content = GotoInstruction { BasicBlock = destination } } as terminator :: _ when (!destination
                                                                                                       |> BasicBlock.predecessors
@@ -1123,5 +1124,35 @@ let analyzeLifetimes irModule =
                          | Done (x, y) -> (x, y)
                          | NotDone (x, y) -> (x, y))
                      |> distinctIntervals })
+
+    irModule
+
+let reorderBasicBlocks irModule =
+
+    !irModule
+    |> Module.basicBlocks
+    |> List.choose
+        ((!)
+         >> Value.asBasicBlock
+         >> BasicBlock.tryTerminator
+         >> Option.filter ((!) >> Value.isUnconditional >> not))
+    |> List.iter (fun termintor ->
+        let successors =
+            !termintor |> Value.operands |> List.tail
+
+        // Only handling diamonds for now
+        let mergeCount =
+            successors
+            |> List.map
+                ((!)
+                 >> BasicBlock.successors
+                 >> ImmutableSet.ofList)
+            |> ImmutableSet.unionMany
+            |> ImmutableSet.count
+
+        if mergeCount <= 1
+           && (!successors.[1] |> Value.index) > (!successors.[0] |> Value.index) then
+            irModule
+            |> Module.swapBlocks successors.[0] successors.[1])
 
     irModule

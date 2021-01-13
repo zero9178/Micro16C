@@ -715,6 +715,23 @@ module Module =
 
     let revBasicBlocks irModule = irModule.BasicBlocks
 
+    let swapBlocks block1 block2 irModule =
+        assert (Value.isBasicBlock !block1)
+        assert (Value.isBasicBlock !block2)
+
+        irModule
+        := { !irModule with
+                 BasicBlocks =
+                     (!irModule).BasicBlocks
+                     |> List.map (fun bb ->
+                         if bb = block1 then block2
+                         else if bb = block2 then block1
+                         else bb) }
+
+        let temp = (!block1).Index
+        block1 := { !block1 with Index = (!block2).Index }
+        block2 := { !block2 with Index = temp }
+
     let revInstructions =
         revBasicBlocks
         >> List.map

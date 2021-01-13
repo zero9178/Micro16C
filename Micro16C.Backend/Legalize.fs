@@ -110,10 +110,16 @@ let legalizeConstants irModule =
 
     irModule
 
-let destroyCriticalEdges irModule =
+let fixLostCopy irModule =
 
     !irModule
     |> Module.basicBlocks
+    |> List.filter
+        ((!)
+         >> Value.asBasicBlock
+         >> BasicBlock.phis
+         >> List.length
+         >> (<>) 0)
     |> List.map (associateWith ((!) >> BasicBlock.predecessors))
     |> List.iter (fun (currBlock, preds) ->
         preds

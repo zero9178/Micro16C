@@ -45,10 +45,11 @@ let main argv =
             |> Result.map Passes.removeRedundantLoadStores
             |> Result.map (debugModulePasses "End of optimizations:")
             |> Result.map Legalize.legalizeConstants
-            |> Result.map Legalize.destroyCriticalEdges
+            |> Result.map Legalize.fixLostCopy
             |> Result.map Legalize.genPhiMoves
-            |> Result.map (debugModulePasses "End of IR:")
             |> Result.map Passes.numberAll
+            |> Result.map Passes.reorderBasicBlocks
+            |> Result.map (debugModulePasses "End of IR:")
             |> Result.map Passes.analyzeLifetimes
             |> Result.map RegisterAllocator.allocateRegisters
             |> Result.map GenAssembly.genAssembly
