@@ -383,3 +383,132 @@ let ``Instruction Simplify: Phi Instruction`` () =
 %cont:
     store 1 -> R0
     """)
+
+[<Fact>]
+let ``Instruction Combine`` () =
+    """%entry:
+    %0 = load R1
+    %1 = not %0
+    %2 = not %1
+    store %2 -> R1
+"""
+    |> IRReader.fromString
+    |> Passes.instructionCombine
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    %1 = not %0
+    store %0 -> R1
+    """)
+
+    """%entry:
+    %0 = load R1
+    %1 = add 1 %0
+    %2 = add 3 %1
+    store %2 -> R1
+"""
+    |> IRReader.fromString
+    |> Passes.instructionCombine
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    %1 = add 4 %0
+    store %1 -> R1
+    """)
+
+    """%entry:
+    %0 = load R1
+    %1 = and 1 %0
+    %2 = and 3 %1
+    store %2 -> R1
+"""
+    |> IRReader.fromString
+    |> Passes.instructionCombine
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    %1 = and 3 %0
+    store %1 -> R1
+    """)
+
+    """%entry:
+    %0 = load R1
+    %1 = and %0 -32768
+    br %1 = 0 %true %false
+%true:
+    store 0 -> R1
+%false:
+    store 1 -> R1
+"""
+    |> IRReader.fromString
+    |> Passes.instructionCombine
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    br %0 < 0 %false %true
+%true:
+    store 0 -> R1
+%false:
+    store 1 -> R1
+    """)
+
+    """%entry:
+    %0 = load R1
+    %1 = not %0
+    %2 = and %1 %0
+    store %2 -> R1
+"""
+    |> IRReader.fromString
+    |> Passes.instructionCombine
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    %1 = not %0
+    store 0 -> R1
+    """)
+
+    """%entry:
+    %0 = load R1
+    %1 = not %0
+    %2 = add %1 %0
+    store %2 -> R1
+"""
+    |> IRReader.fromString
+    |> Passes.instructionCombine
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    %1 = not %0
+    store -1 -> R1
+    """)
+
+    """%entry:
+    %0 = load R1
+    %1 = not %0
+    %2 = add %1 1
+    %3 = add %2 %0
+    store %3 -> R1
+"""
+    |> IRReader.fromString
+    |> Passes.instructionCombine
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    %1 = not %0
+    %2 = add %1 1
+    store 0 -> R1
+    """)

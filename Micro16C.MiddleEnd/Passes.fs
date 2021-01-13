@@ -161,17 +161,9 @@ let simplifyCFG (irModule: Module ref) =
 
 let private singleInstructionCombine builder value =
     match value with
-    | Ref { Content = UnaryInstruction { Kind = Shr
-                                         Value = Ref { Content = UnaryInstruction { Kind = Shl; Value = passThrough }
-                                                       Users = [ _ ] } as first } }
-    | Ref { Content = UnaryInstruction { Kind = Shl
-                                         Value = Ref { Content = UnaryInstruction { Kind = Shr; Value = passThrough }
-                                                       Users = [ _ ] } as first } }
     | Ref { Content = UnaryInstruction { Kind = Not
-                                         Value = Ref { Content = UnaryInstruction { Kind = Not; Value = passThrough }
-                                                       Users = [ _ ] } as first } } ->
+                                         Value = Ref { Content = UnaryInstruction { Kind = Not; Value = passThrough } } } } ->
         value |> Value.replaceWith passThrough
-        first |> Value.destroy
     | Ref { Content = BinaryInstruction { Kind = Add
                                           Left = Ref { Content = Constant { Value = value1 } }
                                           Right = Ref { Content = BinaryInstruction { Kind = Add
@@ -181,6 +173,11 @@ let private singleInstructionCombine builder value =
                                           Left = Ref { Content = Constant { Value = value1 } }
                                           Right = Ref { Content = BinaryInstruction { Kind = Add
                                                                                       Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                        Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = Ref { Content = Constant { Value = value1 } }
+                                          Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                      Left = Ref { Content = Constant { Value = value2 } } as oldOp }
                                                         Users = [ _ ] } as first } }
     | Ref { Content = BinaryInstruction { Kind = Add
                                           Right = Ref { Content = Constant { Value = value1 } }
@@ -240,6 +237,48 @@ let private singleInstructionCombine builder value =
 
         value |> Value.replaceWith newCond
         neg |> Value.destroy
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Right = op1
+                                          Left = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = op1
+                                          Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when op1 = op2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0xFFFFs)
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Right = op1
+                                          Left = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } }
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Left = op1
+                                          Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when op1 = op2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Right = op1
+                                          Left = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                     Right = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                                                                Value = op2 } }
+                                                                                     Left = Ref { Content = Constant { Value = 1s } } } } } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Right = op1
+                                          Left = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                     Left = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                                                               Value = op2 } }
+                                                                                     Right = Ref { Content = Constant { Value = 1s } } } } } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = op1
+                                          Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                      Right = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                                                                 Value = op2 } }
+                                                                                      Left = Ref { Content = Constant { Value = 1s } } } } } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = op1
+                                          Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                      Left = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                                                                Value = op2 } }
+                                                                                      Right = Ref { Content = Constant { Value = 1s } } } } } } when op1 = op2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
     | _ -> ()
 
 let jumpThreading irModule =
