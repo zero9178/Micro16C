@@ -766,3 +766,40 @@ let ``Analyze Allocs`` () =
         | _ -> None)
     |> List.ofSeq
     |> should equal [ false; true ]
+
+[<Fact>]
+let ``mem2reg pass`` () =
+    """%entry:
+    %0 = alloca
+    store 10 -> %0
+    goto %body
+
+%body:
+    %1 = load %0
+    %2 = add %1 -1
+    store %2 -> %0
+    br %2 < 0 %cont %body
+
+%cont:
+    %3 = load %0
+    store %3 -> R4
+    """
+    |> IRReader.fromString
+    |> Passes.analyzeAlloc
+    |> Passes.analyzeDominance
+    |> Passes.analyzeDominanceFrontiers
+    |> Passes.mem2reg
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    goto %body
+
+%body:
+    %1 = phi(%0,%body) (10,%entry)
+    %0 = add %1 -1
+    br %0 < 0 %cont %body
+
+%cont:
+    store %0 -> R4
+""")

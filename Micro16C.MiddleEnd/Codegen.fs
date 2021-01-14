@@ -362,7 +362,6 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
              | Some bb -> (bb, context))
             ||> Context.createGoto
             |> Context.setInsertPoint None
-
     | Sema.LabelStatement (label, statement) ->
         let bb, context =
             (match Map.tryFind (label, statement) context.Labels with

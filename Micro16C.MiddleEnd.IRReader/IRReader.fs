@@ -1,4 +1,5 @@
-﻿module Micro16C.MiddleEnd.IRReader
+﻿[<RequireQualifiedAccess>]
+module Micro16C.MiddleEnd.IRReader
 
 open System
 open Micro16C.MiddleEnd.IR
