@@ -295,6 +295,7 @@ module internal BasicBlockInternal =
             | Ref { Content = PhiInstruction _ } -> true
             | _ -> false)
 
+[<RequireQualifiedAccess>]
 module Value =
 
     let name value = value.Name
@@ -657,6 +658,7 @@ module Value =
                     |> List.iter (addToPhis parentBlockValue)
         | _ -> destroy value
 
+[<RequireQualifiedAccess>]
 module BasicBlock =
 
     let createDefault = BasicBlockInternal.createDefault
@@ -709,6 +711,7 @@ module BasicBlock =
 
     let nonPhiInstructions = BasicBlockInternal.nonPhiInstructions
 
+[<RequireQualifiedAccess>]
 module Module =
 
     let basicBlocks irModule = irModule.BasicBlocks |> List.rev
@@ -755,6 +758,7 @@ type InsertPoint =
     | Start
     | End
 
+[<RequireQualifiedAccess>]
 module Builder =
 
     let fromModule irModule =

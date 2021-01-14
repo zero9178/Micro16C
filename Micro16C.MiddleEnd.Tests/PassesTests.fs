@@ -747,3 +747,22 @@ let ``BasicBlock reordering`` () =
     store 1 -> R2
 
     """)
+
+[<Fact>]
+let ``Analyze Allocs`` () =
+    """%entry:
+    %0 = alloca
+    %1 = load %0
+    store %1 -> R2
+    %2 = alloca
+    store %2 -> R1
+    """
+    |> IRReader.fromString
+    |> Passes.analyzeAlloc
+    |> (!)
+    |> Module.instructions
+    |> Seq.choose (function
+        | Ref { Content = AllocationInstruction { Aliased = aliased } } -> aliased
+        | _ -> None)
+    |> List.ofSeq
+    |> should equal [ false; true ]

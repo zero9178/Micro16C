@@ -570,8 +570,8 @@ let analyzeAlloc (irModule: Module ref) =
             let addressTaken =
                 users
                 |> List.exists (function
-                    | Ref { Content = LoadInstruction _ }
-                    | Ref { Content = StoreInstruction _ } -> false
+                    | Ref { Content = LoadInstruction _ } -> false
+                    | Ref { Content = StoreInstruction { Value = value } } when value <> instr -> false
                     | _ -> true)
 
             instr
