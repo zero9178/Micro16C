@@ -888,15 +888,10 @@ let mem2reg (irModule: Module ref) =
 
     irModule
 
-let numberAll (irModule: Module ref) =
+let numberInstr (irModule: Module ref) =
 
     !irModule
     |> Module.instructions
-    |> List.indexed
-    |> List.iter (fun (index, value) -> value := { !value with Index = Some index })
-
-    !irModule
-    |> Module.basicBlocks
     |> List.indexed
     |> List.iter (fun (index, value) -> value := { !value with Index = Some index })
 

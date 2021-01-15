@@ -605,7 +605,21 @@ module Value =
 
             irModule
             := { !irModule with
-                     BasicBlocks = (!irModule).BasicBlocks |> List.except [ value ] }
+                     BasicBlocks =
+                         (!irModule).BasicBlocks
+                         |> List.fold (fun (found, result) bb ->
+                             if found then
+                                 (true, bb :: result)
+                             else if bb = value then
+                                 (true, result)
+                             else
+                                 bb
+                                 := { !bb with
+                                          Index = (!bb).Index |> Option.map (fun x -> x - 1) }
+
+                                 (false, bb :: result)) (false, [])
+                         |> snd
+                         |> List.rev }
         | _ ->
             (!value)
             |> operands
@@ -868,10 +882,22 @@ module Builder =
 
                 match insertPoint with
                 | End ->
+                    basicBlock
+                    := { !basicBlock with
+                             Index = List.length (!builder.Module).BasicBlocks |> Some }
+
                     builder.Module
                     := { !builder.Module with
                              BasicBlocks = basicBlock :: (!builder.Module).BasicBlocks }
                 | Start ->
+                    basicBlock := { !basicBlock with Index = Some 0 }
+
+                    (!builder.Module).BasicBlocks
+                    |> List.iter (fun bb ->
+                        bb
+                        := { !bb with
+                                 Index = (!bb).Index |> Option.map ((+) 1) })
+
                     builder.Module
                     := { !builder.Module with
                              BasicBlocks = (!builder.Module).BasicBlocks @ [ basicBlock ] }
@@ -882,6 +908,18 @@ module Builder =
                     | Some i ->
                         let (first, second) =
                             (!builder.Module).BasicBlocks |> List.splitAt i
+
+                        basicBlock
+                        := { !basicBlock with
+                                 Index =
+                                     ((!builder.Module).BasicBlocks |> List.length) - i
+                                     |> Some }
+
+                        first
+                        |> List.iter (fun bb ->
+                            bb
+                            := { !bb with
+                                     Index = (!bb).Index |> Option.map ((+) 1) })
 
                         builder.Module
                         := { !builder.Module with
@@ -894,6 +932,19 @@ module Builder =
                         let (first, second) =
                             (!builder.Module).BasicBlocks
                             |> List.splitAt (i + 1)
+
+                        basicBlock
+                        := { !basicBlock with
+                                 Index =
+                                     ((!builder.Module).BasicBlocks |> List.length) - i
+                                     + 1
+                                     |> Some }
+
+                        first
+                        |> List.iter (fun bb ->
+                            bb
+                            := { !bb with
+                                     Index = (!bb).Index |> Option.map ((+) 1) })
 
                         builder.Module
                         := { BasicBlocks = first @ [ basicBlock ] @ second }

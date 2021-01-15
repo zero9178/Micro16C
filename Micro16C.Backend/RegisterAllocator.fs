@@ -106,9 +106,11 @@ let allocateRegisters irModule =
             | Ref { Content = UnaryInstruction { Kind = kind } }, _ when kind = Shl || kind = Shr -> true
             | Ref { Content = PhiInstruction _ }, _ -> true
             | Ref { Users = [ Ref { Content = CondBrInstruction _
-                                    Index = Some condIndex } ]
-                    Index = Some index },
-              _ when condIndex = index + 1 -> false
+                                    Index = Some condIndex
+                                    ParentBlock = Some condParent } ]
+                    Index = Some index
+                    ParentBlock = Some parent },
+              _ when condIndex = index + 1 && parent = condParent -> false
             | _ -> true)
         |> ImmutableMap.ofList
 

@@ -42,7 +42,7 @@ let compile text =
     |> Result.map Legalize.legalizeConstants
     |> Result.map Legalize.fixLostCopy
     |> Result.map Legalize.genPhiMoves
-    |> Result.map Passes.numberAll
+    |> Result.map Passes.numberInstr
     |> Result.map Passes.reorderBasicBlocks
     |> Result.map (debugModulePasses "End of IR:")
     |> Result.map Passes.analyzeLifetimes

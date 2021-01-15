@@ -731,7 +731,6 @@ let ``BasicBlock reordering`` () =
     store 0 -> R2
 """
     |> IRReader.fromString
-    |> Passes.numberAll
     |> Passes.reorderBasicBlocks
     |> should
         be
