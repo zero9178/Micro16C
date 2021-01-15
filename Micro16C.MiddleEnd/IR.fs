@@ -747,16 +747,21 @@ module Module =
 
     let asText (irModule: Module) = irModule.ToString()
 
-type Builder =
-    { InsertBlock: Value ref option
-      InsertIndex: int
-      Module: Module ref }
-
 type InsertPoint =
     | Before of Value ref
     | After of Value ref
     | Start
     | End
+
+type Builder =
+
+    private
+        { InsertBlock: Value ref option
+          InsertIndex: int
+          Module: Module ref
+          NotYetInserted: ImmutableDictionary<Value ref, InsertPoint> }
+
+
 
 [<RequireQualifiedAccess>]
 module Builder =
@@ -764,7 +769,8 @@ module Builder =
     let fromModule irModule =
         { InsertBlock = None
           InsertIndex = 0
-          Module = irModule }
+          Module = irModule
+          NotYetInserted = ImmutableMap.empty }
 
     let private isBasicBlockOrUndef =
         function
@@ -809,45 +815,11 @@ module Builder =
                       Name = name
                       Content = BasicBlockValue(BasicBlock.createDefault builder.Module) }
 
-        match insertPoint with
-        | End ->
-            builder.Module
-            := { !builder.Module with
-                     BasicBlocks = basicBlock :: (!builder.Module).BasicBlocks }
-
-            basicBlock
-        | Start ->
-            builder.Module
-            := { !builder.Module with
-                     BasicBlocks = (!builder.Module).BasicBlocks @ [ basicBlock ] }
-
-            basicBlock
-        | After ref ->
-            match (!builder.Module).BasicBlocks
-                  |> List.tryFindIndex ((=) ref) with
-            | None -> failwith "Internal Compiler Error: Failed to find Basic Block in block list"
-            | Some i ->
-                let (first, second) =
-                    (!builder.Module).BasicBlocks |> List.splitAt i
-
-                builder.Module
-                := { !builder.Module with
-                         BasicBlocks = first @ [ basicBlock ] @ second }
-
-                basicBlock
-        | Before ref ->
-            match (!builder.Module).BasicBlocks
-                  |> List.tryFindIndex ((=) ref) with
-            | None -> failwith "Internal Compiler Error: Failed to find Basic Block in block list"
-            | Some i ->
-                let (first, second) =
-                    (!builder.Module).BasicBlocks
-                    |> List.splitAt (i + 1)
-
-                builder.Module
-                := { BasicBlocks = first @ [ basicBlock ] @ second }
-
-                basicBlock
+        (basicBlock,
+         { builder with
+               NotYetInserted =
+                   builder.NotYetInserted
+                   |> (ImmutableMap.add basicBlock insertPoint) })
 
     let createBasicBlock = createBasicBlockAt End
 
@@ -883,6 +855,53 @@ module Builder =
         assert (basicBlock
                 |> Option.map ((!) >> isBasicBlockOrUndef)
                 |> Option.defaultValue true)
+
+        let builder =
+            match basicBlock
+                  |> Option.map (fun block ->
+                      builder.NotYetInserted
+                      |> ImmutableMap.tryFind block) with
+            | None
+            | Some None -> builder
+            | Some (Some insertPoint) ->
+                let basicBlock = basicBlock |> Option.get
+
+                match insertPoint with
+                | End ->
+                    builder.Module
+                    := { !builder.Module with
+                             BasicBlocks = basicBlock :: (!builder.Module).BasicBlocks }
+                | Start ->
+                    builder.Module
+                    := { !builder.Module with
+                             BasicBlocks = (!builder.Module).BasicBlocks @ [ basicBlock ] }
+                | After ref ->
+                    match (!builder.Module).BasicBlocks
+                          |> List.tryFindIndex ((=) ref) with
+                    | None -> failwith "Internal Compiler Error: Failed to find Basic Block in block list"
+                    | Some i ->
+                        let (first, second) =
+                            (!builder.Module).BasicBlocks |> List.splitAt i
+
+                        builder.Module
+                        := { !builder.Module with
+                                 BasicBlocks = first @ [ basicBlock ] @ second }
+                | Before ref ->
+                    match (!builder.Module).BasicBlocks
+                          |> List.tryFindIndex ((=) ref) with
+                    | None -> failwith "Internal Compiler Error: Failed to find Basic Block in block list"
+                    | Some i ->
+                        let (first, second) =
+                            (!builder.Module).BasicBlocks
+                            |> List.splitAt (i + 1)
+
+                        builder.Module
+                        := { BasicBlocks = first @ [ basicBlock ] @ second }
+
+                { builder with
+                      NotYetInserted =
+                          builder.NotYetInserted
+                          |> ImmutableMap.remove basicBlock }
 
         { builder with
               InsertBlock = basicBlock

@@ -705,14 +705,22 @@ let rec parseStatement error (tokens: Token list) =
             | { Type = SemiColon } :: tokens -> (MaybeExpression None |> Ok, tokens)
             | _ ->
                 let expr, tokens = parseExpression error tokens
-                (expr |> Result.map (Some >> MaybeExpression), tokens)
+
+                let error1, tokens =
+                    expect SemiColon error tokens "Expected ';' after initial expression"
+
+                (comb2 (fun _ -> Some >> MaybeExpression) error1 expr, tokens)
 
         let second, tokens =
             match tokens with
             | { Type = SemiColon } :: tokens -> (None |> Ok, tokens)
             | _ ->
                 let expr, tokens = parseExpression error tokens
-                (expr |> Result.map Some, tokens)
+
+                let error1, tokens =
+                    expect SemiColon error tokens "Expected ';' after condition"
+
+                (comb2 (fun _ -> Some) error1 expr, tokens)
 
         let third, tokens =
             match tokens with

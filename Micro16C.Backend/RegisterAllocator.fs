@@ -98,10 +98,13 @@ let allocateRegisters irModule =
         // and done in parallel in Assembly. Let's only do so though if the conditional branch is right after the
         // the definition of the condition. A separate pass should be responsible to increasing data locality if need be.
         //
-        // Exception to the above is shift operations. The Control Unit of the Micro16 reads from the ALU, the shifter
-        // is separate and placed after the ALU. Results from shift operations need to be stored in a register.
+        // Exception to the above is shift operations as well as Phis. The Control Unit of the Micro16 reads from the
+        // ALU, the shifter is separate and placed after the ALU. Results from shift operations need to be stored in a
+        // register. Phis because they are not actually real processor instructions but copies generate in predecessor
+        // blocks
         |> List.filter (function
-            | Ref { Content = UnaryInstruction { Kind = kind } }, _ when kind = Shl || kind = Shl -> true
+            | Ref { Content = UnaryInstruction { Kind = kind } }, _ when kind = Shl || kind = Shr -> true
+            | Ref { Content = PhiInstruction _ }, _ -> true
             | Ref { Users = [ Ref { Content = CondBrInstruction _
                                     Index = Some condIndex } ]
                     Index = Some index },

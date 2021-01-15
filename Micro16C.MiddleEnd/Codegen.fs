@@ -8,7 +8,9 @@ open Micro16C.MiddleEnd.IR
 type Context =
     { Builder: Builder
       Variables: Map<Sema.Declaration, Value ref>
-      Labels: Map<string * Sema.Statement, Value ref> }
+      Labels: Map<string * Sema.Statement, Value ref>
+      Continues: Map<Sema.LoopStatement, Value ref>
+      Breaks: Map<Sema.LoopStatement, Value ref> }
 
 module private Context =
 
@@ -18,11 +20,13 @@ module private Context =
 
     let createBasicBlock name context =
         Builder.createBasicBlock name context.Builder
+        |> retWithBuilder context
 
     let createBasicBlockAt point name context =
         Builder.createBasicBlockAt point name context.Builder
+        |> retWithBuilder context
 
-    let insertPoint (context: Context) = context.Builder.InsertBlock
+    let insertBlock (context: Context) = context.Builder |> Builder.insertBlock
 
     let setInsertPoint basicBlock context =
         context.Builder
@@ -119,7 +123,7 @@ module private Op =
         bitAnd lhs rhs context ||> bitNot
 
     let rem lhs rhs context =
-        match Context.insertPoint context with
+        match Context.insertBlock context with
         | None ->
             // if we are in dead code, this is all irrelevant and impossible to implement
             (Builder.createConstant 0s, context)
@@ -129,10 +133,10 @@ module private Op =
             | { Content = Constant { Value = value } } when (value &&& (value - 1s)) = 0s ->
                 (lhs, context) ||> bitAnd rhs
             | _ ->
-                let neg =
+                let neg, context =
                     Context.createBasicBlock "modNeg" context
 
-                let cont = Context.createBasicBlock "cont" context
+                let cont, context = Context.createBasicBlock "cont" context
 
                 let negated, context =
                     context
@@ -156,7 +160,7 @@ module private Op =
 
                 let rhs, context = (rhs, context) ||> negate
 
-                let body =
+                let body, context =
                     Context.createBasicBlock "modBody" context
 
                 let context =
@@ -168,10 +172,10 @@ module private Op =
                 let value, context =
                     (acc, context) ||> Context.createLoad ||> plus rhs
 
-                let modCont =
+                let modCont, context =
                     Context.createBasicBlock "modCont" context
 
-                let modEnd =
+                let modEnd, context =
                     Context.createBasicBlock "modEnd" context
 
                 context
@@ -183,16 +187,16 @@ module private Op =
                 |> Context.createLoad acc
 
     let toBool value context =
-        match context |> Context.insertPoint with
+        match context |> Context.insertBlock with
         | None -> (Builder.createConstant 0s, context)
         | Some _ ->
-            let isZero =
+            let isZero, context =
                 context |> Context.createBasicBlock "isZero"
 
-            let isNotZero =
+            let isNotZero, context =
                 context |> Context.createBasicBlock "isNotZero"
 
-            let cont =
+            let cont, context =
                 context |> Context.createBasicBlock "boolCont"
 
             context
@@ -212,19 +216,19 @@ module private Op =
 
     let lessThan lhs rhs context =
 
-        match context |> Context.insertPoint with
+        match context |> Context.insertBlock with
         | None -> (Builder.createConstant 0s, context)
         | Some _ ->
             let value, context = minus lhs rhs context
 
-            let isLess =
+            let isLess, context =
                 context |> Context.createBasicBlock "isLess"
 
-            let isGreaterOrEqual =
+            let isGreaterOrEqual, context =
                 context
                 |> Context.createBasicBlock "isGreaterOrEqual"
 
-            let cont =
+            let cont, context =
                 context |> Context.createBasicBlock "lessCont"
 
             context
@@ -263,15 +267,15 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
         let condition, context =
             visitExpression condition context ||> Op.toBool
 
-        let trueBranch =
+        let trueBranch, context =
             Context.createBasicBlock "ifTrue" context
 
-        let continueBranch =
+        let continueBranch, context =
             Context.createBasicBlock "ifCond" context
 
-        let falseBranch =
+        let falseBranch, context =
             match falseStatement with
-            | None -> continueBranch
+            | None -> (continueBranch, context)
             | Some _ -> Context.createBasicBlockAt (Before continueBranch) "ifFalse" context
 
         let context =
@@ -280,7 +284,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
             |> Context.setInsertPoint (Some trueBranch)
             |> visitStatement trueStatement
 
-        let trueBranch = Context.insertPoint context
+        let trueBranch = Context.insertBlock context
 
         let context =
             context |> Context.createGoto continueBranch
@@ -294,7 +298,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
                     |> Context.setInsertPoint (Some falseBranch)
                     |> visitStatement falseStatement
 
-                let falseBranch = Context.insertPoint context
+                let falseBranch = Context.insertBlock context
 
                 (falseBranch, context |> Context.createGoto continueBranch)
 
@@ -305,25 +309,39 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
             |> Context.setInsertPoint (Some continueBranch)
         | _ -> context
     | Sema.DoWhileStatement statement ->
-        let body =
+        let body, context =
             Context.createBasicBlock "doWhileBody" context
+
+        let cond, context =
+            Context.createBasicBlock "doWhileCondition" context
+
+        let cont, context =
+            Context.createBasicBlock "doWhileContinue" context
+
+        let context =
+            { context with
+                  Breaks =
+                      context.Breaks
+                      |> Map.add (Sema.DoWhileLoop statement) cont
+                  Continues =
+                      context.Continues
+                      |> Map.add (Sema.DoWhileLoop statement) cond }
 
         let value, context =
             context
             |> Context.createGoto body
             |> Context.setInsertPoint (Some body)
             |> visitStatement statement.Statement
+            |> Context.createGoto cond
+            |> Context.setInsertPoint (Some cond)
             |> visitExpression statement.Expression
             ||> Op.toBool
-
-        let cont =
-            Context.createBasicBlock "doWhileContinue" context
 
         context
         |> Context.createCondBr Zero value cont body
         |> Context.setInsertPoint (Some cont)
     | Sema.WhileStatement statement ->
-        let cond = Context.createBasicBlock "cond" context
+        let cond, context = Context.createBasicBlock "cond" context
 
         let value, context =
             context
@@ -332,11 +350,20 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
             |> visitExpression statement.Expression
             ||> Op.toBool
 
-        let cont =
+        let body, context =
+            Context.createBasicBlock "WhileBody" context
+
+        let cont, context =
             Context.createBasicBlock "WhileContinue" context
 
-        let body =
-            Context.createBasicBlock "WhileBody" context
+        let context =
+            { context with
+                  Breaks =
+                      context.Breaks
+                      |> Map.add (Sema.WhileLoop statement) cont
+                  Continues =
+                      context.Continues
+                      |> Map.add (Sema.WhileLoop statement) cond }
 
         context
         |> Context.createCondBr Zero value cont body
@@ -353,7 +380,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
         | Some label ->
             (match Map.tryFind label context.Labels with
              | None ->
-                 let bb =
+                 let bb, context =
                      Context.createBasicBlock (fst label) context
 
                  { context with
@@ -366,7 +393,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
         let bb, context =
             (match Map.tryFind (label, statement) context.Labels with
              | None ->
-                 let bb = Context.createBasicBlock label context
+                 let bb, context = Context.createBasicBlock label context
 
                  (bb,
                   { context with
@@ -377,7 +404,73 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
         |> Context.createGoto bb
         |> Context.setInsertPoint (Some bb)
         |> visitStatement statement
-    | _ -> failwith "TODO"
+    | Sema.ContinueStatement statement ->
+        context
+        |> Context.createGoto
+            (context.Continues
+             |> Map.find (!statement |> Option.get))
+    | Sema.BreakStatement statement ->
+        context
+        |> Context.createGoto
+            (context.Breaks
+             |> Map.find (!statement |> Option.get))
+    | Sema.ForStatement statement ->
+        let context =
+            match statement.Initial with
+            | Sema.ForInitialExpression (Some expression) -> context |> visitExpression expression |> snd
+            | Sema.ForInitialExpression None -> context
+            | Sema.ForInitialDeclaration decl ->
+                decl
+                |> List.fold (fun context decl -> visitDeclaration decl context) context
+
+        let cond, context = Context.createBasicBlock "cond" context
+
+        let condValue, context =
+            match statement.Condition with
+            | None ->
+                context
+                |> Context.createGoto cond
+                |> Context.setInsertPoint (Some cond)
+                |> (fun x -> None, x)
+            | Some expr ->
+                context
+                |> Context.createGoto cond
+                |> Context.setInsertPoint (Some cond)
+                |> visitExpression expr
+                ||> Op.toBool
+                ||> (fun value context -> Some value, context)
+
+        let body, context =
+            Context.createBasicBlock "ForBody" context
+
+        let cont, context =
+            Context.createBasicBlock "ForContinue" context
+
+        let context =
+            match condValue with
+            | None -> Context.createGoto body context
+            | Some expr ->
+                context
+                |> Context.createCondBr Zero expr cont body
+
+        let context =
+            { context with
+                  Breaks =
+                      context.Breaks
+                      |> Map.add (Sema.ForLoop statement) cont
+                  Continues =
+                      context.Continues
+                      |> Map.add (Sema.ForLoop statement) cond }
+
+        context
+        |> Context.setInsertPoint (Some body)
+        |> visitStatement statement.Statement
+        |> (fun context ->
+            statement.Iteration
+            |> Option.map (fun expr -> visitExpression expr context |> snd)
+            |> Option.defaultValue context)
+        |> Context.createGoto cond
+        |> Context.setInsertPoint (Some cont)
 
 and visitDeclaration (declaration: Sema.Declaration) (context: Context): Context =
     let value, context =
@@ -482,7 +575,37 @@ and visitExpression (expression: Sema.Expression) (context: Context) =
             ||> Context.createUnary Not
             ||> Context.createBinary (Builder.createConstant 1s) Add
         | Sema.BitwiseNegate -> Context.createUnary Not value context
-        | _ -> failwith "TODO"
+        | Sema.PostIncrement ->
+            let loaded, context = Context.createLoad value context
+
+            let context =
+                (loaded, context)
+                ||> Op.plus (Builder.createConstant 1s)
+                ||> Context.createStore value
+
+            (loaded, context)
+        | Sema.PreIncrement ->
+            (value, context)
+            ||> Context.createLoad
+            ||> Op.plus (Builder.createConstant 1s)
+            ||> Context.createStore value
+            |> Context.createLoad value
+        | Sema.PostDecrement ->
+            let loaded, context = Context.createLoad value context
+
+            let context =
+                (loaded, context)
+                ||> Op.minus (Builder.createConstant 1s)
+                ||> Context.createStore value
+
+            (loaded, context)
+        | Sema.PreDecrement ->
+            (value, context)
+            ||> Context.createLoad
+            ||> Op.minus (Builder.createConstant 1s)
+            ||> Context.createStore value
+            |> Context.createLoad value
+        | Sema.LogicalNegate -> (value, context) ||> Op.toBool ||> Op.boolInvert
     | Sema.SizeofExpression _ -> (Builder.createConstant 1s, context)
     | Sema.CommaExpression expression ->
         let values, context =
@@ -522,9 +645,11 @@ let codegen (translationUnit: Sema.CompoundItem list) =
     let context =
         { Builder = Builder.fromModule irModule
           Variables = Map([])
-          Labels = Map([]) }
+          Labels = Map([])
+          Continues = Map([])
+          Breaks = Map([]) }
 
-    let entry = Context.createBasicBlock "entry" context
+    let entry, context = Context.createBasicBlock "entry" context
 
     context
     |> Context.setInsertPoint (Some entry)

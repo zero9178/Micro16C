@@ -304,7 +304,7 @@ let jumpThreading irModule =
                  >> List.exists ((!) >> Value.parentBlock >> (<>) (Some blockValue)))
 
         let createCopies pred =
-            let newBlock =
+            let newBlock, builder =
                 builder
                 |> Builder.createBasicBlockAt (After pred) ((!blockValue |> Value.name) + ".copy")
 

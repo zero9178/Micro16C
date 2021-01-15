@@ -14,6 +14,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.MiddleEnd.IRReader
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.MiddleEnd.Tests", "Micro16C.MiddleEnd.Tests\Micro16C.MiddleEnd.Tests.fsproj", "{F7A4462C-B91A-47E9-9429-B88F9A78EBA1}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Tests", "Micro16C.Tests\Micro16C.Tests.fsproj", "{3ED3370E-35AF-47E0-B7F0-FDA6EBFEEF01}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -48,5 +50,9 @@ Global
 		{F7A4462C-B91A-47E9-9429-B88F9A78EBA1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F7A4462C-B91A-47E9-9429-B88F9A78EBA1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F7A4462C-B91A-47E9-9429-B88F9A78EBA1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3ED3370E-35AF-47E0-B7F0-FDA6EBFEEF01}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3ED3370E-35AF-47E0-B7F0-FDA6EBFEEF01}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3ED3370E-35AF-47E0-B7F0-FDA6EBFEEF01}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3ED3370E-35AF-47E0-B7F0-FDA6EBFEEF01}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

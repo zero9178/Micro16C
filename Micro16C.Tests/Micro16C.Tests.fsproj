@@ -8,8 +8,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="IRReaderTests.fs"/>
-        <Compile Include="PassesTests.fs"/>
+        <Compile Include="Tests.fs"/>
         <Compile Include="Program.fs"/>
     </ItemGroup>
 
@@ -28,7 +27,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Micro16C.MiddleEnd.IRReader\Micro16C.MiddleEnd.IRReader.fsproj"/>
+        <ProjectReference Include="..\Micro16C.fsproj"/>
     </ItemGroup>
 
 </Project>

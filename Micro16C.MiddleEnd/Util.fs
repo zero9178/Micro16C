@@ -38,6 +38,8 @@ module ImmutableMap =
         Seq.filter (fun (kv: KeyValuePair<_, _>) -> kv.Deconstruct() ||> p)
         >> (fun x -> ImmutableDictionary.CreateRange(HashIdentity.Reference, x))
 
+    let remove key (map: ImmutableDictionary<_, _>) = map.Remove key
+
 module ImmutableSet =
 
     let ofList (list: 'Key list): ImmutableHashSet<'Key> =

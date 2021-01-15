@@ -940,8 +940,8 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
              |> Error,
              context)
         | loop :: _ -> (BreakStatement loop |> Ok, context)
-    | Parse.ForStatementDecl (_, condition, iteration, statement)
-    | Parse.ForStatement (_, condition, iteration, statement) ->
+    | Parse.ForStatementDecl (_, condition, iteration, body)
+    | Parse.ForStatement (_, condition, iteration, body) ->
 
         let oRtoRo optionResult =
             match optionResult with
@@ -984,7 +984,7 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
             { context with
                   Loops = forLoop :: context.Loops }
 
-        let statement, context = visitStatement context statement
+        let statement, context = visitStatement context body
 
         (comb4 (fun x y z w ->
             let forObj =

@@ -131,7 +131,7 @@ let fixLostCopy irModule =
 
                 let builder = Builder.fromModule irModule
 
-                let block =
+                let block, builder =
                     builder
                     |> Builder.createBasicBlockAt (After pred) ""
 

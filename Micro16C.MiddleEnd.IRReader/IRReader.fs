@@ -416,7 +416,7 @@ let fromString text: Module ref =
     |> tokenize
     |> parseModule
     |> Seq.fold (fun map bb ->
-        let block =
+        let block, builder =
             builder
             |> Builder.createBasicBlock (valueToName bb.Label)
 
