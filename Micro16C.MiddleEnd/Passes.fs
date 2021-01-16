@@ -404,7 +404,7 @@ let jumpThreading irModule =
                      |> List.distinctBy ((!) >> BasicBlock.successors)
                      |> (fun x ->
                          x |> List.length = 1
-                         && !x.[0] |> BasicBlock.successors |> List.length = 1))
+                         && !x.[0] |> BasicBlock.hasSingleSuccessor))
 
             if escapingValues |> List.isEmpty then
                 // If we have no escaping values then no phis need to be created in the successor and we can actually
@@ -419,9 +419,7 @@ let jumpThreading irModule =
                 blockValue |> Value.destroy
             else
 
-            if !blockValue
-               |> BasicBlock.successors
-               |> List.length = 1 then
+            if !blockValue |> BasicBlock.hasSingleSuccessor then
                 let mergeBlock =
                     !blockValue
                     |> BasicBlock.successors
@@ -1131,9 +1129,9 @@ let reorderBasicBlocks irModule =
          >> Value.asBasicBlock
          >> BasicBlock.tryTerminator
          >> Option.filter ((!) >> Value.isUnconditional >> not))
-    |> List.iter (fun termintor ->
+    |> List.iter (fun terminator ->
         let successors =
-            !termintor |> Value.operands |> List.tail
+            !terminator |> Value.operands |> List.tail
 
         // Only handling diamonds for now
         let mergeCount =

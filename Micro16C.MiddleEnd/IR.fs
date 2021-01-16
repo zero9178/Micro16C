@@ -685,17 +685,20 @@ module BasicBlock =
 
     let dominanceFrontier = BasicBlockInternal.dominanceFrontier
 
-    let successors =
-        Value.asBasicBlock
-        >> revInstructions
+    let tryTerminator =
+        revInstructions
         >> List.tryHead
         >> Option.filter ((!) >> Value.isTerminating)
+
+    let terminator = tryTerminator >> Option.get
+
+    let successors =
+        Value.asBasicBlock
+        >> tryTerminator
         >> Option.map
             ((!)
              >> Value.operands
-             >> List.filter (function
-                 | Ref { Content = BasicBlockValue _ } -> true
-                 | _ -> false))
+             >> List.filter ((!) >> Value.isBasicBlock))
         >> Option.defaultValue []
 
     let predecessors =
@@ -714,12 +717,13 @@ module BasicBlock =
     let dominates other basicBlock =
         other |> dominators |> Seq.contains basicBlock
 
-    let tryTerminator =
-        revInstructions
-        >> List.tryHead
-        >> Option.filter ((!) >> Value.isTerminating)
+    let hasSingleSuccessor =
+        successors >> Seq.tryExactlyOne >> Option.isSome
 
-    let terminator = tryTerminator >> Option.get
+    let hasSinglePredecessor =
+        predecessors >> Seq.tryExactlyOne >> Option.isSome
+
+    let hasNoPredecessor = predecessors >> Seq.isEmpty
 
     let phis = BasicBlockInternal.phis
 
