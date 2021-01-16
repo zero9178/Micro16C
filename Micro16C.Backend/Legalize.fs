@@ -36,73 +36,112 @@ let legalizeConstants irModule =
                          |> Before)
                 | _ ->
                     builder
-                    |> Builder.setInsertBlock ((!instr).ParentBlock)
+                    |> Builder.setInsertBlock (!instr |> Value.parentBlock)
                     |> Builder.setInsertPoint (Before instr)
 
-            let bitPairs =
-                Seq.unfold (fun c ->
-                    if c = 0s then
-                        None
-                    else
-                        let lower2 = c &&& 0b11s
-                        // Logical right shift needed, not an arithmetic shift
-                        Some(lower2, ((c |> uint16) >>> 2) |> int16)) c
-                |> Seq.rev
+            let allBits =
+                Seq.unfold (fun c -> Some(c &&& 0x8000us <> 0us, c <<< 1)) (c |> uint16)
+                |> Seq.take 16
 
-            // If the number were to consist of an uneven amount of active bits, then the very first value in the
-            // sequence is 1. The fold below does not account for bitPairs that are actually not pairs but a single
-            // bit so we need to set the start value to 1 instead of 0 instead
-            let (start, bitPairs) =
-                match Seq.head bitPairs with
-                | 0b01s -> (1s, Seq.tail bitPairs)
-                | _ -> (0s, bitPairs)
+            let splitIndex =
+                1
+                + (allBits
+                   |> Seq.windowed 2
+                   |> Seq.findIndex (fun l -> l.[0] <> l.[1]))
 
-            let c =
-                bitPairs
-                |> Seq.fold (fun (op, builder) bitPair ->
-                    match bitPair with
-                    | 0b00s ->
-                        match !op with
-                        | { Content = Constant { Value = 0s } } -> (op, builder)
-                        | _ ->
-                            builder
-                            |> Builder.createBinary op Add op
-                            ||> Builder.createUnary Shl
-                    | 0b01s ->
-                        match !op with
-                        | { Content = Constant { Value = 0s } } -> (Builder.createConstant 1s, builder)
-                        | _ ->
-                            (op, builder)
-                            ||> Builder.createUnary Shl
-                            ||> Builder.createUnary Shl
-                            ||> Builder.createBinary (Builder.createConstant 1s) Add
-                    | 0b10s ->
-                        match !op with
-                        | { Content = Constant { Value = 0s } } ->
-                            (Builder.createConstant 1s, builder)
-                            ||> Builder.createUnary Shl
-                        | _ ->
-                            (op, builder)
-                            ||> Builder.createUnary Shl
-                            ||> Builder.createBinary (Builder.createConstant 1s) Add
-                            ||> Builder.createUnary Shl
-                    | 0b11s ->
-                        match !op with
-                        | { Content = Constant { Value = 0s } } ->
-                            (Builder.createConstant 1s, builder)
-                            ||> Builder.createUnary Shl
-                            ||> Builder.createBinary (Builder.createConstant 1s) Add
-                        | _ ->
-                            (op, builder)
-                            ||> Builder.createUnary Shl
-                            ||> Builder.createBinary (Builder.createConstant 1s) Add
-                            ||> Builder.createUnary Shl
-                            ||> Builder.createBinary (Builder.createConstant 1s) Add
-                    | _ -> failwithf "Internal Compiler Error: Invalid bit pair %d" bitPair)
-                       (Builder.createConstant start, builder)
-                |> fst
+            let (first, second) =
+                allBits |> List.ofSeq |> List.splitAt splitIndex
 
-            instr |> Value.setOperand i c)
+            if (List.forall id first
+                && List.forall (id >> not) second)
+               || (List.forall (id >> not) first
+                   && List.forall id second) then
+                let pattern =
+                    Seq.unfold (fun c ->
+                        let c = Builder.createUnary Shr c builder |> fst
+                        Some(c, c)) (Builder.createConstant -1s)
+                    |> Seq.take (List.length first)
+                    |> Seq.last
+
+                if not first.[0] then
+                    instr |> Value.setOperand i pattern
+                else
+                    instr
+                    |> Value.setOperand i (Builder.createUnary Not pattern builder |> fst)
+            else
+                let hasMore1s =
+                    allBits
+                    |> Seq.fold (fun res b -> if b then res + 1 else res) 0 > 8
+
+                let c = if hasMore1s then ~~~c else c
+
+                let bitPairs =
+                    Seq.unfold (fun c ->
+                        if c = 0s then
+                            None
+                        else
+                            let lower2 = c &&& 0b11s
+                            // Logical right shift needed, not an arithmetic shift
+                            Some(lower2, ((c |> uint16) >>> 2) |> int16)) c
+                    |> Seq.rev
+
+                // If the number were to consist of an uneven amount of active bits, then the very first value in the
+                // sequence is 1. The fold below does not account for bitPairs that are actually not pairs but a single
+                // bit so we need to set the start value to 1 instead of 0 instead
+                let (start, bitPairs) =
+                    match Seq.head bitPairs with
+                    | 0b01s -> (1s, Seq.tail bitPairs)
+                    | _ -> (0s, bitPairs)
+
+                let c =
+                    bitPairs
+                    |> Seq.fold (fun (op, builder) bitPair ->
+                        match bitPair with
+                        | 0b00s ->
+                            match !op with
+                            | { Content = Constant { Value = 0s } } -> (op, builder)
+                            | _ ->
+                                builder
+                                |> Builder.createBinary op Add op
+                                ||> Builder.createUnary Shl
+                        | 0b01s ->
+                            match !op with
+                            | { Content = Constant { Value = 0s } } -> (Builder.createConstant 1s, builder)
+                            | _ ->
+                                (op, builder)
+                                ||> Builder.createUnary Shl
+                                ||> Builder.createUnary Shl
+                                ||> Builder.createBinary (Builder.createConstant 1s) Add
+                        | 0b10s ->
+                            match !op with
+                            | { Content = Constant { Value = 0s } } ->
+                                (Builder.createConstant 1s, builder)
+                                ||> Builder.createUnary Shl
+                            | _ ->
+                                (op, builder)
+                                ||> Builder.createUnary Shl
+                                ||> Builder.createBinary (Builder.createConstant 1s) Add
+                                ||> Builder.createUnary Shl
+                        | 0b11s ->
+                            match !op with
+                            | { Content = Constant { Value = 0s } } ->
+                                (Builder.createConstant 1s, builder)
+                                ||> Builder.createUnary Shl
+                                ||> Builder.createBinary (Builder.createConstant 1s) Add
+                            | _ ->
+                                (op, builder)
+                                ||> Builder.createUnary Shl
+                                ||> Builder.createBinary (Builder.createConstant 1s) Add
+                                ||> Builder.createUnary Shl
+                                ||> Builder.createBinary (Builder.createConstant 1s) Add
+                        | _ -> failwithf "Internal Compiler Error: Invalid bit pair %d" bitPair)
+                           (Builder.createConstant start, builder)
+                    |> fst
+
+                let c =
+                    if hasMore1s then Builder.createUnary Not c builder |> fst else c
+
+                instr |> Value.setOperand i c)
 
     !irModule
     |> Module.instructions

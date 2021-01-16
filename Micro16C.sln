@@ -16,6 +16,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.MiddleEnd.Tests", 
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Tests", "Micro16C.Tests\Micro16C.Tests.fsproj", "{3ED3370E-35AF-47E0-B7F0-FDA6EBFEEF01}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Backend.Tests", "Micro16C.Backend.Tests\Micro16C.Backend.Tests.fsproj", "{FAC2CFBC-755E-4DE2-A295-B4A357969C1D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -54,5 +56,9 @@ Global
 		{3ED3370E-35AF-47E0-B7F0-FDA6EBFEEF01}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3ED3370E-35AF-47E0-B7F0-FDA6EBFEEF01}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3ED3370E-35AF-47E0-B7F0-FDA6EBFEEF01}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FAC2CFBC-755E-4DE2-A295-B4A357969C1D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FAC2CFBC-755E-4DE2-A295-B4A357969C1D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FAC2CFBC-755E-4DE2-A295-B4A357969C1D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FAC2CFBC-755E-4DE2-A295-B4A357969C1D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
