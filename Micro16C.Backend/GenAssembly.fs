@@ -71,7 +71,57 @@ let genAssembly irModule: AssemblyLine list =
             |> Value.register
             |> Option.map Register.toBus
 
-    let prependOperation operation list = (Operation operation) :: list
+    let prependOperation operation list =
+        match (operation, list) with
+        | { Shifter = Some Shifter.Left
+            ALU = Some ALU.ABus
+            SBus = Some result
+            ABus = Some aBus
+            AMux = Some AMux.ABus } as op1,
+          Operation ({ Shifter = Some Shifter.Left
+                       ALU = Some ALU.ABus
+                       SBus = Some sBus
+                       ABus = Some input
+                       BBus = None
+                       AMux = Some AMux.ABus
+                       Condition = None } as op2) :: rest when sBus = aBus
+                                                               && Operation.canCombine
+                                                                   { op1 with
+                                                                         Shifter = None
+                                                                         ALU = None
+                                                                         ABus = None
+                                                                         SBus = None
+                                                                         AMux = None }
+                                                                      { op2 with
+                                                                            Shifter = None
+                                                                            ALU = None
+                                                                            ABus = None
+                                                                            SBus = None
+                                                                            AMux = None } ->
+            let op =
+                Operation.combine
+                    { op1 with
+                          Shifter = None
+                          ALU = None
+                          ABus = None
+                          SBus = None }
+                    { op2 with
+                          Shifter = None
+                          ALU = None
+                          ABus = None
+                          SBus = None }
+
+            Operation
+                { op with
+                      Shifter = Some Shifter.Left
+                      AMux = Some AMux.ABus
+                      ABus = Some input
+                      BBus = Some input
+                      ALU = Some ALU.Add
+                      SBus = Some result }
+            :: rest
+        | op1, Operation op2 :: list when Operation.canCombine op1 op2 -> Operation(Operation.combine op1 op2) :: list
+        | operation, list -> (Operation operation) :: list
 
     let basicBlocks =
         !irModule |> Module.basicBlocks |> Array.ofList

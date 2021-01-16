@@ -2,6 +2,7 @@ module Tests
 
 
 open Micro16C.Backend
+open Micro16C.Backend.Assembly
 open Micro16C.MiddleEnd
 open Micro16C.MiddleEnd.Tests.PassesTests
 open Xunit
@@ -76,3 +77,70 @@ let ``Legalize Constants`` () =
     %2 = not %1
     %3 = add %0 %2
     """)
+
+[<Fact>]
+let ``Assembly folding`` () =
+    let assembly =
+        """
+    %entry:
+        %0 = load R0
+        %1 = shl %0
+        %2 = shl %1
+        """
+        |> IRReader.fromString
+        |> Passes.numberInstr
+        |> Passes.analyzeLifetimes
+        |> RegisterAllocator.allocateRegisters
+        |> GenAssembly.genAssembly
+
+
+    assembly |> should haveLength 2
+    assembly.[0] |> should equal (Label "entry")
+
+    (match assembly.[1] with
+     | Operation { AMux = Some AMux.ABus
+                   ABus = Some input1
+                   BBus = Some input2
+                   SBus = Some _
+                   Shifter = Some Shifter.Left
+                   ALU = Some ALU.Add } when input1 = input2 -> true
+     | _ -> false)
+    |> should be True
+
+    let assembly =
+        """
+    %entry:
+        %0 = load R0
+        %1 = shl %0
+        %2 = shl %1
+        goto %false
+    %true:
+        store 0 -> R1
+
+    %false:
+        store 1 -> R2
+        """
+        |> IRReader.fromString
+        |> Passes.numberInstr
+        |> Passes.analyzeLifetimes
+        |> RegisterAllocator.allocateRegisters
+        |> GenAssembly.genAssembly
+
+
+    assembly
+    |> List.length
+    |> should be (greaterThanOrEqualTo 2)
+
+    assembly.[0] |> should equal (Label "entry")
+
+    (match assembly.[1] with
+     | Operation { AMux = Some AMux.ABus
+                   ABus = Some input1
+                   BBus = Some input2
+                   SBus = Some _
+                   Shifter = Some Shifter.Left
+                   ALU = Some ALU.Add
+                   Condition = Some Cond.None
+                   Address = Some "false" } when input1 = input2 -> true
+     | _ -> false)
+    |> should be True
