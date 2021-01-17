@@ -163,6 +163,36 @@ let simplifyCFG (irModule: Module ref) =
 
     irModule
 
+let removeUnreachableBlocks (irModule: Module ref) =
+
+    let set =
+        !irModule
+        |> Module.entryBlock
+        |> Option.map Seq.singleton
+        |> Option.map (associateValue ImmutableSet.empty)
+        |> Option.defaultValue (Seq.empty, ImmutableSet.empty)
+        |> Seq.unfold (fun (seq, set) ->
+            match Seq.tryHead seq with
+            | None -> None
+            | Some head when ImmutableSet.contains head set -> Some(set, (Seq.tail seq, set))
+            | Some head ->
+                let set = set |> ImmutableSet.add head
+
+                Some
+                    (set,
+                     (Seq.tail seq
+                      |> Seq.append (!head |> BasicBlock.successors),
+                      set)))
+        |> Seq.tryLast
+        |> Option.defaultValue ImmutableSet.empty
+
+    !irModule
+    |> Module.revBasicBlocks
+    |> Seq.filter (fun v -> ImmutableSet.contains v set |> not)
+    |> Seq.iter Value.destroy
+
+    irModule
+
 let private singleInstructionCombine builder value =
     match value with
     | Ref { Content = UnaryInstruction { Kind = Not

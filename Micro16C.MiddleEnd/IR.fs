@@ -627,8 +627,6 @@ module Value =
 
             value |> removeFromParent
 
-        assert (useCount !value = 0)
-
         value := !Value.UndefValue
 
     and replaceWith replacement value =
@@ -735,6 +733,10 @@ module Module =
     let basicBlocks irModule = irModule.BasicBlocks |> List.rev
 
     let revBasicBlocks irModule = irModule.BasicBlocks
+
+    let entryBlock = revBasicBlocks >> List.tryLast
+
+    let exitBlock = revBasicBlocks >> List.tryHead
 
     let swapBlocks block1 block2 irModule =
         assert (Value.isBasicBlock !block1)

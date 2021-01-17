@@ -4,6 +4,18 @@
 	<s:String x:Key="/Default/Environment/AssemblyExplorer/XmlDocument/@EntryValue">&lt;AssemblyExplorer&gt;&#xD;
   &lt;Assembly Path="C:\Users\Markus\.nuget\packages\fsunit.xunit\4.0.2\lib\netstandard2.0\FsUnit.Xunit.dll" /&gt;&#xD;
 &lt;/AssemblyExplorer&gt;</s:String>
+	<s:String x:Key="/Default/Environment/UnitTesting/UnitTestSessionStore/Sessions/=06940601_002Db322_002D4ea5_002Db33c_002Dcbcd9caeb09e/@EntryIndexedValue">&lt;SessionState ContinuousTestingMode="0" Name="Remove unreachable blocks" xmlns="urn:schemas-jetbrains-com:jetbrains-ut-session"&gt;&#xD;
+  &lt;TestAncestor&gt;&#xD;
+    &lt;TestId&gt;xUnit::F7A4462C-B91A-47E9-9429-B88F9A78EBA1::net5.0::Micro16C.MiddleEnd.Tests.PassesTests.Remove unreachable blocks&lt;/TestId&gt;&#xD;
+  &lt;/TestAncestor&gt;&#xD;
+&lt;/SessionState&gt;</s:String>
+	<s:String x:Key="/Default/Environment/UnitTesting/UnitTestSessionStore/Sessions/=9ea486b9_002D7bd4_002D407e_002D8edb_002D19e6e8236292/@EntryIndexedValue">&lt;SessionState ContinuousTestingMode="0" IsActive="True" Name="All tests from Solution" xmlns="urn:schemas-jetbrains-com:jetbrains-ut-session"&gt;&#xD;
+  &lt;Solution /&gt;&#xD;
+&lt;/SessionState&gt;</s:String>
+	
+	
+	
+	
 	
 	
 	

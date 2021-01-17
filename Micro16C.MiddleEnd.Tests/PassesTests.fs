@@ -802,3 +802,34 @@ let ``mem2reg pass`` () =
 %cont:
     store %0 -> R4
 """)
+
+[<Fact>]
+let ``Remove unreachable blocks`` () =
+    """
+%entry:
+    %0 = load R1
+    goto %next
+
+%deadLoop:
+    %1 = phi (%0,%entry) (%2,%false)
+    %2 = add %1 1
+    br %1 = 0 %next %false
+
+%false:
+    goto %deadLoop
+
+%next:
+    store %0 -> R2
+    """
+    |> IRReader.fromString
+    |> Passes.removeUnreachableBlocks
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    goto %next
+
+%next:
+    store %0 -> R2
+    """)

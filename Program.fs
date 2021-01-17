@@ -22,6 +22,7 @@ let compile text =
     |> Result.map Passes.instructionSimplify
     |> Result.map Passes.instructionCombine
     |> Result.map Passes.deadCodeElimination
+    |> Result.map Passes.removeUnreachableBlocks
     |> Result.map Passes.simplifyCFG
     |> Result.map Passes.analyzeAlloc
     |> Result.map Passes.analyzeDominance
@@ -32,10 +33,12 @@ let compile text =
     |> Result.map Passes.instructionSimplify
     |> Result.map Passes.instructionCombine
     |> Result.map Passes.deadCodeElimination
+    |> Result.map Passes.removeUnreachableBlocks
     |> Result.map Passes.simplifyCFG
     |> Result.map Passes.instructionSimplify
     |> Result.map Passes.instructionCombine
     |> Result.map Passes.deadCodeElimination
+    |> Result.map Passes.removeUnreachableBlocks
     |> Result.map Passes.simplifyCFG
     |> Result.map Passes.removeRedundantLoadStores
     |> Result.map (debugModulePasses "End of optimizations:")
