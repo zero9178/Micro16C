@@ -767,6 +767,21 @@ module Module =
 
     let asText (irModule: Module) = irModule.ToString()
 
+    let rec preOrder =
+        entryBlock
+        >> Option.map (Graphs.preOrder ((!) >> BasicBlock.successors >> Seq.ofList))
+        >> Option.defaultValue Seq.empty
+
+    let rec postOrder =
+        entryBlock
+        >> Option.map (Graphs.postOrder ((!) >> BasicBlock.successors >> Seq.ofList))
+        >> Option.defaultValue Seq.empty
+
+    let rec reversePostOrder =
+        entryBlock
+        >> Option.map (Graphs.reversePostOrder ((!) >> BasicBlock.successors >> Seq.ofList))
+        >> Option.defaultValue Seq.empty
+
 type InsertPoint =
     | Before of Value ref
     | After of Value ref

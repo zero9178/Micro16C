@@ -11,7 +11,7 @@ module ImmutableMap =
     let ofSeq (seq: seq<('Key * 'Value)>): ImmutableDictionary<'Key, 'Value> =
         ImmutableDictionary.CreateRange<'Key, 'Value>(HashIdentity.Reference, seq |> Seq.map (KeyValuePair))
 
-    let empty<'Key, 'Value when 'Value: not struct and 'Key: not struct> =
+    let empty<'Key, 'Value when 'Key: not struct> =
         ImmutableDictionary<'Key, 'Value>
             .Empty.WithComparers(HashIdentity.Reference)
 

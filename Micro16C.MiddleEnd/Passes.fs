@@ -15,45 +15,64 @@ let private singleInstructionSimplify builder value =
                                       Left = _ } } ->
         value
         |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
     | { Content = BinaryInstruction { Kind = Add
                                       Left = Ref { Content = Constant { Value = 0s } }
                                       Right = passThrough } }
     | { Content = BinaryInstruction { Kind = Add
                                       Right = Ref { Content = Constant { Value = 0s } }
-                                      Left = passThrough } } -> value |> Value.replaceWith passThrough
+                                      Left = passThrough } } ->
+        value |> Value.replaceWith passThrough
+        true
     | { Content = BinaryInstruction { Kind = And
                                       Left = Ref { Content = Constant { Value = 0xFFFFs } }
                                       Right = passThrough } }
     | { Content = BinaryInstruction { Kind = And
                                       Right = Ref { Content = Constant { Value = 0xFFFFs } }
-                                      Left = passThrough } } -> value |> Value.replaceWith passThrough
+                                      Left = passThrough } } ->
+        value |> Value.replaceWith passThrough
+        true
     | { Content = BinaryInstruction { Kind = Add
                                       Left = Ref { Content = Constant { Value = lhs } }
                                       Right = Ref { Content = Constant { Value = rhs } } } } ->
         value
         |> Value.replaceWith (Builder.createConstant (lhs + rhs))
+
+        true
     | { Content = BinaryInstruction { Kind = And
                                       Left = Ref { Content = Constant { Value = lhs } }
                                       Right = Ref { Content = Constant { Value = rhs } } } } ->
         value
         |> Value.replaceWith (Builder.createConstant (lhs &&& rhs))
+
+        true
     | { Content = BinaryInstruction { Kind = And; Left = lhs; Right = rhs } } when lhs = rhs ->
         value |> Value.replaceWith lhs
+        true
     | { Content = BinaryInstruction { Kind = Add; Left = lhs; Right = rhs } } when lhs = rhs ->
         value
         |> Value.replaceWith (builder |> Builder.createUnary Shl lhs |> fst)
+
+        true
     | { Content = UnaryInstruction { Kind = Not
                                      Value = Ref { Content = Constant { Value = rhs } } } } ->
         value
         |> Value.replaceWith (Builder.createConstant (~~~rhs))
+
+        true
     | { Content = UnaryInstruction { Kind = Shl
                                      Value = Ref { Content = Constant { Value = constant } } } } ->
         value
         |> Value.replaceWith (Builder.createConstant (constant <<< 1))
+
+        true
     | { Content = UnaryInstruction { Kind = Shr
                                      Value = Ref { Content = Constant { Value = constant } } } } ->
         value
         |> Value.replaceWith (Builder.createConstant ((constant |> uint16) >>> 1 |> int16))
+
+        true
     | { Content = CondBrInstruction { Kind = Zero
                                       Value = Ref { Content = Constant { Value = constant } }
                                       TrueBranch = trueBranch
@@ -64,6 +83,8 @@ let private singleInstructionSimplify builder value =
         else
             value
             |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
+
+        true
     | { Content = CondBrInstruction { Kind = Negative
                                       Value = Ref { Content = Constant { Value = constant } }
                                       TrueBranch = trueBranch
@@ -74,25 +95,33 @@ let private singleInstructionSimplify builder value =
         else
             value
             |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
+
+        true
     | { Content = CondBrInstruction { TrueBranch = trueBranch
                                       FalseBranch = falseBranch } } when trueBranch = falseBranch ->
         value
         |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
+
+        true
     | { Content = PhiInstruction { Incoming = list } } when list
                                                             |> List.map fst
                                                             |> List.distinct
                                                             |> List.length = 1 ->
         value
         |> Value.replaceWith (list |> List.head |> fst)
-    | _ -> ()
+
+        true
+    | _ -> false
 
 let instructionSimplify (irModule: Module ref) =
 
     let builder = Builder.fromModule irModule
 
-    !irModule
-    |> Module.instructions
-    |> List.iter (singleInstructionSimplify builder)
+    while !irModule
+          |> Module.instructions
+          |> List.map (singleInstructionSimplify builder)
+          |> List.exists id do
+        ()
 
     irModule
 
@@ -102,24 +131,24 @@ let deadCodeElimination (irModule: Module ref) =
         if not (Value.hasSideEffects !value)
            && 0 = Value.useCount !value then
             value |> Value.destroy
+            true
+        else
+            false
 
-    !irModule
-    |> Module.revInstructions
-    |> List.iter eliminate
+    while !irModule
+          |> Module.revInstructions
+          |> List.map eliminate
+          |> List.exists id do
+        ()
 
     irModule
 
 let simplifyCFG (irModule: Module ref) =
 
-    let simplifyBlock (index, blockValue) =
-        if index <> 0
-           && !blockValue
-              |> BasicBlock.predecessors
-              |> List.isEmpty then
-            blockValue |> Value.destroy
-        else if !blockValue |> Value.isBasicBlock |> not then
+    let simplifyBlock blockValue =
+        if !blockValue |> Value.isBasicBlock |> not then
             // As we may delete a successor this case could occur
-            ()
+            false
         else
             let block = !blockValue |> Value.asBasicBlock
             // this optimization may be invalid if the basic block is used in a Phi. For now I'll be conservative and
@@ -133,10 +162,9 @@ let simplifyCFG (irModule: Module ref) =
                                                                                           | _ -> false)
                                                                                       |> not ->
                 blockValue |> Value.replaceWith destination
+                true
             | Ref { Content = GotoInstruction { BasicBlock = destination } } as terminator :: _ when (!destination
-                                                                                                      |> BasicBlock.predecessors
-                                                                                                      |> List.length =
-                                                                                                         1)
+                                                                                                      |> BasicBlock.hasSinglePredecessor)
                                                                                                      && (!destination
                                                                                                          |> Value.asBasicBlock
                                                                                                          |> BasicBlock.phis
@@ -154,12 +182,14 @@ let simplifyCFG (irModule: Module ref) =
                 |> List.iter (fun x -> builder |> Builder.insertValue x |> ignore)
 
                 destination |> Value.replaceWith blockValue
-            | _ -> ()
+                true
+            | _ -> false
 
-    !irModule
-    |> Module.basicBlocks
-    |> List.indexed
-    |> List.iter simplifyBlock
+    while !irModule
+          |> Module.basicBlocks
+          |> List.map simplifyBlock
+          |> List.exists id do
+        ()
 
     irModule
 
@@ -167,24 +197,8 @@ let removeUnreachableBlocks (irModule: Module ref) =
 
     let set =
         !irModule
-        |> Module.entryBlock
-        |> Option.map Seq.singleton
-        |> Option.map (associateValue ImmutableSet.empty)
-        |> Option.defaultValue (Seq.empty, ImmutableSet.empty)
-        |> Seq.unfold (fun (seq, set) ->
-            match Seq.tryHead seq with
-            | None -> None
-            | Some head when ImmutableSet.contains head set -> Some(set, (Seq.tail seq, set))
-            | Some head ->
-                let set = set |> ImmutableSet.add head
-
-                Some
-                    (set,
-                     (Seq.tail seq
-                      |> Seq.append (!head |> BasicBlock.successors),
-                      set)))
-        |> Seq.tryLast
-        |> Option.defaultValue ImmutableSet.empty
+        |> Module.preOrder
+        |> Seq.fold (fun set bb -> set |> ImmutableSet.add bb) ImmutableSet.empty
 
     !irModule
     |> Module.revBasicBlocks
@@ -198,6 +212,7 @@ let private singleInstructionCombine builder value =
     | Ref { Content = UnaryInstruction { Kind = Not
                                          Value = Ref { Content = UnaryInstruction { Kind = Not; Value = passThrough } } } } ->
         value |> Value.replaceWith passThrough
+        true
     | Ref { Content = BinaryInstruction { Kind = Add
                                           Left = Ref { Content = Constant { Value = value1 } }
                                           Right = Ref { Content = BinaryInstruction { Kind = Add
@@ -227,6 +242,7 @@ let private singleInstructionCombine builder value =
         |> Value.replaceOperand oldOp (Builder.createConstant (value1 + value2))
 
         value |> Value.replaceWith first
+        true
     | Ref { Content = BinaryInstruction { Kind = And
                                           Left = Ref { Content = Constant { Value = value1 } }
                                           Right = Ref { Content = BinaryInstruction { Kind = And
@@ -251,6 +267,7 @@ let private singleInstructionCombine builder value =
         |> Value.replaceOperand oldOp (Builder.createConstant (value1 ||| value2))
 
         value |> Value.replaceWith first
+        true
     | Ref { Content = CondBrInstruction { Kind = Zero
                                           Value = Ref { Users = [ _ ]
                                                         Content = BinaryInstruction { Right = Ref { Content = Constant { Value = 0x8000s } }
@@ -271,6 +288,7 @@ let private singleInstructionCombine builder value =
 
         value |> Value.replaceWith newCond
         neg |> Value.destroy
+        true
     | Ref { Content = BinaryInstruction { Kind = Add
                                           Right = op1
                                           Left = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } }
@@ -279,6 +297,8 @@ let private singleInstructionCombine builder value =
                                           Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when op1 = op2 ->
         value
         |> Value.replaceWith (Builder.createConstant 0xFFFFs)
+
+        true
     | Ref { Content = BinaryInstruction { Kind = And
                                           Right = op1
                                           Left = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } }
@@ -287,6 +307,8 @@ let private singleInstructionCombine builder value =
                                           Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when op1 = op2 ->
         value
         |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
     | Ref { Content = BinaryInstruction { Kind = Add
                                           Right = op1
                                           Left = Ref { Content = BinaryInstruction { Kind = Add
@@ -313,7 +335,9 @@ let private singleInstructionCombine builder value =
                                                                                       Right = Ref { Content = Constant { Value = 1s } } } } } } when op1 = op2 ->
         value
         |> Value.replaceWith (Builder.createConstant 0s)
-    | _ -> ()
+
+        true
+    | _ -> false
 
 let jumpThreading irModule =
 
@@ -373,14 +397,14 @@ let jumpThreading irModule =
                     ((!)
                      >> Value.asBasicBlock
                      >> BasicBlock.instructions
-                     >> List.iter (singleInstructionSimplify builder))
+                     >> List.iter (singleInstructionSimplify builder >> ignore))
 
                 newBlock
                 |> Option.iter
                     ((!)
                      >> Value.asBasicBlock
                      >> BasicBlock.instructions
-                     >> List.iter (singleInstructionCombine builder))
+                     >> List.iter (singleInstructionCombine builder >> ignore))
 
                 newBlock |> Option.map (fun x -> (x, pred)))
 
@@ -447,6 +471,7 @@ let jumpThreading irModule =
                     |> Value.replaceOperand blockValue newBlock)
 
                 blockValue |> Value.destroy
+                true
             else
 
             if !blockValue |> BasicBlock.hasSingleSuccessor then
@@ -490,7 +515,7 @@ let jumpThreading irModule =
                     oldValue |> Value.replaceWith phi)
 
                 blockValue |> Value.destroy
-
+                true
             else if shareSingleSuccessor.Force() then
                 // Otherwise we need to create phi nodes that will have the replacements for the escaping values as
                 // incoming values for the new blocks.
@@ -557,26 +582,32 @@ let jumpThreading irModule =
                     oldValue |> Value.replaceWith phi)
 
                 blockValue |> Value.destroy
+                true
             else
                 copies |> List.iter (fst >> Value.destroy)
+                false
         else
             copies |> List.iter (fst >> Value.destroy)
+            false
 
 
     // Only run on basic blocks that have more than one predecessor and contain a phi. Without phis this could only
     // generate more code
-    !irModule
-    |> Module.basicBlocks
-    |> Seq.filter (fun blockValue ->
-        !blockValue
-        |> BasicBlock.predecessors
-        |> List.length > 1
-        && !blockValue
-           |> Value.asBasicBlock
-           |> BasicBlock.phis
-           |> List.isEmpty
-           |> not)
-    |> Seq.iter jumpThreadingBlock
+    while !irModule
+          |> Module.basicBlocks
+          |> Seq.filter (fun blockValue ->
+              !blockValue
+              |> BasicBlock.predecessors
+              |> List.length > 1
+              && !blockValue
+                 |> Value.asBasicBlock
+                 |> BasicBlock.phis
+                 |> List.isEmpty
+                 |> not)
+          |> Seq.map jumpThreadingBlock
+          |> List.ofSeq
+          |> List.exists id do
+        ()
 
     irModule
 
@@ -584,9 +615,11 @@ let instructionCombine (irModule: Module ref) =
 
     let builder = Builder.fromModule irModule
 
-    !irModule
-    |> Module.instructions
-    |> List.iter (singleInstructionCombine builder)
+    while !irModule
+          |> Module.instructions
+          |> List.map (singleInstructionCombine builder)
+          |> List.exists id do
+        ()
 
     irModule
 
@@ -668,7 +701,7 @@ let removeRedundantLoadStores (irModule: Module ref) =
         |> List.iter (snd >> simplifyLoadStoreSeries)
 
     !irModule
-    |> Module.basicBlocks
+    |> Module.revBasicBlocks
     |> List.iter removeRedundantLoadStoresInBlock
 
     irModule
@@ -676,23 +709,22 @@ let removeRedundantLoadStores (irModule: Module ref) =
 let analyzeDominance (irModule: Module ref) =
     let map = Dictionary(HashIdentity.Reference)
 
+    // as seen in https://www.cs.rice.edu/~keith/Embed/dom.pdf
+
     !irModule
     |> Module.basicBlocks
     |> List.map (associateValue None)
     |> List.iter map.Add
 
-    let order = Dictionary(HashIdentity.Reference)
-
-    !irModule
-    |> Module.basicBlocks
-    |> List.indexed
-    |> List.map (fun (y, x) -> (x, y))
-    |> List.iter order.Add
-
     let processBlocks blocks =
-        map.[List.head blocks] <- Some(List.head blocks)
+        map.[Seq.head blocks] <- Some(Seq.head blocks)
 
-        let blocks = List.skip 1 blocks
+        let order =
+            blocks
+            |> Seq.indexed
+            |> Seq.fold (fun map (index, value) -> ImmutableMap.add value index map) ImmutableMap.empty
+
+        let blocks = Seq.skip 1 blocks
 
         let intersect b1 b2 =
             let mutable finger1 = b1
@@ -712,7 +744,7 @@ let analyzeDominance (irModule: Module ref) =
             finger1
 
         while blocks
-              |> List.fold (fun changed node ->
+              |> Seq.fold (fun changed node ->
                   let processedPredecessors =
                       !node
                       |> BasicBlock.predecessors
@@ -736,19 +768,20 @@ let analyzeDominance (irModule: Module ref) =
                      false do
             ()
 
-    !irModule |> Module.basicBlocks |> processBlocks
+    !irModule
+    |> Module.reversePostOrder
+    |> processBlocks
 
     !irModule
-    |> Module.basicBlocks
+    |> Module.revBasicBlocks
     |> List.iter (fun x ->
         let block = Value.asBasicBlock !x
 
+        let iDom = map.[x]
+
         x
         := { !x with
-                 Content =
-                     BasicBlockValue
-                         { block with
-                               ImmediateDominator = map.[x] } })
+                 Content = BasicBlockValue { block with ImmediateDominator = iDom } })
 
     irModule
 
@@ -757,12 +790,12 @@ let analyzeDominanceFrontiers (irModule: Module ref) =
     let map = Dictionary(HashIdentity.Reference)
 
     !irModule
-    |> Module.basicBlocks
-    |> List.map (associateValue (ImmutableHashSet.Create<Value ref>(HashIdentity.Reference)))
+    |> Module.revBasicBlocks
+    |> List.map (associateValue (ImmutableSet.empty))
     |> List.iter map.Add
 
     !irModule
-    |> Module.basicBlocks
+    |> Module.revBasicBlocks
     |> List.choose (fun x ->
         match !x |> BasicBlock.predecessors with
         | []
@@ -781,7 +814,7 @@ let analyzeDominanceFrontiers (irModule: Module ref) =
                 if Some runner = iDom then
                     None
                 else
-                    map.[runner] <- map.[runner].Add(b)
+                    map.[runner] <- map.[runner] |> ImmutableSet.add b
 
                     match !runner
                           |> Value.asBasicBlock
@@ -794,7 +827,7 @@ let analyzeDominanceFrontiers (irModule: Module ref) =
             |> ignore))
 
     !irModule
-    |> Module.basicBlocks
+    |> Module.revBasicBlocks
     |> List.iter (fun x ->
         let block = Value.asBasicBlock !x
 
@@ -1153,7 +1186,7 @@ let analyzeLifetimes irModule =
 let reorderBasicBlocks irModule =
 
     !irModule
-    |> Module.basicBlocks
+    |> Module.revBasicBlocks
     |> List.choose
         ((!)
          >> Value.asBasicBlock
