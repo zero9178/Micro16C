@@ -67,6 +67,25 @@ module Bus =
         | Bus.AC -> "AC"
         | _ -> failwith "Internal Compiler Error: Invalid bus value"
 
+    let toRegister bus =
+        match bus with
+        | Bus.Zero
+        | Bus.One
+        | Bus.NegOne -> None
+        | Bus.PC -> PC |> Some
+        | Bus.R0 -> R0 |> Some
+        | Bus.R1 -> R1 |> Some
+        | Bus.R2 -> R2 |> Some
+        | Bus.R3 -> R3 |> Some
+        | Bus.R4 -> R4 |> Some
+        | Bus.R5 -> R5 |> Some
+        | Bus.R6 -> R6 |> Some
+        | Bus.R7 -> R7 |> Some
+        | Bus.R8 -> R8 |> Some
+        | Bus.R9 -> R9 |> Some
+        | Bus.R10 -> R10 |> Some
+        | Bus.AC -> AC |> Some
+        | _ -> failwith "Internal Compiler Error: Invalid bus value"
 
 module Register =
 

@@ -149,7 +149,7 @@ let legalizeConstants irModule =
 
     irModule
 
-let fixLostCopy irModule =
+let breakPhiCriticalEdges irModule =
 
     !irModule
     |> Module.basicBlocks
@@ -197,77 +197,5 @@ let fixLostCopy irModule =
                 |> Builder.setInsertBlock (Some block)
                 |> Builder.createGoto currBlock
                 |> ignore))
-
-    irModule
-
-let genPhiMoves irModule =
-
-
-    !irModule
-    |> Module.basicBlocks
-    |> List.map (fun x -> (x, !x |> BasicBlock.predecessors))
-    |> List.iter (fun (currBlock, preds) ->
-        preds
-        |> List.iter (fun pred ->
-
-
-            let builder = Builder.fromModule irModule
-
-            let builder =
-                builder
-                |> Builder.setInsertBlock (Some pred)
-                |> Builder.setInsertPoint
-                    (!pred
-                     |> Value.asBasicBlock
-                     |> BasicBlock.terminator
-                     |> Before)
-
-            let startOfMoves = builder |> Builder.afterInstr
-
-            let phis =
-                !currBlock
-                |> Value.asBasicBlock
-                |> BasicBlock.phis
-
-            let createdTemporaries = ref ImmutableMap.empty
-
-            phis
-            |> List.iter (fun phi ->
-                let blockIndex =
-                    !phi
-                    |> Value.operands
-                    |> List.indexed
-                    |> List.findIndex (snd >> (=) pred)
-
-                let operand =
-                    !phi
-                    |> Value.operands
-                    |> List.item (blockIndex - 1)
-
-                let copyOperand, builder =
-                    if phis |> List.contains operand then
-                        match !createdTemporaries
-                              |> ImmutableMap.tryFind operand with
-                        | Some temporary -> (temporary, builder)
-                        | None ->
-                            let currPoint = builder |> Builder.beforeInstr
-
-                            let temp, builder =
-                                builder
-                                |> Builder.setInsertPoint startOfMoves
-                                |> Builder.createCopy operand
-
-                            createdTemporaries
-                            := !createdTemporaries
-                               |> ImmutableMap.add operand temp
-
-                            (temp, builder |> Builder.setInsertPoint currPoint)
-                    else
-                        (operand, builder)
-
-                let copy =
-                    builder |> Builder.createCopy copyOperand |> fst
-
-                phi |> Value.setOperand (blockIndex - 1) copy)))
 
     irModule

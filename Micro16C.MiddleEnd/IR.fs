@@ -7,7 +7,6 @@ open Micro16C.MiddleEnd.Util
 let (|Ref|) (ref: 'T ref) = ref.Value
 
 type Register =
-    | PC
     | R0
     | R1
     | R2
@@ -20,6 +19,7 @@ type Register =
     | R9
     | R10
     | AC
+    | PC
 
     member this.asString =
         match this with
@@ -76,7 +76,6 @@ and ValueContent =
     | PhiInstruction of PhiInstruction
     | BasicBlockValue of BasicBlock
     | Undef
-    | CopyInstruction of CopyInstruction
 
 and Constant = { Value: int16 }
 
@@ -120,11 +119,10 @@ and PhiInstruction =
     { Incoming: (Value ref * Value ref) list
       ValuesMemory: ImmutableMap<Value ref, Value ref> }
 
-and CopyInstruction = { Source: Value ref }
-
 and BasicBlock =
     { Instructions: Value ref list
       ImmediateDominator: Value ref option
+      ImmediatelyDominates: Value ref list
       DominanceFrontier: Value ref list option
       ParentModule: Module ref
       LiveIn: ImmutableSet<Value ref>
@@ -236,9 +234,6 @@ and Module =
                      | { Content = LoadInstruction load } ->
                          text
                          + sprintf "\t%s = load %s\n" (getName instruction) (getName load.Source)
-                     | { Content = CopyInstruction move } ->
-                         text
-                         + sprintf "\t%s = copy %s\n" (getName instruction) (getName move.Source)
                      | { Content = CondBrInstruction cr } ->
 
                          let opName =
@@ -273,6 +268,7 @@ module internal BasicBlockInternal =
     let createDefault parent =
         { Instructions = []
           ImmediateDominator = None
+          ImmediatelyDominates = []
           DominanceFrontier = None
           ParentModule = parent
           LiveIn = ImmutableSet.empty
@@ -348,7 +344,6 @@ module Value =
         | BinaryInstruction _
         | UnaryInstruction _
         | LoadInstruction _
-        | CopyInstruction _
         | PhiInstruction _ -> true
         | _ -> false
 
@@ -462,7 +457,6 @@ module Value =
         | BinaryInstruction { Left = lhs; Right = rhs } -> [ lhs; rhs ]
         | GotoInstruction { BasicBlock = value }
         | UnaryInstruction { Value = value }
-        | CopyInstruction { Source = value }
         | LoadInstruction { Source = value } -> [ value ]
         | StoreInstruction { Value = value
                              Destination = destination } -> [ destination; value ]
@@ -481,7 +475,6 @@ module Value =
         | (_, AllocationInstruction _) -> failwith "Internal Compiler Error: Invalid Operand Index"
         | (i, UnaryInstruction _)
         | (i, GotoInstruction _)
-        | (i, CopyInstruction _)
         | (i, LoadInstruction _) when i >= 1 -> failwith "Internal Compiler Error: Invalid Operand Index"
         | (i, BinaryInstruction _)
         | (i, StoreInstruction _) when i >= 2 -> failwith "Internal Compiler Error: Invalid Operand Index"
@@ -524,12 +517,6 @@ module Value =
             value
             := { !value with
                      Content = LoadInstruction { instr with Source = operand } }
-        | (0, CopyInstruction instr) ->
-            changeUser instr.Source operand value
-
-            value
-            := { !value with
-                     Content = CopyInstruction { instr with Source = operand } }
         | (0, BinaryInstruction instr) ->
             changeUser instr.Left operand value
 
@@ -689,6 +676,8 @@ module BasicBlock =
     let liveIn block = block.LiveIn
 
     let liveOut block = block.LiveOut
+
+    let immediatelyDominates block = block.ImmediatelyDominates
 
     let tryTerminator =
         revInstructions
@@ -1097,20 +1086,6 @@ module Builder =
 
     let createLoad = createNamedLoad ""
 
-    let createNamedCopy name value builder =
-
-        let copy =
-            ref
-                { Value.Default with
-                      Name = name
-                      Content = CopyInstruction { Source = value } }
-
-        value |> Value.addUser copy
-
-        builder |> addValue copy
-
-    let createCopy = createNamedCopy ""
-
     let createStore destination value builder =
 
         let store =
@@ -1202,9 +1177,6 @@ module Builder =
             | UnaryInstruction { Kind = kind } ->
                 assert (operands |> List.length = 1)
                 builder |> createUnary kind operands.[0]
-            | CopyInstruction _ ->
-                assert (operands |> List.length = 1)
-                builder |> createCopy operands.[0]
             | LoadInstruction _ ->
                 assert (operands |> List.length = 1)
                 builder |> createLoad operands.[0]

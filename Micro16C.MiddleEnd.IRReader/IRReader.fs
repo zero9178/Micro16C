@@ -134,7 +134,6 @@ type private Instruction =
     | Shl of Value * Operand
     | Shr of Value * Operand
     | Load of Value * Operand
-    | Copy of Value * Operand
     | BrNeg of Operand * Value * Value
     | BrZero of Operand * Value * Value
     | Store of Operand * Operand
@@ -222,10 +221,6 @@ let private parseBasicBlock tokens =
                 let op, tokens = parseOperand tokens
                 let result, tokens = parseInstruction tokens
                 (Load(value, op) :: result, tokens)
-            | Identifier "copy" :: tokens ->
-                let op, tokens = parseOperand tokens
-                let result, tokens = parseInstruction tokens
-                (Copy(value, op) :: result, tokens)
             | Identifier "phi" :: tokens ->
                 let _, tokens = require OpenParentheses tokens
                 let fstOp, tokens = parseOperand tokens
@@ -484,14 +479,6 @@ let fromString text: Module ref =
 
                 let map = assignOperand load 0 operand map
                 defineValue value load map
-            | Copy (value, operand) ->
-                let copy =
-                    builder
-                    |> Builder.createNamedCopy (valueToName value) Value.UndefValue
-                    |> fst
-
-                let map = assignOperand copy 0 operand map
-                defineValue value copy map
             | BrZero (cond, trueBranch, falseBranch)
             | BrNeg (cond, trueBranch, falseBranch) ->
                 let kind =

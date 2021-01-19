@@ -1,30 +1,224 @@
 module Micro16C.Backend.GenAssembly
 
 open System
-open System.Collections.Generic
 open Micro16C.Backend.Assembly
 open Micro16C.MiddleEnd.IR
+open Micro16C.MiddleEnd.Util
 
+let private operandToBus operand =
+    match !operand with
+    | { Content = Constant { Value = 0s } } -> Bus.Zero |> Some
+    | { Content = Constant { Value = 1s } } -> Bus.One |> Some
+    | { Content = Constant { Value = -1s } } -> Bus.NegOne |> Some
+    | { Content = Register reg } -> Register.toBus reg |> Some
+    | _ ->
+        !operand
+        |> Value.register
+        |> Option.map Register.toBus
 
+let private prependOperation operation list =
+    match (operation, list) with
+    | { Shifter = Some Shifter.Left
+        ALU = Some ALU.ABus
+        SBus = Some result
+        ABus = Some aBus
+        AMux = Some AMux.ABus } as op1,
+      Operation ({ Shifter = Some Shifter.Left
+                   ALU = Some ALU.ABus
+                   SBus = Some sBus
+                   ABus = Some input
+                   BBus = None
+                   AMux = Some AMux.ABus
+                   Condition = None } as op2) :: rest when sBus = aBus
+                                                           && Operation.canCombine
+                                                               { op1 with
+                                                                     Shifter = None
+                                                                     ALU = None
+                                                                     ABus = None
+                                                                     SBus = None
+                                                                     AMux = None }
+                                                                  { op2 with
+                                                                        Shifter = None
+                                                                        ALU = None
+                                                                        ABus = None
+                                                                        SBus = None
+                                                                        AMux = None } ->
+        let op =
+            Operation.combine
+                { op1 with
+                      Shifter = None
+                      ALU = None
+                      ABus = None
+                      SBus = None }
+                { op2 with
+                      Shifter = None
+                      ALU = None
+                      ABus = None
+                      SBus = None }
+
+        Operation
+            { op with
+                  Shifter = Some Shifter.Left
+                  AMux = Some AMux.ABus
+                  ABus = Some input
+                  BBus = Some input
+                  ALU = Some ALU.Add
+                  SBus = Some result }
+        :: rest
+    | op1, Operation op2 :: list when Operation.canCombine op1 op2 -> Operation(Operation.combine op1 op2) :: list
+    | operation, list -> (Operation operation) :: list
+
+let private prependMove fromReg toReg list =
+    if fromReg = toReg then
+        list
+    else
+        prependOperation
+            { Operation.Default with
+                  SBus = toReg |> Some
+                  ABus = fromReg |> Some
+                  AMux = Some AMux.ABus
+                  ALU = Some ALU.ABus
+                  Shifter = Some Shifter.Noop }
+            list
+
+let private genPhiMoves block list =
+
+    // Following assumptions need to be true here:
+    // Any block whose successor(s) contain a phi ends with an unconditional branch.
+    // Therefore any such block also only has a single successor. If it does not have a single successor,
+    // the successor definitely does not contain phis. This facts is guaranteed by the breakPhiCriticalEdges pass
+    // run shortly before register allocation passes
+
+    !block
+    |> BasicBlock.successors
+    |> Seq.tryExactlyOne
+    |> Option.map ((!) >> Value.asBasicBlock >> BasicBlock.phis)
+    |> Option.map (fun phis ->
+        let transfers =
+            phis
+            |> Seq.fold (fun list phi ->
+                match !phi
+                      |> Value.operands
+                      |> Seq.pairwise
+                      |> Seq.find (snd >> (=) block)
+                      |> fst with
+                | Ref { Content = Undef } -> list
+                | source ->
+                    (source |> operandToBus |> Option.get, phi |> operandToBus |> Option.get)
+                    :: list) []
+
+        let assigned = Array.create 13 false
+
+        !block
+        |> Value.asBasicBlock
+        |> BasicBlock.liveOut
+        |> Seq.map
+            ((!)
+             >> Value.register
+             >> Option.get
+             >> RegisterAllocator.registerToIndex)
+        |> Seq.iter (fun i -> Array.set assigned i true)
+
+        let notZeroOutDegrees =
+            transfers
+            |> Seq.filter (fun (x, y) -> x <> y)
+            |> Seq.countBy fst
+            |> Seq.map fst
+            |> Set
+
+        let mutable remapped = Map.empty
+
+        let transfers, list =
+            transfers
+            |> List.fold (fun (transfers, list) (fromReg, toReg) ->
+                if toReg = fromReg
+                   || notZeroOutDegrees |> Set.contains toReg then
+                    ((remapped
+                      |> Map.tryFind fromReg
+                      |> Option.defaultValue fromReg,
+                      toReg)
+                     :: transfers,
+                     list)
+                else
+                    let list = list |> prependMove fromReg toReg
+
+                    remapped <- remapped |> Map.add fromReg toReg
+
+                    fromReg
+                    |> Bus.toRegister
+                    |> Option.iter (fun reg -> Array.set assigned (reg |> RegisterAllocator.registerToIndex) false)
+
+                    let transfers =
+                        transfers
+                        |> List.map (fun (a, b) -> if a = fromReg then (toReg, b) else (a, b))
+
+                    (transfers, list)) ([], list)
+
+        let maps =
+            transfers
+            |> List.filter (fun (x, y) -> x <> y)
+            |> List.map (fun (x, y) -> (y, x))
+            |> Map
+
+        let temp =
+            lazy
+                (match assigned |> Array.tryFindIndex not with
+                 | None ->
+                     failwith "Too much register pressure to implement phi operation. Spilling is not yet implemented"
+                 | Some i ->
+                     Array.set assigned i true
+
+                     i
+                     |> RegisterAllocator.indexToRegister
+                     |> Register.toBus)
+
+        Seq.unfold (fun (maps, list) ->
+            if maps |> Map.isEmpty then
+                None
+            else
+                let brokenOpen = maps |> Seq.head
+                let maps = maps |> Map.remove brokenOpen.Key
+
+                let maps, list =
+                    Seq.unfold (fun (current, toReg, maps, list) ->
+                        match current with
+                        | None -> None
+                        | Some current ->
+                            let list = prependMove current toReg list
+
+                            match maps |> Map.tryFind current with
+                            | None -> Some((maps, list), (None, current, maps, list))
+                            | Some next ->
+                                let maps = maps |> Map.remove current
+                                Some((maps, list), (Some next, current, maps, list)))
+                        (Some brokenOpen.Value, temp.Force(), maps, list)
+                    |> Seq.last
+
+                let list =
+                    prependMove (temp.Force()) brokenOpen.Key list
+
+                Some(list, (maps, list))) (maps, list)
+        |> Seq.tryLast
+        |> Option.defaultValue list)
+    |> Option.defaultValue list
 
 let genAssembly irModule: AssemblyLine list =
 
     let mutable counter = 0
 
-    let mutable seenValues =
-        Dictionary<Value, string>(HashIdentity.Reference)
+    let mutable seenValues = ImmutableMap.empty
 
     let seenNames = ref Set.empty
 
     let getName (value: Value ref) =
-        match seenValues.TryGetValue !value with
-        | (true, name) -> name
-        | (false, _) ->
+        match seenValues |> ImmutableMap.tryFind value with
+        | Some name -> name
+        | None ->
             match !value |> Value.name with
             | "" ->
                 counter <- counter + 1
                 let name = (counter - 1) |> string
-                seenValues.Add(!value, name)
+                seenValues <- seenValues |> ImmutableMap.add value name
                 name
             | _ ->
                 let rec uniqueName name =
@@ -54,74 +248,11 @@ let genAssembly irModule: AssemblyLine list =
 
                             uniqueName (name + (newInt |> string))
                     else
-                        seenValues.Add(!value, name)
+                        seenValues <- seenValues |> ImmutableMap.add value name
                         seenNames := Set.add name !seenNames
                         name
 
                 uniqueName (!value |> Value.name)
-
-    let operandToBus operand =
-        match !operand with
-        | { Content = Constant { Value = 0s } } -> Bus.Zero |> Some
-        | { Content = Constant { Value = 1s } } -> Bus.One |> Some
-        | { Content = Constant { Value = -1s } } -> Bus.NegOne |> Some
-        | { Content = Register reg } -> Register.toBus reg |> Some
-        | _ ->
-            !operand
-            |> Value.register
-            |> Option.map Register.toBus
-
-    let prependOperation operation list =
-        match (operation, list) with
-        | { Shifter = Some Shifter.Left
-            ALU = Some ALU.ABus
-            SBus = Some result
-            ABus = Some aBus
-            AMux = Some AMux.ABus } as op1,
-          Operation ({ Shifter = Some Shifter.Left
-                       ALU = Some ALU.ABus
-                       SBus = Some sBus
-                       ABus = Some input
-                       BBus = None
-                       AMux = Some AMux.ABus
-                       Condition = None } as op2) :: rest when sBus = aBus
-                                                               && Operation.canCombine
-                                                                   { op1 with
-                                                                         Shifter = None
-                                                                         ALU = None
-                                                                         ABus = None
-                                                                         SBus = None
-                                                                         AMux = None }
-                                                                      { op2 with
-                                                                            Shifter = None
-                                                                            ALU = None
-                                                                            ABus = None
-                                                                            SBus = None
-                                                                            AMux = None } ->
-            let op =
-                Operation.combine
-                    { op1 with
-                          Shifter = None
-                          ALU = None
-                          ABus = None
-                          SBus = None }
-                    { op2 with
-                          Shifter = None
-                          ALU = None
-                          ABus = None
-                          SBus = None }
-
-            Operation
-                { op with
-                      Shifter = Some Shifter.Left
-                      AMux = Some AMux.ABus
-                      ABus = Some input
-                      BBus = Some input
-                      ALU = Some ALU.Add
-                      SBus = Some result }
-            :: rest
-        | op1, Operation op2 :: list when Operation.canCombine op1 op2 -> Operation(Operation.combine op1 op2) :: list
-        | operation, list -> (Operation operation) :: list
 
     let basicBlocks =
         !irModule |> Module.basicBlocks |> Array.ofList
@@ -137,22 +268,13 @@ let genAssembly irModule: AssemblyLine list =
         |> BasicBlock.instructions
         |> List.fold (fun list instr ->
 
+            let list =
+                if Value.isTerminating !instr
+                then genPhiMoves (!instr |> Value.parentBlock |> Option.get) list
+                else list
+
             match !instr with
-            | { Content = CopyInstruction { Source = op }
-                Users = [ Ref { Content = PhiInstruction _ } as phi ] } ->
-                if operandToBus phi = operandToBus op then
-                    list
-                else
-                    prependOperation
-                        { Operation.Default with
-                              SBus = operandToBus phi
-                              ABus = operandToBus op
-                              AMux = Some AMux.ABus
-                              ALU = Some ALU.ABus
-                              Shifter = Some Shifter.Noop }
-                        list
-            | { Content = LoadInstruction { Source = Ref { Content = Register _ } as op } }
-            | { Content = CopyInstruction { Source = op } } ->
+            | { Content = LoadInstruction { Source = Ref { Content = Register _ } as op } } ->
                 if operandToBus instr = operandToBus op then
                     list
                 else

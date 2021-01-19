@@ -43,12 +43,11 @@ let compile text =
     |> Result.map Passes.removeRedundantLoadStores
     |> Result.map (debugModulePasses "End of optimizations:")
     |> Result.map Legalize.legalizeConstants
-    |> Result.map Legalize.fixLostCopy
-    |> Result.map Legalize.genPhiMoves
-    |> Result.map Passes.numberInstr
+    |> Result.map Legalize.breakPhiCriticalEdges
     |> Result.map Passes.reorderBasicBlocks
     |> Result.map (debugModulePasses "End of IR:")
-    |> Result.map Passes.analyzeLifetimes
+    |> Result.map Passes.analyzeDominance
+    |> Result.map Passes.analyzeLiveness
     |> Result.map RegisterAllocator.allocateRegisters
     |> Result.map GenAssembly.genAssembly
     |> Result.map GenAssembly.removeRedundantLabels

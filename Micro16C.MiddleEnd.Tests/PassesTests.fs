@@ -35,7 +35,6 @@ let private structurallyEquivalentToImpl string irModule =
         | { Content = LoadInstruction _ }, { Content = LoadInstruction _ } -> true
         | { Content = StoreInstruction _ }, { Content = StoreInstruction _ } -> true
         | { Content = GotoInstruction _ }, { Content = GotoInstruction _ } -> true
-        | { Content = CopyInstruction _ }, { Content = CopyInstruction _ } -> true
         | { Content = BasicBlockValue _ }, { Content = BasicBlockValue _ } -> true
         | _ -> false
 
@@ -836,7 +835,7 @@ let ``Remove unreachable blocks`` () =
     """)
 
 [<Fact>]
-let ``Lifeness analysis`` () =
+let ``Liveness analysis`` () =
 
     let result =
         Map
@@ -851,22 +850,22 @@ let ``Lifeness analysis`` () =
     let map =
         """
     %cond.copy:
-            %n0 = copy 0
-            %n1 = copy 0
+            %n0 = load 0
+            %n1 = load 0
             goto %isLess
 
     %isLess:
             %n4 = phi (%n0,%cond.copy) (%n2,%n3)
             %n6 = phi (%n1,%cond.copy) (%n5,%n3)
-            %n7 = copy %n4
-            %n8 = copy %n6
-            %n9 = copy 1
+            %n7 = load %n4
+            %n8 = load %n6
+            %n9 = load 1
             goto %boolCont
 
     %isZero:
-            %n10 = copy %n11
-            %n12 = copy %n13
-            %n14 = copy 0
+            %n10 = load %n11
+            %n12 = load %n13
+            %n14 = load 0
             goto %boolCont
 
     %boolCont:
@@ -885,15 +884,15 @@ let ``Lifeness analysis`` () =
             br %21 < 0 %n3 %isZero
 
     %n3:
-            %n2 = copy %n11
-            %n5 = copy %n13
+            %n2 = load %n11
+            %n5 = load %n13
             goto %isLess
 
     %ForContinue:
             store %n16 -> R1
         """
         |> IRReader.fromString
-        |> Passes.analyzeLifeness
+        |> Passes.analyzeLiveness
         |> (!)
         |> Module.revBasicBlocks
         |> Seq.map (fun x ->

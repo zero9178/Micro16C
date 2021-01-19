@@ -88,8 +88,8 @@ let ``Assembly folding`` () =
         %2 = shl %1
         """
         |> IRReader.fromString
-        |> Passes.numberInstr
-        |> Passes.analyzeLifetimes
+        |> Passes.analyzeLiveness
+        |> Passes.analyzeDominance
         |> RegisterAllocator.allocateRegisters
         |> GenAssembly.genAssembly
 
@@ -121,8 +121,8 @@ let ``Assembly folding`` () =
         store 1 -> R2
         """
         |> IRReader.fromString
-        |> Passes.numberInstr
-        |> Passes.analyzeLifetimes
+        |> Passes.analyzeLiveness
+        |> Passes.analyzeDominance
         |> RegisterAllocator.allocateRegisters
         |> GenAssembly.genAssembly
 
