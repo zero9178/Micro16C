@@ -962,8 +962,6 @@ type private LifeRange =
     | Done of int * int
     | NotDone of int * int
 
-type private LifetimesDictionary = ImmutableDictionary<Value ref, LifeRange list>
-
 let private distinctIntervals =
     List.sort
     >> List.fold (fun result (start, endV) ->
@@ -980,8 +978,7 @@ let private tryMaxBy p list =
 
 let analyzeLifetimes irModule =
 
-    let map =
-        ref (LifetimesDictionary.Empty.WithComparers HashIdentity.Reference)
+    let map = ref ImmutableMap.empty
 
     let analyzeLifetimesInBlock (block, prev) =
 

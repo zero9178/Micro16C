@@ -229,8 +229,7 @@ let genPhiMoves irModule =
                 |> Value.asBasicBlock
                 |> BasicBlock.phis
 
-            let createdTemporaries =
-                ref (ImmutableDictionary.Create<Value ref, Value ref>(HashIdentity.Reference))
+            let createdTemporaries = ref ImmutableMap.empty
 
             phis
             |> List.iter (fun phi ->

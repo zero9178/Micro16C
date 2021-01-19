@@ -2,7 +2,6 @@ module Micro16C.MiddleEnd.IR
 
 open System
 open System.Collections.Generic
-open System.Collections.Immutable
 open Micro16C.MiddleEnd.Util
 
 let (|Ref|) (ref: 'T ref) = ref.Value
@@ -119,7 +118,7 @@ and CondBrInstruction =
 
 and PhiInstruction =
     { Incoming: (Value ref * Value ref) list
-      ValuesMemory: ImmutableDictionary<Value ref, Value ref> }
+      ValuesMemory: ImmutableMap<Value ref, Value ref> }
 
 and CopyInstruction = { Source: Value ref }
 
@@ -811,7 +810,7 @@ type Builder =
         { InsertBlock: Value ref option
           InsertIndex: int
           Module: Module ref
-          NotYetInserted: ImmutableDictionary<Value ref, InsertPoint> }
+          NotYetInserted: ImmutableMap<Value ref, InsertPoint> }
 
 
 

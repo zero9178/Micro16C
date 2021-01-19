@@ -5,29 +5,109 @@ open System.Collections.Generic
 open System.Collections
 open System.Collections.Immutable
 
-[<RequireQualifiedAccess>]
-module ImmutableMap =
+type ImmutableMap<'Key, 'Value when 'Key: not struct>(map: ImmutableDictionary<'Key, 'Value>) =
 
-    let ofList (list: ('Key * 'Value) list): ImmutableDictionary<'Key, 'Value> =
-        ImmutableDictionary.CreateRange<'Key, 'Value>(HashIdentity.Reference, list |> List.map (KeyValuePair))
+    member this.Dictionary =
+        map.WithComparers(HashIdentity.Reference)
 
-    let ofSeq (seq: seq<('Key * 'Value)>): ImmutableDictionary<'Key, 'Value> =
-        ImmutableDictionary.CreateRange<'Key, 'Value>(HashIdentity.Reference, seq |> Seq.map (KeyValuePair))
+    new(seq: seq<'Key * 'Value>) =
+        ImmutableMap(ImmutableDictionary.CreateRange(HashIdentity.Reference, seq |> Seq.map KeyValuePair))
 
-    let empty<'Key, 'Value when 'Key: not struct> =
-        ImmutableDictionary<'Key, 'Value>
-            .Empty.WithComparers(HashIdentity.Reference)
+    member this.Add(key, value) =
+        this.Dictionary.SetItem(key, value)
+        |> ImmutableMap
 
-    let tryFind value (map: ImmutableDictionary<_, _>) =
-        match map.TryGetValue value with
+    member this.Change(key, f) =
+        match this.Dictionary.TryGetValue key with
+        | (false, _) ->
+            f None
+            |> Option.map (fun x -> this.Add(key, x))
+            |> Option.defaultValue this
+        | (true, value) ->
+            value
+            |> Some
+            |> f
+            |> Option.map (fun x -> this.Add(key, x))
+            |> Option.defaultValue this
+
+    member this.ContainsKey key = this.Dictionary.ContainsKey key
+
+    member this.Count = this.Dictionary.Count
+
+    member this.IsEmpty = this.Dictionary.IsEmpty
+
+    member this.Remove key =
+        this.Dictionary.Remove key |> ImmutableMap
+
+    member this.TryFind key =
+        match this.Dictionary.TryGetValue key with
         | (false, _) -> None
         | (true, value) -> Some value
 
-    let find value (map: ImmutableDictionary<_, _>) = tryFind value map |> Option.get
+    member this.TryGetValue(key, value: byref<'Value>) =
+        match this.TryFind key with
+        | None -> false
+        | Some res ->
+            value <- res
+            true
 
-    let inline add key value (map: ImmutableDictionary<_, _>) = map.SetItem(key, value)
+    member this.Item
+        with get key = this.Dictionary.[key]
 
-    let inline map f (map: ImmutableDictionary<_, _>) =
+    interface IEnumerable<KeyValuePair<'Key, 'Value>> with
+        member this.GetEnumerator() =
+            this.Dictionary.GetEnumerator() :> IEnumerator<KeyValuePair<'Key, 'Value>>
+
+        member this.GetEnumerator() =
+            this.Dictionary.GetEnumerator() :> IEnumerator
+
+    interface IReadOnlyCollection<KeyValuePair<'Key, 'Value>> with
+        member this.Count = this.Count
+
+    interface IReadOnlyDictionary<'Key, 'Value> with
+
+        member this.ContainsKey key = this.ContainsKey key
+
+        member this.TryGetValue(key, value) = this.TryGetValue(key, &value)
+
+        member this.Item
+            with get key = this.[key]
+
+        member this.Keys = this.Dictionary.Keys
+
+        member this.Values = this.Dictionary.Values
+
+    interface IEquatable<ImmutableMap<'Key, 'Value>> with
+        member this.Equals other = Seq.exists2 (<>) this other |> not
+
+    override this.Equals other =
+        if other.GetType() <> this.GetType() then
+            false
+        else
+            (this :> IEquatable<ImmutableMap<'Key, 'Value>>)
+                .Equals(other :?> ImmutableMap<'Key, 'Value>)
+
+    override this.GetHashCode() =
+        this
+        |> Seq.map (fun x -> x.GetHashCode())
+        |> Seq.reduce (^^^)
+
+[<RequireQualifiedAccess>]
+module ImmutableMap =
+
+    let ofList (list: ('Key * 'Value) list) = ImmutableMap(list)
+
+    let ofSeq (seq: seq<('Key * 'Value)>) = ImmutableMap(seq)
+
+    let empty<'Key, 'Value when 'Key: not struct> = ImmutableMap<'Key, 'Value>(Seq.empty)
+
+    let tryFind value (map: ImmutableMap<_, _>) = map.TryFind value
+
+    let find value (map: ImmutableMap<_, _>) = tryFind value map |> Option.get
+
+    let inline add key value (map: ImmutableMap<_, _>) = map.Add(key, value)
+
+    let inline map f (map: ImmutableMap<_, _>) =
         map
         |> Seq.map (fun kv -> kv.Deconstruct() ||> f)
         |> ofSeq
@@ -35,15 +115,15 @@ module ImmutableMap =
     let iter f =
         Seq.iter (fun (kv: KeyValuePair<_, _>) -> kv.Deconstruct() ||> f)
 
-    let isEmpty (map: ImmutableDictionary<_, _>) = map.IsEmpty
+    let isEmpty (map: ImmutableMap<_, _>) = map.IsEmpty
 
     let filter p =
-        Seq.filter (fun (kv: KeyValuePair<_, _>) -> kv.Deconstruct() ||> p)
-        >> (fun x -> ImmutableDictionary.CreateRange(HashIdentity.Reference, x))
+        Seq.choose (fun (kv: KeyValuePair<_, _>) -> kv.Deconstruct() |> Some |> Option.filter p)
+        >> ImmutableMap
 
-    let remove key (map: ImmutableDictionary<_, _>) = map.Remove key
+    let remove key (map: ImmutableMap<_, _>) = map.Remove key
 
-    let contains key (map: ImmutableDictionary<_, _>) = map.ContainsKey key
+    let contains key (map: ImmutableMap<_, _>) = map.ContainsKey key
 
 type ImmutableSet<'Key when 'Key: equality and 'Key: not struct>(set: ImmutableHashSet<'Key>) =
 
@@ -93,8 +173,11 @@ type ImmutableSet<'Key when 'Key: equality and 'Key: not struct>(set: ImmutableH
             (this :> IReadOnlySet<'Key>).SetEquals other
 
     override this.Equals other =
-        (this :> IEquatable<ImmutableSet<'Key>>)
-            .Equals(other :?> ImmutableSet<'Key>)
+        if other.GetType() <> this.GetType() then
+            false
+        else
+            (this :> IEquatable<ImmutableSet<'Key>>)
+                .Equals(other :?> ImmutableSet<'Key>)
 
     override this.GetHashCode(): int =
         this.HashSet
