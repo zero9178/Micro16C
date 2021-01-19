@@ -36,31 +36,28 @@ occur at start or end of the C program if possible.
 The above currently compiles to following Assembly:
 
 ```
-R2 <- R0
+R2 <- R1
+R1 <- R0
+R0 <- R2
 :doWhileBody
-(R1); if N goto .modNeg
-R0 <- R1
+(R0); if N goto .modNeg
 goto .cont
 :modNeg
-R3 <- ~R1
-R3 <- 1 + R3
-R0 <- R3
+R0 <- ~R0
+R0 <- 1 + R0
 :cont
-R3 <- ~R2
-R3 <- 1 + R3
-R4 <- R0
+R2 <- ~R1
+R2 <- 1 + R2
 :modBody
-R5 <- R3 + R4
-(R5); if N goto .modEnd
-R4 <- R5
-goto .modBody
+R3 <- R2 + R0; if N goto .modEnd
+R0 <- R3; goto .modBody
 :modEnd
-(R4); if Z goto .doWhileContinue
-R3 <- R2
-R1 <- R3
-R2 <- R4
-goto .doWhileBody
+(R0); if Z goto .doWhileContinue
+R2 <- R1
+R1 <- R0
+R0 <- R2; goto .doWhileBody
 :doWhileContinue
+R2 <- R1
 ```
 
 Memory access can be simply done through pointers:

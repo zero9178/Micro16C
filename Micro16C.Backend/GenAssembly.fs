@@ -65,6 +65,34 @@ let private prependOperation operation list =
                   ALU = Some ALU.Add
                   SBus = Some result }
         :: rest
+    | { ALU = Some ALU.ABus
+        ABus = Some aBus
+        AMux = Some AMux.ABus
+        SBus = None
+        Condition = Some _ } as op1,
+      Operation ({ Shifter = (None
+                   | Some Shifter.Noop)
+                   SBus = Some sBus } as op2) :: rest when aBus = sBus
+                                                           && Operation.canCombine
+                                                               { op1 with ALU = None; ABus = None }
+                                                                  op2 ->
+        let op =
+            Operation.combine { op1 with ALU = None; ABus = None } op2
+
+        Operation(op) :: rest
+    | { ALU = Some ALU.ABus
+        AMux = Some AMux.MBR
+        SBus = None
+        Condition = Some _ } as op1,
+      Operation ({ Shifter = (None
+                   | Some Shifter.Noop)
+                   MBRWrite = Some true } as op2) :: rest when Operation.canCombine
+                                                                   { op1 with ALU = None; ABus = None }
+                                                                   op2 ->
+        let op =
+            Operation.combine { op1 with ALU = None; ABus = None } op2
+
+        Operation(op) :: rest
     | op1, Operation op2 :: list when Operation.canCombine op1 op2 -> Operation(Operation.combine op1 op2) :: list
     | operation, list -> (Operation operation) :: list
 
@@ -275,30 +303,10 @@ let genAssembly irModule: AssemblyLine list =
 
             match !instr with
             | { Content = LoadInstruction { Source = Ref { Content = Register _ } as op } } ->
-                if operandToBus instr = operandToBus op then
-                    list
-                else
-                    prependOperation
-                        { Operation.Default with
-                              SBus = operandToBus instr
-                              ABus = operandToBus op
-                              AMux = Some AMux.ABus
-                              ALU = Some ALU.ABus
-                              Shifter = Some Shifter.Noop }
-                        list
+                prependMove (operandToBus op |> Option.get) (operandToBus instr |> Option.get) list
             | { Content = StoreInstruction { Destination = Ref { Content = Register _ } as instr
                                              Value = op } } ->
-                if operandToBus instr = operandToBus op then
-                    list
-                else
-                    prependOperation
-                        { Operation.Default with
-                              SBus = operandToBus instr
-                              ABus = operandToBus op
-                              AMux = Some AMux.ABus
-                              ALU = Some ALU.ABus
-                              Shifter = Some Shifter.Noop }
-                        list
+                prependMove (operandToBus op |> Option.get) (operandToBus instr |> Option.get) list
             | { Content = BinaryInstruction { Left = lhs; Right = rhs; Kind = kind } } ->
                 prependOperation
                     { Operation.Default with
