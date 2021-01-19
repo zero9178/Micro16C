@@ -6,9 +6,9 @@ instructions and capability can be viewed
 here https://vowi.fsinf.at/wiki/TU_Wien:Technische_Grundlagen_der_Informatik_VU_(Kastner)/Kapitel_Micro16 (German)
 
 Due to these limitations a fully C compliant compiler is impossible. The main reason is the lack of indirect addressing
-therefore making recursion impossible.
+therefore making non tail recursion impossible.
 
-For that reason there is also no concept of functions; Everything is written in "global scope". The smallest addressable
+For that reason there is currently no concept of functions; Everything is written in "global scope". The smallest addressable
 storage unit is 16 bit. Due to the lack of a carry over flag, the only integer type is `int` which is 16 bit. Besides
 integer types, pointer types exist and can be created recursively.
 
@@ -30,7 +30,7 @@ R2 = r1;
 
 Due to the common need to accept input in specific registers and outputting them to others, the Keywords R0 to R10, AC
 and PC exist which can be used to read and write to these registers. One thing to keep in mind however that this usage
-is **NOT** visiblie to the Register Allocator, besides attempting to optimize redundant moves. Therefore they shall only
+is currently **NOT** visible to the Register Allocator, besides attempting to optimize redundant moves. Therefore they shall only
 occur at start or end of the C program if possible.
 
 The above currently compiles to following Assembly:
@@ -76,10 +76,10 @@ want it written to a file writing `Micro16C filename.c > output.asm` ought to wo
 
 ## Implementation
 
-The whole compiler is written form scratch in F#. It starts at the frontend that first runs a lexer over the string
+The whole compiler is written from scratch in F#. It starts at the frontend that first runs a lexer over the string
 input, parse the token stream, checks for semantic correctness and then generates IR code. The implemented IR is very
 similar to LLVM and in SSA form. Almost all optimizations and code transformations are done in IR and at the very end
-compiled to assembly. To compile to assembly register allocation is done using a linear scan register allocator
+compiled to assembly. To compile to assembly register allocation is done using graph coloruing
 
 The IR of the Euclid program above serialized as text is:
 
