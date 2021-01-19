@@ -686,6 +686,10 @@ module BasicBlock =
 
     let dominanceFrontier = BasicBlockInternal.dominanceFrontier
 
+    let liveIn block = block.LiveIn
+
+    let liveOut block = block.LiveOut
+
     let tryTerminator =
         revInstructions
         >> List.tryHead
