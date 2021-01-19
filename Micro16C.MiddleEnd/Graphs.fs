@@ -49,3 +49,69 @@ let reversePostOrder successorsFunc root =
     postOrder successorsFunc root
     |> Seq.rev
     |> Seq.cache
+
+let singleForwardAnalysis transform join predecessorsFun successorsFunc root =
+    let mutable outs = ImmutableMap.empty
+
+    let seq =
+        reversePostOrder successorsFunc root |> Seq.cache
+
+    Seq.initInfinite (fun _ ->
+        Seq.fold (fun changes b ->
+
+            let inValue =
+                b
+                |> predecessorsFun
+                |> Seq.map (fun x -> (x, outs |> ImmutableMap.tryFind x))
+                |> join b
+
+            let out = transform inValue b
+
+            let changes =
+                (match outs |> ImmutableMap.tryFind b with
+                 | None ->
+                     outs <- outs |> ImmutableMap.add b out
+                     true
+                 | Some before when before <> out ->
+                     outs <- outs |> ImmutableMap.add b out
+                     true
+                 | _ -> false)
+                || changes
+
+            changes) false seq)
+    |> Seq.takeWhile id
+    |> Seq.tryLast
+    |> ignore
+
+let backwardAnalysis transform join successorsFunc root =
+    let mutable outs = ImmutableMap.empty
+
+    let seq =
+        postOrder successorsFunc root |> Seq.cache
+
+    Seq.initInfinite (fun _ ->
+        Seq.fold (fun changes b ->
+
+            let inValue =
+                b
+                |> successorsFunc
+                |> Seq.map (fun x -> (x, outs |> ImmutableMap.tryFind x))
+                |> join b
+
+            let out = transform inValue b
+
+            let changes =
+                (match outs |> ImmutableMap.tryFind b with
+                 | None ->
+                     outs <- outs |> ImmutableMap.add b out
+                     true
+                 | Some before when before <> out ->
+                     outs <- outs |> ImmutableMap.add b out
+                     true
+                 | _ -> false)
+                || changes
+
+            changes) false seq)
+    |> Seq.takeWhile id
+    |> Seq.tryLast
+    |> ignore

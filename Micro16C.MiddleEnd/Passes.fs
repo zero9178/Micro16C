@@ -869,7 +869,7 @@ let mem2reg (irModule: Module ref) =
         let builder = Builder.fromModule irModule
 
         let phis =
-            Seq.unfold (fun (x: ImmutableHashSet<Value ref>) ->
+            Seq.unfold (fun (x: ImmutableSet<Value ref>) ->
                 let next =
                     x |> ImmutableSet.union x |> dominanceFrontiers
 
@@ -1180,6 +1180,67 @@ let analyzeLifetimes irModule =
                          | Done (x, y) -> (x, y)
                          | NotDone (x, y) -> (x, y))
                      |> distinctIntervals })
+
+    irModule
+
+let analyzeLifeness irModule =
+
+    !irModule
+    |> Module.backwardAnalysis
+        (fun liveOut blockValue ->
+            let block = !blockValue |> Value.asBasicBlock
+
+            // As seen in https://hal.inria.fr/inria-00558509v2/document
+
+            let liveIn =
+                block
+                |> BasicBlock.revInstructions
+                |> List.fold (fun set instr ->
+
+                    let set, upwardsExposed =
+                        match !instr with
+                        | { Content = PhiInstruction _ } -> (set, [ instr ])
+                        | _ ->
+                            let set =
+                                if !instr |> Value.producesValue then set |> ImmutableSet.remove instr else set
+
+                            (set,
+                             !instr
+                             |> Value.operands
+                             |> List.filter ((!) >> Value.isInstruction))
+
+                    set
+                    |> ImmutableSet.union (ImmutableSet.ofList upwardsExposed)) liveOut
+
+            blockValue
+            := { !blockValue with
+                     Content =
+                         BasicBlockValue
+                             { block with
+                                   LiveIn = liveIn
+                                   LiveOut = liveOut } }
+
+            liveIn)
+           (fun b succ ->
+               succ
+               |> Seq.map (fun (bb, liveIn) ->
+                   liveIn
+                   |> Option.defaultValue ImmutableSet.empty
+                   |> ImmutableSet.fold (fun result instr ->
+                       match instr with
+                       | Ref { Content = PhiInstruction { Incoming = list }
+                               ParentBlock = Some block } when bb = block ->
+                           list
+                           |> List.tryFind (snd >> (=) b)
+                           |> Option.filter (fst >> (!) >> Value.isInstruction)
+                           |> Option.map
+                               (fst
+                                >> Seq.singleton
+                                >> ImmutableSet
+                                >> ImmutableSet.union result)
+                           |> Option.defaultValue result
+                       | instr -> result |> ImmutableSet.add instr) ImmutableSet.empty)
+               |> ImmutableSet.unionMany)
 
     irModule
 

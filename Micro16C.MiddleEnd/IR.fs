@@ -127,7 +127,9 @@ and BasicBlock =
     { Instructions: Value ref list
       ImmediateDominator: Value ref option
       DominanceFrontier: Value ref list option
-      ParentModule: Module ref }
+      ParentModule: Module ref
+      LiveIn: ImmutableSet<Value ref>
+      LiveOut: ImmutableSet<Value ref> }
 
 and Module =
     internal
@@ -273,7 +275,9 @@ module internal BasicBlockInternal =
         { Instructions = []
           ImmediateDominator = None
           DominanceFrontier = None
-          ParentModule = parent }
+          ParentModule = parent
+          LiveIn = ImmutableSet.empty
+          LiveOut = ImmutableSet.empty }
 
     let revInstructions basicBlock = basicBlock.Instructions
 
@@ -767,20 +771,33 @@ module Module =
 
     let asText (irModule: Module) = irModule.ToString()
 
-    let rec preOrder =
+    let preOrder =
         entryBlock
         >> Option.map (Graphs.preOrder ((!) >> BasicBlock.successors >> Seq.ofList))
         >> Option.defaultValue Seq.empty
 
-    let rec postOrder =
+    let postOrder =
         entryBlock
         >> Option.map (Graphs.postOrder ((!) >> BasicBlock.successors >> Seq.ofList))
         >> Option.defaultValue Seq.empty
 
-    let rec reversePostOrder =
+    let reversePostOrder =
         entryBlock
         >> Option.map (Graphs.reversePostOrder ((!) >> BasicBlock.successors >> Seq.ofList))
         >> Option.defaultValue Seq.empty
+
+    let forwardAnalysis transform join =
+        entryBlock
+        >> Option.iter
+            (Graphs.singleForwardAnalysis
+                transform
+                 join
+                 ((!) >> BasicBlock.predecessors >> Seq.ofList)
+                 ((!) >> BasicBlock.successors >> Seq.ofList))
+
+    let backwardAnalysis transform join =
+        entryBlock
+        >> Option.iter (Graphs.backwardAnalysis transform join ((!) >> BasicBlock.successors >> Seq.ofList))
 
 type InsertPoint =
     | Before of Value ref
