@@ -294,6 +294,28 @@ module internal BasicBlockInternal =
             | Ref { Content = PhiInstruction _ } -> true
             | _ -> false)
 
+    let strictDominators =
+        Seq.unfold (fun blockValue ->
+            !blockValue
+            |> (function
+            | { Content = BasicBlockValue block } -> block
+            | _ -> failwith "")
+            |> immediateDominator
+            |> Option.filter ((=) blockValue)
+            |> Option.map (fun x -> (x, x)))
+
+    let dominators block =
+        strictDominators block
+        |> Seq.append (Seq.singleton block)
+
+    let dominates other basicBlock =
+        other |> dominators |> Seq.contains basicBlock
+
+    let strictlyDominates other basicBlock =
+        other
+        |> strictDominators
+        |> Seq.contains basicBlock
+
 [<RequireQualifiedAccess>]
 module Value =
 
@@ -660,6 +682,27 @@ module Value =
                     |> List.iter (addToPhis parentBlockValue)
         | _ -> destroy value
 
+    let dominates other value =
+        if !value
+           |> parentBlock
+           |> Option.get
+           |> BasicBlockInternal.dominates other
+           |> not then
+            false
+        else if (!value |> parentBlock) <> (!other |> parentBlock) then
+            true
+        else
+            !value
+            |> parentBlock
+            |> Option.get
+            |> (!)
+            |> asBasicBlock
+            |> BasicBlockInternal.revInstructions
+            |> List.find (fun bb -> bb = value || bb = other) = value
+
+    let strictlyDominates other value =
+        if other = value then false else dominates other value
+
 [<RequireQualifiedAccess>]
 module BasicBlock =
 
@@ -700,16 +743,13 @@ module BasicBlock =
         >> List.filter ((!) >> Value.isTerminating)
         >> List.choose ((!) >> Value.parentBlock)
 
-    let dominators =
-        Seq.unfold (fun blockValue ->
-            !blockValue
-            |> Value.asBasicBlock
-            |> immediateDominator
-            |> Option.filter ((=) blockValue)
-            |> Option.map (fun x -> (x, x)))
+    let dominators = BasicBlockInternal.dominators
 
-    let dominates other basicBlock =
-        other |> dominators |> Seq.contains basicBlock
+    let dominates = BasicBlockInternal.dominates
+
+    let strictDominators = BasicBlockInternal.strictDominators
+
+    let strictlyDominates = BasicBlockInternal.strictlyDominates
 
     let hasSingleSuccessor =
         successors >> Seq.tryExactlyOne >> Option.isSome
