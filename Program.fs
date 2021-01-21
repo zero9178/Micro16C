@@ -35,6 +35,13 @@ let compile text =
     |> Result.map Passes.deadCodeElimination
     |> Result.map Passes.removeUnreachableBlocks
     |> Result.map Passes.simplifyCFG
+    |> Result.map Legalize.legalizeInstructions
+    |> Result.map Passes.instructionSimplify
+    |> Result.map Passes.instructionCombine
+    |> Result.map Passes.deadCodeElimination
+    |> Result.map Passes.removeUnreachableBlocks
+    |> Result.map Passes.simplifyCFG
+    |> Result.map Passes.jumpThreading
     |> Result.map Passes.instructionSimplify
     |> Result.map Passes.instructionCombine
     |> Result.map Passes.deadCodeElimination

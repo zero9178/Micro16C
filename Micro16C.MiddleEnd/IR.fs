@@ -46,8 +46,6 @@ type Value =
       Name: string
       Content: ValueContent
       ParentBlock: Value ref option
-      Index: int option
-      LifeIntervals: (int * int) list
       Register: Register option }
 
     override this.ToString() = this.Name
@@ -57,8 +55,6 @@ type Value =
           Name = ""
           Content = Undef
           ParentBlock = None
-          Index = None
-          LifeIntervals = []
           Register = None }
 
     static member UndefValue = ref Value.Default
@@ -84,6 +80,14 @@ and AllocationInstruction = { Aliased: bool option }
 and BinaryKind =
     | And
     | Add
+    | Or
+    | Xor
+    | Sub
+    | Mul
+    | SDiv
+    | UDiv
+    | SRem
+    | URem
 
 and BinaryInstruction =
     { Left: Value ref
@@ -218,6 +222,14 @@ and Module =
                              match binary.Kind with
                              | Add -> "add"
                              | And -> "and"
+                             | Or -> "or"
+                             | Xor -> "xor"
+                             | Sub -> "sub"
+                             | Mul -> "mul"
+                             | SDiv -> "sdiv"
+                             | UDiv -> "udiv"
+                             | SRem -> "srem"
+                             | URem -> "urem"
 
                          text
                          + sprintf "\t%s = %s %s %s\n" (getName instruction) opName (getName binary.Left)
@@ -325,11 +337,7 @@ module Value =
 
     let users value = value.Users
 
-    let index value = Option.get value.Index
-
     let register (value: Value) = value.Register
-
-    let lifeIntervals value = value.LifeIntervals
 
     let tracksUsers value =
         match value.Content with
@@ -619,19 +627,7 @@ module Value =
             := { !irModule with
                      BasicBlocks =
                          (!irModule).BasicBlocks
-                         |> List.fold (fun (found, result) bb ->
-                             if found then
-                                 (true, bb :: result)
-                             else if bb = value then
-                                 (true, result)
-                             else
-                                 bb
-                                 := { !bb with
-                                          Index = (!bb).Index |> Option.map (fun x -> x - 1) }
-
-                                 (false, bb :: result)) (false, [])
-                         |> snd
-                         |> List.rev }
+                         |> List.filter ((<>) value) }
         | _ ->
             (!value)
             |> operands
@@ -716,6 +712,14 @@ module BasicBlock =
 
     let dominanceFrontier = BasicBlockInternal.dominanceFrontier
 
+    let index block =
+        let bb = !block |> Value.asBasicBlock
+
+        (List.length (!bb.ParentModule).BasicBlocks)
+        - ((!bb.ParentModule).BasicBlocks
+           |> List.findIndex ((=) block))
+        - 1
+
     let liveIn block = block.LiveIn
 
     let liveOut block = block.LiveOut
@@ -786,10 +790,6 @@ module Module =
                          if bb = block1 then block2
                          else if bb = block2 then block1
                          else bb) }
-
-        let temp = (!block1).Index
-        block1 := { !block1 with Index = (!block2).Index }
-        block2 := { !block2 with Index = temp }
 
     let revInstructions =
         revBasicBlocks
@@ -952,22 +952,10 @@ module Builder =
 
                 match insertPoint with
                 | End ->
-                    basicBlock
-                    := { !basicBlock with
-                             Index = List.length (!builder.Module).BasicBlocks |> Some }
-
                     builder.Module
                     := { !builder.Module with
                              BasicBlocks = basicBlock :: (!builder.Module).BasicBlocks }
                 | Start ->
-                    basicBlock := { !basicBlock with Index = Some 0 }
-
-                    (!builder.Module).BasicBlocks
-                    |> List.iter (fun bb ->
-                        bb
-                        := { !bb with
-                                 Index = (!bb).Index |> Option.map ((+) 1) })
-
                     builder.Module
                     := { !builder.Module with
                              BasicBlocks = (!builder.Module).BasicBlocks @ [ basicBlock ] }
@@ -978,18 +966,6 @@ module Builder =
                     | Some i ->
                         let (first, second) =
                             (!builder.Module).BasicBlocks |> List.splitAt i
-
-                        basicBlock
-                        := { !basicBlock with
-                                 Index =
-                                     ((!builder.Module).BasicBlocks |> List.length) - i
-                                     |> Some }
-
-                        first
-                        |> List.iter (fun bb ->
-                            bb
-                            := { !bb with
-                                     Index = (!bb).Index |> Option.map ((+) 1) })
 
                         builder.Module
                         := { !builder.Module with
@@ -1002,19 +978,6 @@ module Builder =
                         let (first, second) =
                             (!builder.Module).BasicBlocks
                             |> List.splitAt (i + 1)
-
-                        basicBlock
-                        := { !basicBlock with
-                                 Index =
-                                     ((!builder.Module).BasicBlocks |> List.length) - i
-                                     + 1
-                                     |> Some }
-
-                        first
-                        |> List.iter (fun bb ->
-                            bb
-                            := { !bb with
-                                     Index = (!bb).Index |> Option.map ((+) 1) })
 
                         builder.Module
                         := { BasicBlocks = first @ [ basicBlock ] @ second }
@@ -1288,3 +1251,51 @@ module Builder =
                     structure |> ImmutableMap.add instr result) ImmutableMap.empty
 
         structure
+
+    let splitBlockAt (insertPoint: InsertPoint) builder =
+
+        let i, instructions, block =
+            match insertPoint with
+            | Start
+            | End -> failwith "Can't split a basic block at it's start or beginning"
+            | Before instr ->
+                let block =
+                    !instr |> Value.parentBlock |> Option.get
+
+                let instructions =
+                    !block
+                    |> Value.asBasicBlock
+                    |> BasicBlock.revInstructions
+
+                (instructions |> List.findIndex ((=) instr), instructions, block)
+            | After instr ->
+                let block =
+                    !instr |> Value.parentBlock |> Option.get
+
+                let instructions =
+                    !block
+                    |> Value.asBasicBlock
+                    |> BasicBlock.revInstructions
+
+                ((instructions |> List.findIndex ((=) instr)) - 1, instructions, block)
+
+        let instr = List.splitAt (i + 1) instructions |> snd
+
+        let newBlock, builder =
+            builder |> createBasicBlockAt (Before block) ""
+
+        let builder =
+            builder |> setInsertBlock (Some newBlock)
+
+        let builder =
+            instr
+            |> Seq.fold (fun builder value -> insertValue value builder |> snd) builder
+            |> createGoto block
+            |> snd
+
+        !block
+        |> Value.users
+        |> Seq.filter ((!) >> Value.isTerminating)
+        |> Seq.iter (Value.replaceOperand block newBlock)
+
+        (newBlock, builder)

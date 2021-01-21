@@ -1,6 +1,5 @@
 module Micro16C.Backend.Legalize
 
-open System.Collections.Immutable
 open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
 
@@ -197,5 +196,169 @@ let breakPhiCriticalEdges irModule =
                 |> Builder.setInsertBlock (Some block)
                 |> Builder.createGoto currBlock
                 |> ignore))
+
+    irModule
+
+let legalizeInstructions irModule =
+
+    let builder = Builder.fromModule irModule
+
+    !irModule
+    |> Module.instructions
+    |> Seq.iter (fun instr ->
+        match !instr with
+        | { Content = BinaryInstruction { Kind = Sub; Left = lhs; Right = rhs } } ->
+
+            let replacement =
+                builder
+                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                |> Builder.setInsertPoint (Before instr)
+                |> Builder.createUnary Not rhs
+                ||> Builder.createBinary (Builder.createConstant 1s) Add
+                ||> Builder.createBinary lhs Add
+                |> fst
+
+            instr |> Value.replaceWith replacement
+        | { Content = BinaryInstruction { Kind = Or; Left = lhs; Right = rhs } } ->
+
+            // R0 | R1 = ~(~R0 & ~R1)
+
+            let builder =
+                builder
+                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                |> Builder.setInsertPoint (Before instr)
+
+            let lhs =
+                builder |> Builder.createUnary Not lhs |> fst
+
+            let replacement =
+                builder
+                |> Builder.createUnary Not rhs
+                ||> Builder.createBinary lhs And
+                |> fst
+
+            instr |> Value.replaceWith replacement
+        | { Content = BinaryInstruction { Kind = Xor; Left = lhs; Right = rhs } } ->
+
+            // R0 ^ R1 = (R1 & ~R2) + (~R1 & R2)
+
+            let builder =
+                builder
+                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                |> Builder.setInsertPoint (Before instr)
+
+            let lhsNew =
+                (rhs, builder)
+                ||> Builder.createUnary Not
+                ||> Builder.createBinary lhs And
+                |> fst
+
+            let rhsNew =
+                (lhs, builder)
+                ||> Builder.createUnary Not
+                ||> Builder.createBinary rhs And
+                |> fst
+
+            let replacement =
+                builder
+                |> Builder.createBinary lhsNew Add rhsNew
+                |> fst
+
+            instr |> Value.replaceWith replacement
+        | { Content = BinaryInstruction { Kind = (SRem
+                                          | URem) as kind
+                                          Left = lhs
+                                          Right = rhs }
+            ParentBlock = Some parentBlock } ->
+            let newBlock, builder =
+                builder |> Builder.splitBlockAt (Before instr)
+
+            let cont, lhs, builder =
+                if kind = SRem then
+                    let neg, builder =
+                        builder
+                        |> Builder.createBasicBlockAt (After newBlock) "modNeg"
+
+                    let cont, builder =
+                        builder
+                        |> Builder.createBasicBlockAt (After neg) "cont"
+
+                    let builder = builder |> Builder.setInsertBlock None
+
+                    !newBlock
+                    |> Value.asBasicBlock
+                    |> BasicBlock.terminator
+                    |> Value.replaceWith
+                        (builder
+                         |> Builder.createCondBr Negative lhs neg cont
+                         |> fst)
+
+                    let negated, builder =
+                        builder
+                        |> Builder.setInsertBlock (Some neg)
+                        |> Builder.createUnary Not lhs
+                        ||> Builder.createBinary (Builder.createConstant 1s) Add
+
+
+                    let phi, builder =
+                        builder
+                        |> Builder.createGoto cont
+                        |> snd
+                        |> Builder.setInsertBlock (Some cont)
+                        |> Builder.createPhi [ (negated, neg)
+                                               (lhs, newBlock) ]
+
+                    (cont, phi, builder)
+                else
+                    let cont, builder =
+                        builder
+                        |> Builder.createBasicBlockAt (After newBlock) "cont"
+
+                    let builder =
+                        builder |> Builder.setInsertBlock (Some cont)
+
+                    !newBlock
+                    |> Value.asBasicBlock
+                    |> BasicBlock.terminator
+                    |> Value.replaceOperand parentBlock cont
+
+                    (cont, lhs, builder)
+
+            let rhs =
+                builder
+                |> Builder.createUnary Not rhs
+                ||> Builder.createBinary (Builder.createConstant 1s) Add
+                |> fst
+
+            let body, builder =
+                builder
+                |> Builder.createBasicBlockAt (After cont) "modBody"
+
+            let modCont, builder =
+                builder
+                |> Builder.createBasicBlockAt (After body) "modCont"
+
+            let acc, builder =
+                builder
+                |> Builder.createGoto body
+                |> snd
+                |> Builder.setInsertBlock (Some body)
+                |> Builder.createPhi [ (lhs, cont)
+                                       (Value.UndefValue, modCont) ]
+
+            let nextValue =
+                builder |> Builder.createBinary acc Add rhs |> fst
+
+            acc |> Value.setOperand 2 nextValue
+
+            builder
+            |> Builder.createCondBr Negative nextValue parentBlock modCont
+            |> snd
+            |> Builder.setInsertBlock (Some modCont)
+            |> Builder.createGoto body
+            |> ignore
+
+            instr |> Value.replaceWith acc
+        | _ -> ())
 
     irModule

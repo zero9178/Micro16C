@@ -356,36 +356,6 @@ let genAssembly irModule: AssemblyLine list =
                 else
                     list
             | { Content = CondBrInstruction { Kind = kind
-                                              Value = Ref { Users = [ _ ]
-                                                            Index = Some condIndex
-                                                            Register = None }
-                                              FalseBranch = falseBranch
-                                              TrueBranch = trueBranch }
-                Index = Some brIndex } when condIndex + 1 = brIndex ->
-                // Case: conditions only use is as condition in the branch instruction and it is immediately before
-                // the branch instruction. No register should have been allocated for it and we need to add the
-                // conditional branch to them instruction.
-                let list =
-                    match list |> List.tryHead with
-                    | Some (Label _)
-                    | None -> failwith "Internal Compiler Error: Did not compute condition before branch"
-                    | Some (Operation operation) ->
-                        list
-                        |> List.tail
-                        |> prependOperation
-                            { operation with
-                                  Address = trueBranch |> getName |> Some
-                                  Condition = if kind = Negative then Some Cond.Neg else Some Cond.Zero }
-
-                if Some falseBranch = Array.tryItem (bbIndex + 1) basicBlocks then
-                    list
-                else
-                    prependOperation
-                        { Operation.Default with
-                              Address = falseBranch |> getName |> Some
-                              Condition = Some Cond.None }
-                        list
-            | { Content = CondBrInstruction { Kind = kind
                                               Value = value
                                               FalseBranch = falseBranch
                                               TrueBranch = trueBranch } } ->

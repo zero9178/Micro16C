@@ -97,7 +97,7 @@ module private Op =
 
     let plus lhs rhs context = Context.createBinary lhs Add rhs context
 
-    let minus lhs rhs context = (rhs, context) ||> negate ||> plus lhs
+    let minus lhs rhs context = Context.createBinary lhs Sub rhs context
 
     let bitAnd lhs rhs context = Context.createBinary lhs And rhs context
 
@@ -109,82 +109,12 @@ module private Op =
         ||> bitNot
         ||> bitAnd (Builder.createConstant 1s)
 
-    let bitOr lhs rhs context =
-        // R0 | R1 = ~(~R0 & ~R1)
-        let lhs, context = bitNot lhs context
-        (rhs, context) ||> bitNot ||> bitAnd lhs
+    let bitOr lhs rhs context = Context.createBinary lhs Or rhs context
 
-    let bitXor lhs rhs context =
-        // R0 ^ R1 = ~(~(~(R0 & R1) & R0) & ~(~(R0 & R1) & R1))
-
-        let midAnd, context = bitAnd lhs rhs context ||> bitNot
-        let lhs, context = bitAnd lhs midAnd context ||> bitNot
-        let rhs, context = bitAnd rhs midAnd context ||> bitNot
-        bitAnd lhs rhs context ||> bitNot
+    let bitXor lhs rhs context = Context.createBinary lhs Xor rhs context
 
     let rem lhs rhs context =
-        match Context.insertBlock context with
-        | None ->
-            // if we are in dead code, this is all irrelevant and impossible to implement
-            (Builder.createConstant 0s, context)
-        | Some prev ->
-
-            match !rhs with
-            | { Content = Constant { Value = value } } when (value &&& (value - 1s)) = 0s ->
-                (lhs, context) ||> bitAnd rhs
-            | _ ->
-                let neg, context =
-                    Context.createBasicBlock "modNeg" context
-
-                let cont, context = Context.createBasicBlock "cont" context
-
-                let negated, context =
-                    context
-                    |> Context.createCondBr Negative lhs neg cont
-                    |> Context.setInsertPoint (Some neg)
-                    |> pack2 lhs
-                    ||> negate
-
-                let context =
-                    context
-                    |> Context.createGoto cont
-                    |> Context.setInsertPoint (Some cont)
-
-                let phi, context =
-                    context
-                    |> Context.createPhi [ (negated, neg)
-                                           (lhs, prev) ]
-
-                let acc, context = Context.createAlloca context
-                let context = context |> Context.createStore acc phi
-
-                let rhs, context = (rhs, context) ||> negate
-
-                let body, context =
-                    Context.createBasicBlock "modBody" context
-
-                let context =
-                    context
-                    |> Context.createGoto body
-                    |> Context.setInsertPoint (Some body)
-
-
-                let value, context =
-                    (acc, context) ||> Context.createLoad ||> plus rhs
-
-                let modCont, context =
-                    Context.createBasicBlock "modCont" context
-
-                let modEnd, context =
-                    Context.createBasicBlock "modEnd" context
-
-                context
-                |> Context.createCondBr Negative value modEnd modCont
-                |> Context.setInsertPoint (Some modCont)
-                |> Context.createStore acc value
-                |> Context.createGoto body
-                |> Context.setInsertPoint (Some modEnd)
-                |> Context.createLoad acc
+        Context.createBinary lhs SRem rhs context
 
     let toBool value context =
         match context |> Context.insertBlock with

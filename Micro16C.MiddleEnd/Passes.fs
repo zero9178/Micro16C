@@ -1053,7 +1053,7 @@ let reorderBasicBlocks irModule =
             |> ImmutableSet.count
 
         if mergeCount <= 1
-           && (!successors.[1] |> Value.index) > (!successors.[0] |> Value.index) then
+           && (successors.[1] |> BasicBlock.index) > (successors.[0] |> BasicBlock.index) then
             irModule
             |> Module.swapBlocks successors.[0] successors.[1])
 
