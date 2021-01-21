@@ -266,6 +266,16 @@ let legalizeInstructions irModule =
 
             instr |> Value.replaceWith replacement
         | { Content = BinaryInstruction { Kind = (SRem
+                                          | URem)
+                                          Left = lhs
+                                          Right = Ref { Content = Constant { Value = c } } as rhs } } when (c
+                                                                                                            &&& (c - 1s)) = 0s ->
+            // lhs mod power of two can be lowered to a simple and
+            let builder = builder |> Builder.setInsertBlock None
+
+            instr
+            |> Value.replaceWith (builder |> Builder.createBinary lhs And rhs |> fst)
+        | { Content = BinaryInstruction { Kind = (SRem
                                           | URem) as kind
                                           Left = lhs
                                           Right = rhs }

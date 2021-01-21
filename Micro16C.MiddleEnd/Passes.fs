@@ -6,23 +6,18 @@ open Micro16C.MiddleEnd.Util
 
 let private singleInstructionSimplify builder value =
     match !value with
+    // And patterns
     | { Content = BinaryInstruction { Kind = And
-                                      Left = Ref { Content = Constant { Value = 0s } }
+                                      Left = Ref { Content = (Constant { Value = 0s }
+                                                   | Undef) }
                                       Right = _ } }
     | { Content = BinaryInstruction { Kind = And
-                                      Right = Ref { Content = Constant { Value = 0s } }
+                                      Right = Ref { Content = (Constant { Value = 0s }
+                                                    | Undef) }
                                       Left = _ } } ->
         value
         |> Value.replaceWith (Builder.createConstant 0s)
 
-        true
-    | { Content = BinaryInstruction { Kind = Add
-                                      Left = Ref { Content = Constant { Value = 0s } }
-                                      Right = passThrough } }
-    | { Content = BinaryInstruction { Kind = Add
-                                      Right = Ref { Content = Constant { Value = 0s } }
-                                      Left = passThrough } } ->
-        value |> Value.replaceWith passThrough
         true
     | { Content = BinaryInstruction { Kind = And
                                       Left = Ref { Content = Constant { Value = 0xFFFFs } }
@@ -31,13 +26,6 @@ let private singleInstructionSimplify builder value =
                                       Right = Ref { Content = Constant { Value = 0xFFFFs } }
                                       Left = passThrough } } ->
         value |> Value.replaceWith passThrough
-        true
-    | { Content = BinaryInstruction { Kind = Add
-                                      Left = Ref { Content = Constant { Value = lhs } }
-                                      Right = Ref { Content = Constant { Value = rhs } } } } ->
-        value
-        |> Value.replaceWith (Builder.createConstant (lhs + rhs))
-
         true
     | { Content = BinaryInstruction { Kind = And
                                       Left = Ref { Content = Constant { Value = lhs } }
@@ -49,9 +37,173 @@ let private singleInstructionSimplify builder value =
     | { Content = BinaryInstruction { Kind = And; Left = lhs; Right = rhs } } when lhs = rhs ->
         value |> Value.replaceWith lhs
         true
+    | { Content = BinaryInstruction { Kind = And
+                                      Left = other1
+                                      Right = Ref { Content = UnaryInstruction { Kind = Not; Value = other2 } } } }
+    | { Content = BinaryInstruction { Kind = And
+                                      Right = other1
+                                      Left = Ref { Content = UnaryInstruction { Kind = Not; Value = other2 } } } } when other1 = other2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
+    | { Content = BinaryInstruction { Kind = And
+                                      Left = other1
+                                      Right = Ref { Content = BinaryInstruction ({ Kind = Or; Left = other2 }
+                                                    | { Kind = Or; Right = other2 }) } } }
+    | { Content = BinaryInstruction { Kind = And
+                                      Right = other1
+                                      Left = Ref { Content = BinaryInstruction ({ Kind = Or; Left = other2 }
+                                                   | { Kind = Or; Right = other2 }) } } } when other1 = other2 ->
+        value |> Value.replaceWith other1
+
+        true
+    // Or patterns
+    | { Content = BinaryInstruction { Kind = Or
+                                      Right = Ref { Content = (Constant { Value = -1s }
+                                                    | Undef) } } }
+    | { Content = BinaryInstruction { Kind = Or
+                                      Left = Ref { Content = (Constant { Value = -1s }
+                                                   | Undef) } } } ->
+        value
+        |> Value.replaceWith (Builder.createConstant -1s)
+
+        true
+    // X | X = X
+    | { Content = BinaryInstruction { Kind = Or; Right = rhs; Left = lhs } } when rhs = lhs ->
+        value |> Value.replaceWith rhs
+
+        true
+    // X | 0 = X
+    | { Content = BinaryInstruction { Kind = Or
+                                      Right = Ref { Content = Constant { Value = 0s } }
+                                      Left = other } }
+    | { Content = BinaryInstruction { Kind = Or
+                                      Left = Ref { Content = Constant { Value = 0s } }
+                                      Right = other } } ->
+        value |> Value.replaceWith other
+
+        true
+    // A | ~A  =  ~A | A  =  -1
+    | { Content = BinaryInstruction { Kind = Or
+                                      Right = other1
+                                      Left = Ref { Content = UnaryInstruction { Kind = Not; Value = other2 } } } }
+    | { Content = BinaryInstruction { Kind = Or
+                                      Left = other1
+                                      Right = Ref { Content = UnaryInstruction { Kind = Not; Value = other2 } } } } when other1 = other2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant -1s)
+
+        true
+    // A | (A & ?) = A
+    // (A & ?) | A = A
+    | { Content = BinaryInstruction { Kind = Or
+                                      Left = other1
+                                      Right = Ref { Content = BinaryInstruction ({ Kind = And; Left = other2 }
+                                                    | { Kind = Or; Right = other2 }) } } }
+    | { Content = BinaryInstruction { Kind = Or
+                                      Right = other1
+                                      Left = Ref { Content = BinaryInstruction ({ Kind = And; Left = other2 }
+                                                   | { Kind = Or; Right = other2 }) } } } when other1 = other2 ->
+        value |> Value.replaceWith other1
+
+        true
+    // A | ~(A & ?) = -1
+    // ~(A & ?) | A = -1
+    | { Content = BinaryInstruction { Kind = Or
+                                      Left = other1
+                                      Right = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                 Value = Ref { Content = BinaryInstruction ({ Kind = And
+                                                                                                                              Left = other2 }
+                                                                                               | { Kind = Or
+                                                                                                   Right = other2 }) } } } } }
+    | { Content = BinaryInstruction { Kind = Or
+                                      Right = other1
+                                      Left = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                Value = Ref { Content = BinaryInstruction ({ Kind = And
+                                                                                                                             Left = other2 }
+                                                                                              | { Kind = Or
+                                                                                                  Right = other2 }) } } } } } when other1 = other2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant -1s)
+
+        true
+    // Add patterns
+    | { Content = BinaryInstruction { Kind = Add
+                                      Left = Ref { Content = (Constant { Value = 0s }
+                                                   | Undef) }
+                                      Right = passThrough } }
+    | { Content = BinaryInstruction { Kind = Add
+                                      Right = Ref { Content = (Constant { Value = 0s }
+                                                    | Undef) }
+                                      Left = passThrough } } ->
+        value |> Value.replaceWith passThrough
+        true
+    | { Content = BinaryInstruction { Kind = Add
+                                      Left = Ref { Content = Constant { Value = lhs } }
+                                      Right = Ref { Content = Constant { Value = rhs } } } } ->
+        value
+        |> Value.replaceWith (Builder.createConstant (lhs + rhs))
+
+        true
     | { Content = BinaryInstruction { Kind = Add; Left = lhs; Right = rhs } } when lhs = rhs ->
         value
         |> Value.replaceWith (builder |> Builder.createUnary Shl lhs |> fst)
+
+        true
+    | { Content = BinaryInstruction { Kind = Add
+                                      Right = other1
+                                      Left = Ref { Content = BinaryInstruction { Kind = Sub
+                                                                                 Left = passThrough
+                                                                                 Right = other2 } } } }
+    | { Content = BinaryInstruction { Kind = Add
+                                      Left = other1
+                                      Right = Ref { Content = BinaryInstruction { Kind = Sub
+                                                                                  Left = passThrough
+                                                                                  Right = other2 } } } } when other1 = other2 ->
+        value |> Value.replaceWith passThrough
+        true
+    //TODO: X + -X = 0
+    // mul patterns
+    | { Content = BinaryInstruction { Kind = Mul
+                                      Left = Ref { Content = Constant { Value = c1 } }
+                                      Right = Ref { Content = Constant { Value = c2 } } } } ->
+        value
+        |> Value.replaceWith (Builder.createConstant (c1 * c2))
+
+        true
+    | { Content = BinaryInstruction { Kind = Mul
+                                      Left = (Ref { Content = (Constant { Value = 0s }
+                                                    | Undef) }) } }
+    | { Content = BinaryInstruction { Kind = Mul
+                                      Right = Ref { Content = (Constant { Value = 0s }
+                                                    | Undef) } } } ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
+    | { Content = BinaryInstruction { Kind = Mul
+                                      Left = Ref { Content = Constant { Value = 1s } }
+                                      Right = other } }
+    | { Content = BinaryInstruction { Kind = Mul
+                                      Right = Ref { Content = Constant { Value = 1s } }
+                                      Left = other } } ->
+        value |> Value.replaceWith other
+
+        true
+    | { Content = BinaryInstruction { Kind = Mul
+                                      Left = other1
+                                      Right = Ref { Content = BinaryInstruction { Kind = (SDiv
+                                                                                  | UDiv)
+                                                                                  Left = passThrough
+                                                                                  Right = other2 } } } }
+    | { Content = BinaryInstruction { Kind = Mul
+                                      Right = other1
+                                      Left = Ref { Content = BinaryInstruction { Kind = (SDiv
+                                                                                 | UDiv)
+                                                                                 Left = passThrough
+                                                                                 Right = other2 } } } } when other1 = other2 ->
+        value |> Value.replaceWith passThrough
 
         true
     | { Content = UnaryInstruction { Kind = Not
