@@ -10,6 +10,7 @@
         <Compile Include="Legalize.fs"/>
         <Compile Include="RegisterAllocator.fs"/>
         <Compile Include="GenAssembly.fs"/>
+        <Compile Include="ParseAssembly.fs"/>
     </ItemGroup>
 
     <ItemGroup>
