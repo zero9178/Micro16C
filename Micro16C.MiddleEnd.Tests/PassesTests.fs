@@ -315,6 +315,23 @@ let ``Instruction Simplify: Not patterns`` () =
     store -4 -> R1
     """)
 
+    """%entry:
+    %0 = load R1
+    %1 = not %0
+    %2 = not %1
+    store %2 -> R1
+"""
+    |> IRReader.fromString
+    |> Passes.instructionSimplify
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    %1 = not %0
+    store %0 -> R1
+    """)
+
 [<Fact>]
 let ``Instruction Simplify: Branch patterns`` () =
     """%entry:
@@ -408,22 +425,6 @@ let ``Instruction Simplify: Phi Instruction`` () =
 
 [<Fact>]
 let ``Instruction Combine`` () =
-    """%entry:
-    %0 = load R1
-    %1 = not %0
-    %2 = not %1
-    store %2 -> R1
-"""
-    |> IRReader.fromString
-    |> Passes.instructionCombine
-    |> should
-        be
-           (structurallyEquivalentTo """
-%entry:
-    %0 = load R1
-    %1 = not %0
-    store %0 -> R1
-    """)
 
     """%entry:
     %0 = load R1

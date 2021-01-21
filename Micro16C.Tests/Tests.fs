@@ -17,4 +17,4 @@ let ``For loop`` () =
     R1 = n;
     """
     |> Micro16C.compile
-    |> should be (ofCase <@ Result<AssemblyLine list, string>.Ok @>)
+    |> should be (ofCase <@ Result<seq<AssemblyLine>, string>.Ok @>)
