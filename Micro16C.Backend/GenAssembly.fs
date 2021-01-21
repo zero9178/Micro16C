@@ -426,15 +426,36 @@ let genAssembly irModule: AssemblyLine list =
             | _ -> failwith "Internal Compiler Error: Can't compile IR instruction to assembly") list) []
     |> List.rev
 
-let removeRedundantLabels assemblyList =
+let removeUnusedLabels assemblyList =
     let usedLabels =
         assemblyList
-        |> List.fold (fun set assembly ->
+        |> Seq.fold (fun set assembly ->
             match assembly with
             | Operation { Address = Some s } -> Set.add s set
             | _ -> set) (Set([]))
 
     assemblyList
-    |> List.filter (function
+    |> Seq.filter (function
         | Label s -> usedLabels |> Set.contains s
         | _ -> true)
+
+let genMachineCode assemblyList =
+    let machineCode, symbolTable =
+        assemblyList
+        |> Seq.fold (fun (result, symbolTable) assembly ->
+            match assembly with
+            | Label s ->
+                (result,
+                 symbolTable
+                 |> Map.add s (4 * List.length result |> uint8))
+            | Operation ({ Address = Some s } as op) -> ((op |> Operation.asMachineCode, Some s) :: result, symbolTable)
+            | Operation op -> ((op |> Operation.asMachineCode, None) :: result, symbolTable)) ([], Map.empty)
+
+    machineCode
+    |> Seq.map (fun (instr, address) ->
+        match address with
+        | None -> instr
+        | Some s ->
+            let address = symbolTable |> Map.find s
+            instr ||| (address |> int))
+    |> Seq.rev

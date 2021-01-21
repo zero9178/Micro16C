@@ -57,7 +57,7 @@ let compile text =
     |> Result.map Passes.analyzeLiveness
     |> Result.map RegisterAllocator.allocateRegisters
     |> Result.map GenAssembly.genAssembly
-    |> Result.map GenAssembly.removeRedundantLabels
+    |> Result.map GenAssembly.removeUnusedLabels
 
 [<EntryPoint>]
 let main argv =

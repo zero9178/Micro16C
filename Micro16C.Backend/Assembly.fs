@@ -3,8 +3,8 @@
 open Micro16C.MiddleEnd.IR
 
 type AMux =
-    | MBR = 0b0
-    | ABus = 0b1
+    | ABus = 0b0
+    | MBR = 0b1
 
 type Cond =
     | NoJump = 0b0
@@ -24,8 +24,8 @@ type Shifter =
     | Right = 0b10
 
 type MemoryAccess =
-    | Read
-    | Write
+    | Read = 1
+    | Write = 0
 
 type Bus =
     | Zero = 0b0000
@@ -196,10 +196,11 @@ type Operation =
         let op =
             match (op, this.MemoryAccess) with
             | (op, None) -> op
-            | ("", Some Read) -> "rd"
-            | ("", Some Write) -> "wr"
-            | (op, Some Read) -> sprintf "%s; rd" op
-            | (op, Some Write) -> sprintf "%s; wr" op
+            | ("", Some MemoryAccess.Read) -> "rd"
+            | ("", Some MemoryAccess.Write) -> "wr"
+            | (op, Some MemoryAccess.Read) -> sprintf "%s; rd" op
+            | (op, Some MemoryAccess.Write) -> sprintf "%s; wr" op
+            | _ -> failwith "Internal Compiler Error: Illegally formed assembly instruction"
 
         op
 
@@ -248,13 +249,98 @@ module Operation =
           ABus = optionalXOR op1.ABus op2.ABus
           Address = optionalXOR op1.Address op2.Address }
 
+    let asText (op: Operation) = op.ToString()
+
+    let asMachineCode op =
+        let current = 0
+
+        let current =
+            current
+            ||| (op.AMux |> Option.defaultValue AMux.ABus |> int
+                 <<< 31)
+
+
+        let current =
+            current
+            ||| (op.Condition
+                 |> Option.defaultValue Cond.NoJump
+                 |> int
+                 <<< 29)
+
+
+        let current =
+            current
+            ||| (op.ALU |> Option.defaultValue ALU.ABus |> int
+                 <<< 27)
+
+
+        let current =
+            current
+            ||| (op.Shifter
+                 |> Option.defaultValue Shifter.Noop
+                 |> int
+                 <<< 25)
+
+
+        let current =
+            current
+            ||| ((if op.MBRWrite |> Option.defaultValue false then 1 else 0)
+                 <<< 24)
+
+
+        let current =
+            current
+            ||| ((if op.MARWrite |> Option.defaultValue false then 1 else 0)
+                 <<< 23)
+
+
+        let current =
+            current
+            ||| (op.MemoryAccess
+                 |> Option.defaultValue MemoryAccess.Write
+                 |> int
+                 <<< 22)
+
+
+        let current =
+            current
+            ||| (if op.MemoryAccess |> Option.isSome then 1 else 0 <<< 21)
+
+
+        let current =
+            current
+            ||| ((if op.SBus |> Option.isSome then 1 else 0) <<< 20)
+
+
+        let current =
+            current
+            ||| (op.SBus |> Option.defaultValue Bus.Zero |> int
+                 <<< 16)
+
+
+        let current =
+            current
+            ||| (op.BBus |> Option.defaultValue Bus.Zero |> int
+                 <<< 12)
+
+
+        let current =
+            current
+            ||| (op.ABus |> Option.defaultValue Bus.Zero |> int
+                 <<< 8)
+
+
+        current
+
 type AssemblyLine =
     | Operation of Operation
     | Label of string
 
 let printAssembly assemblyLine =
     assemblyLine
-    |> List.iter (fun x ->
+    |> Seq.iter (fun x ->
         match x with
         | Label s -> printfn ":%s" s
         | Operation s -> printfn "%s" (s.ToString()))
+
+    assemblyLine
