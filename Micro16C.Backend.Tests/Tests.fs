@@ -144,3 +144,24 @@ let ``Assembly folding`` () =
                    Address = Some "false" } when input1 = input2 -> true
      | _ -> false)
     |> should be True
+
+
+    let assembly =
+        """
+    %entry:
+        %0 = load 1
+        %1 = add %1 1
+        store %1 -> 1
+        """
+        |> IRReader.fromString
+        |> Passes.analyzeLiveness
+        |> Passes.analyzeDominance
+        |> RegisterAllocator.allocateRegisters
+        |> GenAssembly.genAssembly
+
+    assembly
+    |> List.exists (function
+        | Operation { AMux = Some AMux.MBR
+                      MemoryAccess = Some _ } -> true
+        | _ -> false)
+    |> should be False

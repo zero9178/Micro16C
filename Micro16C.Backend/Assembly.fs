@@ -164,8 +164,8 @@ type Operation =
             match (op, this.MBRWrite, this.SBus) with
             | (op, Some false, _)
             | (op, None, _) -> op
-            | (op, Some true, None) -> sprintf "MAR <- %s" op
-            | (op, Some true, Some _) -> sprintf "%s; MAR <- %s" op op
+            | (op, Some true, None) -> sprintf "MBR <- %s" op
+            | (op, Some true, Some _) -> sprintf "%s; MBR <- %s" op op
 
         let op =
             match (op, this.SBus, this.Condition, this.Address) with
@@ -219,7 +219,27 @@ module Operation =
         && comp op1.Condition op2.Condition
         && comp op1.ALU op2.ALU
         && comp op1.Shifter op2.Shifter
-        && comp op1.MemoryAccess op2.MemoryAccess
+        && (((op1.MemoryAccess |> Option.isSome)
+             && (op2.MemoryAccess |> Option.isSome))
+            |> not)
+        && (((op1.MemoryAccess |> Option.isSome)
+             && (op2.MARWrite |> Option.isSome))
+            |> not)
+        && (((op2.MemoryAccess |> Option.isSome)
+             && (op1.MARWrite |> Option.isSome))
+            |> not)
+        && (((op1.MemoryAccess |> Option.isSome)
+             && (op2.MBRWrite |> Option.isSome))
+            |> not)
+        && (((op2.MemoryAccess |> Option.isSome)
+             && (op1.MBRWrite |> Option.isSome))
+            |> not)
+        && (((op1.MemoryAccess |> Option.isSome)
+             && (op2.AMux = Some AMux.MBR))
+            |> not)
+        && (((op2.MemoryAccess |> Option.isSome)
+             && (op1.AMux = Some AMux.MBR))
+            |> not)
         && comp op1.MARWrite op2.MARWrite
         && comp op1.MBRWrite op2.MBRWrite
         && comp op1.SBus op2.SBus
