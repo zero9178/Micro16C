@@ -274,7 +274,10 @@ let legalizeInstructions irModule =
             let builder = builder |> Builder.setInsertBlock None
 
             instr
-            |> Value.replaceWith (builder |> Builder.createBinary lhs And rhs |> fst)
+            |> Value.replaceWith
+                (builder
+                 |> Builder.createBinary lhs And (Builder.createConstant (c - 1s))
+                 |> fst)
         | { Content = BinaryInstruction { Kind = (SRem
                                           | URem) as kind
                                           Left = lhs
