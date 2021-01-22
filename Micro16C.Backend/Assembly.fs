@@ -352,6 +352,57 @@ module Operation =
 
         current
 
+    let fromMachineCode (m: int) =
+
+        let get mask pos value =
+            (uint (value &&& (mask <<< pos)) >>> pos) |> int
+
+        { AMux =
+              m
+              |> get 0x1 31
+              |> LanguagePrimitives.EnumOfValue
+              |> Some
+          Condition =
+              m
+              |> get 0x3 29
+              |> LanguagePrimitives.EnumOfValue
+              |> Some
+          ALU =
+              m
+              |> get 0x3 27
+              |> LanguagePrimitives.EnumOfValue
+              |> Some
+          Shifter =
+              m
+              |> get 0x3 25
+              |> LanguagePrimitives.EnumOfValue
+              |> Some
+          MBRWrite = m |> get 0x1 24 <> 0 |> Some
+          MARWrite = m |> get 0x1 23 <> 0 |> Some
+          MemoryAccess =
+              m
+              |> get 0x1 22
+              |> LanguagePrimitives.EnumOfValue
+              |> Some
+              |> Option.filter (fun _ -> get 0x1 21 m <> 0)
+          SBus =
+              m
+              |> get 0xF 16
+              |> LanguagePrimitives.EnumOfValue
+              |> Some
+              |> Option.filter (fun _ -> get 0x1 20 m <> 0)
+          BBus =
+              m
+              |> get 0xF 12
+              |> LanguagePrimitives.EnumOfValue
+              |> Some
+          ABus =
+              m
+              |> get 0xF 8
+              |> LanguagePrimitives.EnumOfValue
+              |> Some
+          Address = m |> get 0xF 18 |> string |> Some }
+
 type AssemblyLine =
     | Operation of Operation
     | Label of string
