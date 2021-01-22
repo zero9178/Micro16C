@@ -435,6 +435,8 @@ and visitBinaryExpression (expression: Sema.Binary) (context: Context) =
     | Sema.LessThan -> Op.lessThan lhs rhs context
     | Sema.GreaterThanOrEqual -> Op.greaterThanOrEqual lhs rhs context
     | Sema.LessThanOrEqual -> Op.lessThanOrEqual lhs rhs context
+    | Sema.ShiftLeft -> Context.createBinary lhs Shl rhs context
+    | Sema.ShiftRight -> Context.createBinary lhs LShr rhs context
     | _ -> failwith "Not yet implemented"
 
 and visitAssignmentExpression (expression: Sema.Assignment) (context: Context) =

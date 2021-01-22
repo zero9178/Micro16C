@@ -57,7 +57,10 @@ let legalizeConstants irModule =
                    && List.forall id second) then
                 let pattern =
                     Seq.unfold (fun c ->
-                        let c = Builder.createUnary Shr c builder |> fst
+                        let c =
+                            Builder.createBinary c LShr (Builder.createConstant 1s) builder
+                            |> fst
+
                         Some(c, c)) (Builder.createConstant -1s)
                     |> Seq.take (List.length first)
                     |> Seq.last
@@ -92,6 +95,9 @@ let legalizeConstants irModule =
                     | 0b01s -> (1s, Seq.tail bitPairs)
                     | _ -> (0s, bitPairs)
 
+                let shiftLeft value builder =
+                    Builder.createBinary value Shl (Builder.createConstant 1s) builder
+
                 let c =
                     bitPairs
                     |> Seq.fold (fun (op, builder) bitPair ->
@@ -102,36 +108,35 @@ let legalizeConstants irModule =
                             | _ ->
                                 builder
                                 |> Builder.createBinary op Add op
-                                ||> Builder.createUnary Shl
+                                ||> shiftLeft
                         | 0b01s ->
                             match !op with
                             | { Content = Constant { Value = 0s } } -> (Builder.createConstant 1s, builder)
                             | _ ->
                                 (op, builder)
-                                ||> Builder.createUnary Shl
-                                ||> Builder.createUnary Shl
+                                ||> shiftLeft
+                                ||> shiftLeft
                                 ||> Builder.createBinary (Builder.createConstant 1s) Add
                         | 0b10s ->
                             match !op with
                             | { Content = Constant { Value = 0s } } ->
-                                (Builder.createConstant 1s, builder)
-                                ||> Builder.createUnary Shl
+                                (Builder.createConstant 1s, builder) ||> shiftLeft
                             | _ ->
                                 (op, builder)
-                                ||> Builder.createUnary Shl
+                                ||> shiftLeft
                                 ||> Builder.createBinary (Builder.createConstant 1s) Add
-                                ||> Builder.createUnary Shl
+                                ||> shiftLeft
                         | 0b11s ->
                             match !op with
                             | { Content = Constant { Value = 0s } } ->
                                 (Builder.createConstant 1s, builder)
-                                ||> Builder.createUnary Shl
+                                ||> shiftLeft
                                 ||> Builder.createBinary (Builder.createConstant 1s) Add
                             | _ ->
                                 (op, builder)
-                                ||> Builder.createUnary Shl
+                                ||> shiftLeft
                                 ||> Builder.createBinary (Builder.createConstant 1s) Add
-                                ||> Builder.createUnary Shl
+                                ||> shiftLeft
                                 ||> Builder.createBinary (Builder.createConstant 1s) Add
                         | _ -> failwithf "Internal Compiler Error: Invalid bit pair %d" bitPair)
                            (Builder.createConstant start, builder)
@@ -206,8 +211,8 @@ let legalizeInstructions irModule =
     !irModule
     |> Module.instructions
     |> Seq.iter (fun instr ->
-        match !instr with
-        | { Content = BinaryInstruction { Kind = Sub; Left = lhs; Right = rhs } } ->
+        match instr with
+        | BinOp Sub (lhs, rhs) ->
 
             let replacement =
                 builder
@@ -219,7 +224,7 @@ let legalizeInstructions irModule =
                 |> fst
 
             instr |> Value.replaceWith replacement
-        | { Content = BinaryInstruction { Kind = Or; Left = lhs; Right = rhs } } ->
+        | BinOp Or (lhs, rhs) ->
 
             // R0 | R1 = ~(~R0 & ~R1)
 
@@ -238,7 +243,7 @@ let legalizeInstructions irModule =
                 |> fst
 
             instr |> Value.replaceWith replacement
-        | { Content = BinaryInstruction { Kind = Xor; Left = lhs; Right = rhs } } ->
+        | BinOp Xor (lhs, rhs) ->
 
             // R0 ^ R1 = (R1 & ~R2) + (~R1 & R2)
 
@@ -265,11 +270,8 @@ let legalizeInstructions irModule =
                 |> fst
 
             instr |> Value.replaceWith replacement
-        | { Content = BinaryInstruction { Kind = (SRem
-                                          | URem)
-                                          Left = lhs
-                                          Right = Ref { Content = Constant { Value = c } } as rhs } } when (c
-                                                                                                            &&& (c - 1s)) = 0s ->
+        | BinOp SRem (lhs, ConstOp c)
+        | BinOp URem (lhs, ConstOp c) when (c &&& (c - 1s)) = 0s ->
             // lhs mod power of two can be lowered to a simple and
             let builder = builder |> Builder.setInsertBlock None
 
@@ -278,11 +280,18 @@ let legalizeInstructions irModule =
                 (builder
                  |> Builder.createBinary lhs And (Builder.createConstant (c - 1s))
                  |> fst)
-        | { Content = BinaryInstruction { Kind = (SRem
-                                          | URem) as kind
-                                          Left = lhs
-                                          Right = rhs }
-            ParentBlock = Some parentBlock } ->
+        | BinOp SRem (lhs, rhs)
+        | BinOp URem (lhs, rhs) ->
+
+            let kind =
+                match instr with
+                | BinOp SRem _ -> SRem
+                | BinOp URem _ -> URem
+                | _ -> failwith "Internal Compiler Error"
+
+            let parentBlock =
+                !instr |> Value.parentBlock |> Option.get
+
             let newBlock, builder =
                 builder |> Builder.splitBlockAt (Before instr)
 
@@ -372,6 +381,34 @@ let legalizeInstructions irModule =
             |> ignore
 
             instr |> Value.replaceWith acc
+        | BinOp Shl (lhs, ConstOp c) when c > 1s ->
+            let builder =
+                builder
+                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                |> Builder.setInsertPoint (Before instr)
+
+            let repl =
+                [ 1s .. c ]
+                |> Seq.fold (fun current _ ->
+                    builder
+                    |> Builder.createBinary current Shl (Builder.createConstant 1s)
+                    |> fst) lhs
+
+            instr |> Value.replaceWith repl
+        | BinOp LShr (lhs, ConstOp c) when c > 1s ->
+            let builder =
+                builder
+                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                |> Builder.setInsertPoint (Before instr)
+
+            let repl =
+                [ 1s .. c ]
+                |> Seq.fold (fun current _ ->
+                    builder
+                    |> Builder.createBinary current LShr (Builder.createConstant 1s)
+                    |> fst) lhs
+
+            instr |> Value.replaceWith repl
         | _ -> ())
 
     irModule

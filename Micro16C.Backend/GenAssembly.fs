@@ -307,7 +307,10 @@ let genAssembly irModule: AssemblyLine list =
             | { Content = StoreInstruction { Destination = Ref { Content = Register _ } as instr
                                              Value = op } } ->
                 prependMove (operandToBus op |> Option.get) (operandToBus instr |> Option.get) list
-            | { Content = BinaryInstruction { Left = lhs; Right = rhs; Kind = kind } } ->
+            | { Content = BinaryInstruction { Left = lhs
+                                              Right = rhs
+                                              Kind = (Add
+                                              | And) as kind } } ->
                 prependOperation
                     { Operation.Default with
                           AMux = Some AMux.ABus
@@ -326,7 +329,9 @@ let genAssembly irModule: AssemblyLine list =
                           ALU = Some ALU.Neg
                           Shifter = Some Shifter.Noop }
                     list
-            | { Content = UnaryInstruction { Value = value; Kind = Shl } } ->
+            | { Content = BinaryInstruction { Left = value
+                                              Kind = Shl
+                                              Right = Ref { Content = Constant { Value = 1s } } } } ->
                 prependOperation
                     { Operation.Default with
                           AMux = Some AMux.ABus
@@ -335,14 +340,16 @@ let genAssembly irModule: AssemblyLine list =
                           ALU = Some ALU.ABus
                           Shifter = Some Shifter.Left }
                     list
-            | { Content = UnaryInstruction { Value = value; Kind = Shr } } ->
+            | { Content = BinaryInstruction { Left = value
+                                              Kind = LShr
+                                              Right = Ref { Content = Constant { Value = 1s } } } } ->
                 prependOperation
                     { Operation.Default with
                           AMux = Some AMux.ABus
                           SBus = instr |> operandToBus
                           ABus = value |> operandToBus
                           ALU = Some ALU.ABus
-                          Shifter = Some Shifter.Left }
+                          Shifter = Some Shifter.Right }
                     list
             | { Content = GotoInstruction { BasicBlock = branch } } ->
 

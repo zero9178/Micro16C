@@ -88,6 +88,9 @@ and BinaryKind =
     | UDiv
     | SRem
     | URem
+    | Shl
+    | AShr
+    | LShr
 
 and BinaryInstruction =
     { Left: Value ref
@@ -96,8 +99,7 @@ and BinaryInstruction =
 
 and UnaryKind =
     | Not
-    | Shl
-    | Shr
+    | Negate
 
 and UnaryInstruction = { Kind: UnaryKind; Value: Value ref }
 
@@ -230,6 +232,9 @@ and Module =
                              | UDiv -> "udiv"
                              | SRem -> "srem"
                              | URem -> "urem"
+                             | Shl -> "shl"
+                             | AShr -> "ashr"
+                             | LShr -> "lshr"
 
                          text
                          + sprintf "\t%s = %s %s %s\n" (getName instruction) opName (getName binary.Left)
@@ -238,8 +243,7 @@ and Module =
                          let opName =
                              match unary.Kind with
                              | Not -> "not"
-                             | Shl -> "shl"
-                             | Shr -> "shr"
+                             | Negate -> "neg"
 
                          text
                          + sprintf "\t%s = %s %s\n" (getName instruction) opName (getName unary.Value)
@@ -1299,3 +1303,38 @@ module Builder =
         |> Seq.iter (Value.replaceOperand block newBlock)
 
         (newBlock, builder)
+
+let (|BinOp|_|) kind instr =
+    match !instr with
+    | { Content = BinaryInstruction { Kind = binKind
+                                      Left = lhs
+                                      Right = rhs } } when binKind = kind -> Some(lhs, rhs)
+    | _ -> None
+
+let (|UnaryOp|_|) kind instr =
+    match !instr with
+    | { Content = UnaryInstruction { Kind = unaryKind; Value = value } } when unaryKind = kind -> Some(value)
+    | _ -> None
+
+let (|ConstOp|_|) instr =
+    match !instr with
+    | { Content = Constant { Value = c } } -> Some c
+    | _ -> None
+
+let (|UndefOp|_|) instr =
+    match !instr with
+    | { Content = Undef } -> Some UndefOp
+    | _ -> None
+
+let (|CondBrOp|_|) instr =
+    match !instr with
+    | { Content = CondBrInstruction { Kind = cKind
+                                      Value = condition
+                                      TrueBranch = trueBranch
+                                      FalseBranch = falseBranch } } -> Some(cKind, condition, trueBranch, falseBranch)
+    | _ -> None
+
+let (|PhiOp|_|) instr =
+    match !instr with
+    | { Content = PhiInstruction { Incoming = list } } -> Some list
+    | _ -> None

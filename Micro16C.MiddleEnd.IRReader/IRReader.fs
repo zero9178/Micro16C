@@ -130,9 +130,10 @@ type private Instruction =
     | Goto of Value
     | Add of Value * Operand * Operand
     | And of Value * Operand * Operand
+    | Shl of Value * Operand * Operand
+    | LShr of Value * Operand * Operand
+    | AShr of Value * Operand * Operand
     | Not of Value * Operand
-    | Shl of Value * Operand
-    | Shr of Value * Operand
     | Load of Value * Operand
     | BrNeg of Operand * Value * Value
     | BrZero of Operand * Value * Value
@@ -210,13 +211,15 @@ let private parseBasicBlock tokens =
                 let result, tokens = parseInstruction tokens
                 (Not(value, op) :: result, tokens)
             | Identifier "shl" :: tokens ->
-                let op, tokens = parseOperand tokens
+                let lhs, tokens = parseOperand tokens
+                let rhs, tokens = parseOperand tokens
                 let result, tokens = parseInstruction tokens
-                (Shl(value, op) :: result, tokens)
-            | Identifier "shr" :: tokens ->
-                let op, tokens = parseOperand tokens
+                (Shl(value, lhs, rhs) :: result, tokens)
+            | Identifier "lshr" :: tokens ->
+                let lhs, tokens = parseOperand tokens
+                let rhs, tokens = parseOperand tokens
                 let result, tokens = parseInstruction tokens
-                (Shr(value, op) :: result, tokens)
+                (LShr(value, lhs, rhs) :: result, tokens)
             | Identifier "load" :: tokens ->
                 let op, tokens = parseOperand tokens
                 let result, tokens = parseInstruction tokens
@@ -438,12 +441,18 @@ let fromString text: Module ref =
 
                 assignOperand goto 0 (ValueOperand value) map
             | And (value, lhs, rhs)
+            | Shl (value, lhs, rhs)
+            | LShr (value, lhs, rhs)
+            | AShr (value, lhs, rhs)
             | Add (value, lhs, rhs) ->
 
                 let kind =
                     match instr with
                     | And _ -> BinaryKind.And
                     | Add _ -> BinaryKind.Add
+                    | Shl _ -> BinaryKind.Shl
+                    | LShr _ -> BinaryKind.LShr
+                    | AShr _ -> BinaryKind.AShr
                     | _ -> failwith "Not possible"
 
                 let bin =
@@ -454,14 +463,10 @@ let fromString text: Module ref =
                 let map = assignOperand bin 0 lhs map
                 let map = assignOperand bin 1 rhs map
                 defineValue value bin map
-            | Not (value, operand)
-            | Shl (value, operand)
-            | Shr (value, operand) ->
+            | Not (value, operand) ->
                 let kind =
                     match instr with
                     | Not _ -> UnaryKind.Not
-                    | Shl _ -> UnaryKind.Shl
-                    | Shr _ -> UnaryKind.Shr
                     | _ -> failwith "Not possible"
 
                 let unary =

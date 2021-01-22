@@ -267,14 +267,14 @@ let ``Instruction Simplify: Add patterns`` () =
            (structurallyEquivalentTo """
 %entry:
     %0 = load R0
-    %1 = shl %0
+    %1 = shl %0 1
     store %1 -> R1
     """)
 
 [<Fact>]
 let ``Instruction Simplify: Shift patterns`` () =
     """%entry:
-    %0 = shl 3
+    %0 = shl 3 1
     store %0 -> R1
 """
     |> IRReader.fromString
@@ -287,7 +287,7 @@ let ``Instruction Simplify: Shift patterns`` () =
     """)
 
     """%entry:
-    %0 = shr 3
+    %0 = lshr 3 1
     store %0 -> R1
 """
     |> IRReader.fromString
@@ -879,7 +879,7 @@ let ``Liveness analysis`` () =
             %n13 = add %n15 %n16
             %n11 = add 1 %n15
             %18 = add 1 1
-            %19 = shl %18
+            %19 = shl %18 1
             %20 = not %19
             %21 = add %n11 %20
             br %21 < 0 %n3 %isZero

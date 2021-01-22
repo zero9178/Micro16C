@@ -4,41 +4,6 @@ open System.Collections.Generic
 open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
 
-let private (|BinOp|_|) kind instr =
-    match !instr with
-    | { Content = BinaryInstruction { Kind = binKind
-                                      Left = lhs
-                                      Right = rhs } } when binKind = kind -> Some(lhs, rhs)
-    | _ -> None
-
-let private (|UnaryOp|_|) kind instr =
-    match !instr with
-    | { Content = UnaryInstruction { Kind = unaryKind; Value = value } } when unaryKind = kind -> Some(value)
-    | _ -> None
-
-let private (|ConstOp|_|) instr =
-    match !instr with
-    | { Content = Constant { Value = c } } -> Some c
-    | _ -> None
-
-let private (|UndefOp|_|) instr =
-    match !instr with
-    | { Content = Undef } -> Some UndefOp
-    | _ -> None
-
-let private (|CondBrOp|_|) instr =
-    match !instr with
-    | { Content = CondBrInstruction { Kind = cKind
-                                      Value = condition
-                                      TrueBranch = trueBranch
-                                      FalseBranch = falseBranch } } -> Some(cKind, condition, trueBranch, falseBranch)
-    | _ -> None
-
-let private (|PhiOp|_|) instr =
-    match !instr with
-    | { Content = PhiInstruction { Incoming = list } } -> Some list
-    | _ -> None
-
 let private singleInstructionSimplify builder value =
     match value with
     // And patterns
@@ -155,7 +120,10 @@ let private singleInstructionSimplify builder value =
     // X + X -> lsh(X)
     | BinOp Add (lhs, rhs) when lhs = rhs ->
         value
-        |> Value.replaceWith (builder |> Builder.createUnary Shl lhs |> fst)
+        |> Value.replaceWith
+            (builder
+             |> Builder.createBinary lhs Shl (Builder.createConstant 1s)
+             |> fst)
 
         true
     // X + (Y - X) -> Y
@@ -212,14 +180,14 @@ let private singleInstructionSimplify builder value =
     | UnaryOp Not (UnaryOp Not x) ->
         value |> Value.replaceWith x
         true
-    | UnaryOp Shl (ConstOp c) ->
+    | BinOp Shl (ConstOp lhs, ConstOp rhs) ->
         value
-        |> Value.replaceWith (Builder.createConstant (c <<< 1))
+        |> Value.replaceWith (Builder.createConstant (lhs <<< (rhs |> int32)))
 
         true
-    | UnaryOp Shr (ConstOp c) ->
+    | BinOp LShr (ConstOp lhs, ConstOp rhs) ->
         value
-        |> Value.replaceWith (Builder.createConstant ((c |> uint16) >>> 1 |> int16))
+        |> Value.replaceWith (Builder.createConstant ((lhs |> uint16) >>> (rhs |> int32) |> int16))
 
         true
     | CondBrOp (Zero, ConstOp c, trueBranch, falseBranch) ->

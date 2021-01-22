@@ -37,8 +37,8 @@ let ``Legalize Constants`` () =
            (structurallyEquivalentTo """
 %entry:
     %0 = load R1
-    %1 = shl 1
-    %2 = shl %1
+    %1 = shl 1 1
+    %2 = shl %1 1
     %3 = add %2 1
     %4 = add %0 %3
     """)
@@ -56,7 +56,7 @@ let ``Legalize Constants`` () =
 %entry:
     %0 = load R1
     %1 = add 1 1
-    %2 = shl %1
+    %2 = shl %1 1
     %3 = not %2
     %4 = add %0 %3
     """)
@@ -73,9 +73,53 @@ let ``Legalize Constants`` () =
            (structurallyEquivalentTo """
 %entry:
     %0 = load R1
-    %1 = shr -1
+    %1 = lshr -1 1
     %2 = not %1
     %3 = add %0 %2
+    """)
+
+[<Fact>]
+let ``Legalize instructions: Shifting`` () =
+    """
+%entry:
+    %0 = load R0
+    %1 = shl %0 5
+    store %1 -> R1
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeInstructions
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R0
+    %1 = shl %0 1
+    %2 = shl %1 1
+    %3 = shl %2 1
+    %4 = shl %3 1
+    %5 = shl %4 1
+    store %5 -> R1
+    """)
+
+    """
+%entry:
+    %0 = load R0
+    %1 = lshr %0 5
+    store %1 -> R1
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeInstructions
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R0
+    %1 = lshr %0 1
+    %2 = lshr %1 1
+    %3 = lshr %2 1
+    %4 = lshr %3 1
+    %5 = lshr %4 1
+    store %5 -> R1
     """)
 
 [<Fact>]
@@ -84,8 +128,8 @@ let ``Assembly folding`` () =
         """
     %entry:
         %0 = load R0
-        %1 = shl %0
-        %2 = shl %1
+        %1 = shl %0 1
+        %2 = shl %1 1
         """
         |> IRReader.fromString
         |> Passes.analyzeLiveness
@@ -111,8 +155,8 @@ let ``Assembly folding`` () =
         """
     %entry:
         %0 = load R0
-        %1 = shl %0
-        %2 = shl %1
+        %1 = shl %0 1
+        %2 = shl %1 1
         goto %false
     %true:
         store 0 -> R1
