@@ -165,3 +165,15 @@ let ``Assembly folding`` () =
                       MemoryAccess = Some _ } -> true
         | _ -> false)
     |> should be False
+
+[<Fact>]
+let ``Assembly parsing`` () =
+    """
+:entry
+    R0 <- lsh(1+1)
+    R0 <- R0 + 1
+    R1 <- lsh(1)
+    R1 <- R1 + 1
+    R2 <- R0 + R1; goto .entry
+    """
+    |> ParseAssembly.parseAssembly

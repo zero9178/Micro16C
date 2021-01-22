@@ -34,7 +34,8 @@ type private TokenType =
     | Plus
 
 let private tokenize chars =
-    Seq.unfold (function
+    Seq.unfold (fun chars ->
+        match chars |> List.skipWhile Char.IsWhiteSpace with
         | [] -> None
         | '<' :: '-' :: chars -> Some(Arrow, chars)
         | '1' :: chars -> Some(One, chars)
@@ -48,7 +49,7 @@ let private tokenize chars =
         | '.' :: chars -> Some(Dot, chars)
         | '&' :: chars -> Some(And, chars)
         | '+' :: chars -> Some(Plus, chars)
-        | c :: chars when Char.IsLetter c || c = '_' || c = '$' ->
+        | (c :: _) as chars when Char.IsLetter c || c = '_' || c = '$' ->
             let identifier =
                 chars
                 |> List.takeWhile (fun c ->
@@ -60,8 +61,9 @@ let private tokenize chars =
             let chars =
                 chars |> List.skip (List.length identifier)
 
-            Some(chars |> Array.ofList |> String |> Identifier, chars)
+            Some(identifier |> Array.ofList |> String |> Identifier, chars)
         | c :: _ -> failwithf "Invalid character '%c'" c) chars
+    |> Seq.cache
 
 (*
 Grammar:
@@ -81,7 +83,7 @@ Grammar:
 
 <Label> ::= COLON IDENTIFIER
 
-<File> ::= { <Instruction> <Label> }
+<File> ::= { <Instruction> | <Label> }
 
 *)
 
@@ -114,6 +116,20 @@ type private Operation =
     | Add of Operand * Operand
     | And of Operand * Operand
     | Read of Operand
+
+type private Condition =
+    | CondZero
+    | CondNegative
+
+type private Instruction =
+    { Operations: (Register option * Operation) list
+      Control: (Condition option * string) option }
+
+type private Line =
+    | InstructionLine of Instruction
+    | LabelLine of string
+
+type private File = { Lines: Line list }
 
 let private require tokenType tokens =
     match Seq.tryHead tokens with
@@ -154,8 +170,8 @@ let rec private parseOperand tokens =
 
 let rec private parseOperation tokens =
     match Seq.tryHead tokens with
-    | Some (Identifier ("lhs"
-    | "rhs" as s)) ->
+    | Some (Identifier ("lsh"
+    | "rsh" as s)) ->
         let tokens =
             tokens
             |> Seq.tail
@@ -181,3 +197,100 @@ let rec private parseOperation tokens =
             let other, tokens = tokens |> Seq.tail |> parseOperand
             if op = Plus then (Add(operand, other), tokens) else (And(operand, other), tokens)
         | _ -> (Read operand, tokens)
+
+let rec private parseInstruction tokens =
+    let firstDestination, tokens =
+        match Seq.take 2 tokens |> List.ofSeq with
+        | [ _; Arrow ] ->
+            let register, tokens = parseRegister tokens
+            let _, tokens = require Arrow tokens
+            (Some register, tokens)
+        | _ -> (None, tokens)
+
+    let firstOperation, tokens = parseOperation tokens
+
+    let additional =
+        Seq.unfold (fun tokens ->
+            match Seq.take 2 tokens |> List.ofSeq with
+            | [ SemiColon; Identifier "if" ]
+            | [ SemiColon; Identifier "goto" ] -> None
+            | SemiColon :: _ ->
+                let tokens = tokens |> Seq.tail
+
+                let destination, tokens =
+                    match Seq.take 2 tokens |> List.ofSeq with
+                    | [ _; Arrow ] ->
+                        let register, tokens = parseRegister tokens
+                        let _, tokens = require Arrow tokens
+                        (Some register, tokens)
+                    | _ -> (None, tokens)
+
+                let operation, tokens = parseOperation tokens
+                Some(((destination, operation), tokens), tokens)
+            | _ -> None) tokens
+        |> Seq.cache
+
+    let tokens =
+        additional
+        |> Seq.map snd
+        |> Seq.tryLast
+        |> Option.defaultValue tokens
+
+    let operations =
+        (firstDestination, firstOperation)
+        |> Seq.singleton
+        |> Seq.append (additional |> Seq.map fst)
+
+    let control, tokens =
+        match Seq.tryHead tokens with
+        | Some SemiColon ->
+            let tokens = tokens |> Seq.tail
+
+            let condition, tokens =
+                match Seq.tryHead tokens with
+                | Some (Identifier "if") ->
+                    let tokens = tokens |> Seq.tail
+
+                    match Seq.tryHead tokens with
+                    | Some (Identifier "N") -> (CondNegative |> Some, tokens |> Seq.tail)
+                    | Some (Identifier "Z") -> (CondZero |> Some, tokens |> Seq.tail)
+                    | _ -> failwith "Expected 'N' or 'Z' condition after 'if'"
+                | _ -> (None, tokens)
+
+            let tokens =
+                tokens
+                |> require (Identifier "goto")
+                |> snd
+                |> require Dot
+                |> snd
+
+            match tokens |> Seq.tryHead with
+            | Some (Identifier s) -> ((condition, s) |> Some, tokens |> Seq.tail)
+            | _ -> failwith "Expected identifier after 'goto'"
+        | _ -> (None, tokens)
+
+    ({ Operations = operations |> List.ofSeq
+       Control = control },
+     tokens)
+
+let private parseFile tokens =
+    { Lines =
+          Seq.unfold (fun tokens ->
+              match Seq.tryHead tokens with
+              | None -> None
+              | Some Colon ->
+                  let tokens = tokens |> Seq.tail
+
+                  match tokens |> Seq.tryHead with
+                  | Some (Identifier s) -> Some(LabelLine s, tokens |> Seq.tail)
+                  | _ -> failwith "Expected identifier after ':'"
+              | _ ->
+                  let result, tokens = parseInstruction tokens
+                  Some(InstructionLine result, tokens)) tokens
+          |> List.ofSeq }
+
+let parseAssembly string =
+    let tree =
+        string |> List.ofSeq |> tokenize |> parseFile
+
+    ()
