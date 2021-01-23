@@ -597,7 +597,7 @@ module Value =
 
         | _ -> failwith "Internal Compiler Error"
 
-    // Careful, in an instruction with multiple operands this will delete all occurrences
+    // Careful, in an instruction with multiple operands this will replace all occurrences
     let replaceOperand operand replacement value =
         !value
         |> operands
@@ -702,6 +702,8 @@ module Value =
 
     let strictlyDominates other value =
         if other = value then false else dominates other value
+
+    let rename newName value = value := { !value with Name = newName }
 
 [<RequireQualifiedAccess>]
 module BasicBlock =
@@ -1283,13 +1285,24 @@ module Builder =
 
                 ((instructions |> List.findIndex ((=) instr)) - 1, instructions, block)
 
-        let instr = List.splitAt (i + 1) instructions |> snd
+        let instr =
+            List.splitAt (i + 1) instructions
+            |> snd
+            |> List.rev
 
         let newBlock, builder =
-            builder |> createBasicBlockAt (Before block) ""
+            builder
+            |> createBasicBlockAt (Before block) (Value.name !block + ".1")
+
+        block |> Value.rename (Value.name !block + ".2")
 
         let builder =
             builder |> setInsertBlock (Some newBlock)
+
+        !block
+        |> Value.users
+        |> Seq.filter ((!) >> Value.isTerminating)
+        |> Seq.iter (Value.replaceOperand block newBlock)
 
         let builder =
             instr
@@ -1297,12 +1310,7 @@ module Builder =
             |> createGoto block
             |> snd
 
-        !block
-        |> Value.users
-        |> Seq.filter ((!) >> Value.isTerminating)
-        |> Seq.iter (Value.replaceOperand block newBlock)
-
-        (newBlock, builder)
+        (newBlock, block, builder)
 
 let (|BinOp|_|) kind instr =
     match !instr with

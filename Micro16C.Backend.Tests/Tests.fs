@@ -4,6 +4,7 @@ module Tests
 open Micro16C.Backend
 open Micro16C.Backend.Assembly
 open Micro16C.MiddleEnd
+open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Tests.PassesTests
 open Xunit
 open FsUnit.Xunit
@@ -120,6 +121,37 @@ let ``Legalize instructions: Shifting`` () =
     %4 = lshr %3 1
     %5 = lshr %4 1
     store %5 -> R1
+    """)
+
+    """
+%entry:
+    %0 = load R0
+    %1 = load R2
+    %2 = shl %0 %1
+    store %2 -> R2
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeInstructions
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry.1:
+        %0 = load R0
+        %1 = load R2
+        %2 = not %1
+        %3 = add 1 %2
+        goto %shlCond
+%shlCond:
+        %5 = phi (0,%entry.1) (%4,%shlBody)
+        %7 = phi (%0,%entry.1) (%6,%shlBody)
+        %8 = add %5 %3
+        br %8 < 0 %shlBody %entry.2
+%shlBody:
+        %6 = shl %7 1
+        %4 = add %5 1
+        goto %shlCond
+%entry.2:
+        store %7 -> R2
     """)
 
 [<Fact>]

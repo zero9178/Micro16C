@@ -1,6 +1,7 @@
 module Micro16C.Backend.Legalize
 
 open Micro16C.MiddleEnd.IR
+open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
 
 let legalizeConstants irModule =
@@ -289,17 +290,14 @@ let legalizeInstructions irModule =
                 | BinOp URem _ -> URem
                 | _ -> failwith "Internal Compiler Error"
 
-            let parentBlock =
-                !instr |> Value.parentBlock |> Option.get
-
-            let newBlock, builder =
+            let beforeBlock, instrBlock, builder =
                 builder |> Builder.splitBlockAt (Before instr)
 
             let cont, lhs, builder =
                 if kind = SRem then
                     let neg, builder =
                         builder
-                        |> Builder.createBasicBlockAt (After newBlock) "modNeg"
+                        |> Builder.createBasicBlockAt (After beforeBlock) "modNeg"
 
                     let cont, builder =
                         builder
@@ -307,7 +305,7 @@ let legalizeInstructions irModule =
 
                     let builder = builder |> Builder.setInsertBlock None
 
-                    !newBlock
+                    !beforeBlock
                     |> Value.asBasicBlock
                     |> BasicBlock.terminator
                     |> Value.replaceWith
@@ -328,21 +326,21 @@ let legalizeInstructions irModule =
                         |> snd
                         |> Builder.setInsertBlock (Some cont)
                         |> Builder.createPhi [ (negated, neg)
-                                               (lhs, newBlock) ]
+                                               (lhs, beforeBlock) ]
 
                     (cont, phi, builder)
                 else
                     let cont, builder =
                         builder
-                        |> Builder.createBasicBlockAt (After newBlock) "cont"
+                        |> Builder.createBasicBlockAt (After beforeBlock) "cont"
 
                     let builder =
                         builder |> Builder.setInsertBlock (Some cont)
 
-                    !newBlock
+                    !beforeBlock
                     |> Value.asBasicBlock
                     |> BasicBlock.terminator
-                    |> Value.replaceOperand parentBlock cont
+                    |> Value.replaceOperand instrBlock cont
 
                     (cont, lhs, builder)
 
@@ -374,14 +372,24 @@ let legalizeInstructions irModule =
             acc |> Value.setOperand 2 nextValue
 
             builder
-            |> Builder.createCondBr Negative nextValue parentBlock modCont
+            |> Builder.createCondBr Negative nextValue instrBlock modCont
             |> snd
             |> Builder.setInsertBlock (Some modCont)
             |> Builder.createGoto body
             |> ignore
 
             instr |> Value.replaceWith acc
-        | BinOp Shl (lhs, ConstOp c) when c > 1s ->
+        | BinOp Shl (_, ConstOp 1s) -> ()
+        | BinOp LShr (_, ConstOp 1s) -> ()
+        | BinOp LShr (lhs, ConstOp c)
+        | BinOp Shl (lhs, ConstOp c) ->
+
+            let kind =
+                match instr with
+                | BinOp Shl _ -> Shl
+                | BinOp LShr _ -> LShr
+                | _ -> failwith "Internal Compiler Error"
+
             let builder =
                 builder
                 |> Builder.setInsertBlock (!instr |> Value.parentBlock)
@@ -391,24 +399,93 @@ let legalizeInstructions irModule =
                 [ 1s .. c ]
                 |> Seq.fold (fun current _ ->
                     builder
-                    |> Builder.createBinary current Shl (Builder.createConstant 1s)
+                    |> Builder.createBinary current kind (Builder.createConstant 1s)
                     |> fst) lhs
 
             instr |> Value.replaceWith repl
-        | BinOp LShr (lhs, ConstOp c) when c > 1s ->
+        | BinOp LShr (lhs, rhs)
+        | BinOp Shl (lhs, rhs) ->
+
+            let kind =
+                match instr with
+                | BinOp Shl _ -> Shl
+                | BinOp LShr _ -> LShr
+                | _ -> failwith "Internal Compiler Error"
+
+            let beforeBlock, instrBlock, builder =
+                builder |> Builder.splitBlockAt (Before instr)
+
             let builder =
                 builder
-                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
-                |> Builder.setInsertPoint (Before instr)
+                |> Builder.setInsertBlock (Some beforeBlock)
+                |> Builder.setInsertPoint
+                    (Before
+                        (!beforeBlock
+                         |> Value.asBasicBlock
+                         |> BasicBlock.terminator))
 
-            let repl =
-                [ 1s .. c ]
-                |> Seq.fold (fun current _ ->
-                    builder
-                    |> Builder.createBinary current LShr (Builder.createConstant 1s)
-                    |> fst) lhs
+            let negRhs =
+                (rhs, builder)
+                ||> Builder.createUnary Not
+                ||> Builder.createBinary (Builder.createConstant 1s) Add
+                |> fst
 
-            instr |> Value.replaceWith repl
+            let cond, builder =
+                builder
+                |> Builder.createBasicBlockAt (After beforeBlock) "shCond"
+
+            let body, builder =
+                builder
+                |> Builder.createBasicBlockAt (After cond) "shBody"
+
+            !beforeBlock
+            |> Value.asBasicBlock
+            |> BasicBlock.terminator
+            |> Value.replaceOperand instrBlock cond
+
+            let builder =
+                builder |> Builder.setInsertBlock (Some cond)
+
+            let i =
+                builder
+                |> Builder.createPhi [ (Builder.createConstant 0s, beforeBlock)
+                                       (Value.UndefValue, body) ]
+                |> fst
+
+            let acc =
+                builder
+                |> Builder.createPhi [ (lhs, beforeBlock)
+                                       (Value.UndefValue, body) ]
+                |> fst
+
+            let diff =
+                builder
+                |> Builder.createBinary i Add negRhs
+                |> fst
+
+            builder
+            |> Builder.createCondBr Negative diff body instrBlock
+            |> ignore
+
+            let builder =
+                builder |> Builder.setInsertBlock (Some body)
+
+            let newAcc =
+                builder
+                |> Builder.createBinary acc kind (Builder.createConstant 1s)
+                |> fst
+
+            acc |> Value.setOperand 2 newAcc
+
+            let newI =
+                builder
+                |> Builder.createBinary i Add (Builder.createConstant 1s)
+                |> fst
+
+            i |> Value.setOperand 2 newI
+
+            builder |> Builder.createGoto cond |> ignore
+            instr |> Value.replaceWith acc
         | _ -> ())
 
     irModule
