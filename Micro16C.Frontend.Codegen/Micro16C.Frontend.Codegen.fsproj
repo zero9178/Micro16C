@@ -2,18 +2,14 @@
 
     <PropertyGroup>
         <TargetFramework>net5.0</TargetFramework>
-        <RootNamespace>Micro16C.Backend</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="Assembly.fs"/>
-        <Compile Include="Legalize.fs"/>
-        <Compile Include="RegisterAllocator.fs"/>
-        <Compile Include="GenAssembly.fs"/>
-        <Compile Include="ParseAssembly.fs"/>
+        <Compile Include="Codegen.fs"/>
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\Micro16C.Frontend\Micro16C.Frontend.fsproj"/>
         <ProjectReference Include="..\Micro16C.MiddleEnd\Micro16C.MiddleEnd.fsproj"/>
     </ItemGroup>
 
