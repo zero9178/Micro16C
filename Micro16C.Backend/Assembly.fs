@@ -324,7 +324,8 @@ module Operation =
 
         let current =
             current
-            ||| (if op.MemoryAccess |> Option.isSome then 1 else 0 <<< 21)
+            ||| ((if op.MemoryAccess |> Option.isSome then 1 else 0)
+                 <<< 21)
 
 
         let current =

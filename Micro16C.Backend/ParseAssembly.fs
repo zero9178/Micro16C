@@ -513,22 +513,22 @@ let private visitInstructions instr =
             match (current, condition) with
             | { Condition = Some _ }, _ -> failwith "Can't apply jumps to an instruction more than once"
             | _, None ->
-                { op with
+                { current with
                       Condition = Some Cond.None
                       Address = Some address }
             | _, Some CondZero ->
-                { op with
+                { current with
                       Condition = Some Cond.Zero
                       Address = Some address }
             | _, Some CondNegative ->
-                { op with
+                { current with
                       Condition = Some Cond.Neg
                       Address = Some address }
         | MemoryAccess memoryAccess ->
             if current.MemoryAccess |> Option.isSome then
                 failwith "Can't apply memory access twice"
             else
-                { op with
+                { current with
                       MemoryAccess = Some memoryAccess }) op
 
 
