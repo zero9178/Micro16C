@@ -1,6 +1,7 @@
 module Micro16C.Backend.ParseAssembly
 
 open System
+open Micro16C.Backend.Assembly
 
 (*
 IDENTIFIER = ([^\W\d]|[.$])[\w.$]*
@@ -16,6 +17,7 @@ COLON = ":"
 DOT = "."
 AND = "&"
 PLUS = "+"
+COMMENT = "#".*
 *)
 
 type private TokenType =
@@ -35,7 +37,19 @@ type private TokenType =
 
 let private tokenize chars =
     Seq.unfold (fun chars ->
-        match chars |> List.skipWhile Char.IsWhiteSpace with
+
+        let chars =
+            chars |> List.skipWhile Char.IsWhiteSpace
+
+        let chars =
+            match chars with
+            | '#' :: chars ->
+                chars
+                |> List.skipWhile ((<>) '\n')
+                |> List.skipWhile Char.IsWhiteSpace
+            | _ -> chars
+
+        match chars with
         | [] -> None
         | '<' :: '-' :: chars -> Some(Arrow, chars)
         | '1' :: chars -> Some(One, chars)
@@ -70,7 +84,7 @@ Grammar:
 
 <Register> ::= "R0" | "R1" | "R2" | "R3" | "R4" | "R5" | "R6" | "R7" | "R8" | "R9" | "R10" | "AC" | "PC" | "MBR" | "MAR"
 
-<Operand> ::= <Register> | ONE | ZERO | MINUS ONE | OPEN_PARENTHESES <Operand> CLOSE_PARENTHESES
+<Operand> ::= <Register> | ONE | ZERO | MINUS ONE | OPEN_PARENTHESES <Operation> CLOSE_PARENTHESES
 
 <Operation> ::= lsh OPEN_PARENTHESES <Operation> CLOSE_PARENTHESES
               | rhs OPEN_PARENTHESES <Operation> CLOSE_PARENTHESES
@@ -79,15 +93,15 @@ Grammar:
               | <Operand> & <Operand>
               | <Operand>
 
-<Instruction> ::= [<Register> ARROW ] <Operation> { SEMI_COLON [<Register> ARROW ] <Operation> } [ SEMI_COLON ["if" ("N" | "Z")] "goto" DOT IDENTIFIER ]
+<Instruction> ::= ([<Register> ARROW ] <Operation> | ["if" ("N" | "Z")] "goto" DOT IDENTIFIER | "wr" | "rd")
 
 <Label> ::= COLON IDENTIFIER
 
-<File> ::= { <Instruction> | <Label> }
+<File> ::= { <Instruction> { SEMI_COLON <Instruction> } | <Label> }
 
 *)
 
-type private Register =
+type private AssemblyRegister =
     | R0
     | R1
     | R2
@@ -101,15 +115,17 @@ type private Register =
     | R10
     | PC
     | AC
+    | MBR
+    | MAR
 
 type private Operand =
-    | RegisterOperand of Register
+    | RegisterOperand of AssemblyRegister
     | One
     | Zero
     | NegOne
-    | Parentheses of Operand
+    | Parentheses of Operation
 
-type private Operation =
+and private Operation =
     | LeftShift of Operation
     | RightShift of Operation
     | Negate of Operand
@@ -122,14 +138,22 @@ type private Condition =
     | CondNegative
 
 type private Instruction =
-    { Operations: (Register option * Operation) list
-      Control: (Condition option * string) option }
+    | Operation of AssemblyRegister option * Operation
+    | Control of Condition option * string
+    | MemoryAccess of MemoryAccess
 
 type private Line =
-    | InstructionLine of Instruction
+    | InstructionLine of Instruction list
     | LabelLine of string
 
 type private File = { Lines: Line list }
+
+let private lookAhead n (seq: seq<_>) =
+    use e = seq.GetEnumerator()
+
+    [ 1 .. n ]
+    |> List.fold (fun result _ -> if e.MoveNext() then e.Current :: result else result) []
+    |> List.rev
 
 let private require tokenType tokens =
     match Seq.tryHead tokens with
@@ -153,6 +177,8 @@ let private parseRegister tokens =
     | Some (Identifier "R10") -> (R10, Seq.tail tokens)
     | Some (Identifier "AC") -> (AC, Seq.tail tokens)
     | Some (Identifier "PC") -> (PC, Seq.tail tokens)
+    | Some (Identifier "MAR") -> (MAR, Seq.tail tokens)
+    | Some (Identifier "MBR") -> (MBR, Seq.tail tokens)
     | Some t -> failwithf "Expected Register instead of '%A'" t
 
 let rec private parseOperand tokens =
@@ -161,14 +187,14 @@ let rec private parseOperand tokens =
     | Some TokenType.One -> (One, tokens |> Seq.tail)
     | Some TokenType.Zero -> (Zero, tokens |> Seq.tail)
     | Some OpenParentheses ->
-        let operand, tokens = tokens |> Seq.tail |> parseOperand
+        let operand, tokens = tokens |> Seq.tail |> parseOperation
         let _, tokens = tokens |> require CloseParentheses
         (Parentheses operand, tokens)
     | _ ->
         let register, tokens = tokens |> parseRegister
         (RegisterOperand register, tokens)
 
-let rec private parseOperation tokens =
+and private parseOperation tokens =
     match Seq.tryHead tokens with
     | Some (Identifier ("lsh"
     | "rsh" as s)) ->
@@ -183,7 +209,7 @@ let rec private parseOperation tokens =
         let tokens =
             tokens |> require CloseParentheses |> snd
 
-        if s = "lhs" then (LeftShift operation, tokens) else (RightShift operation, tokens)
+        if s = "lsh" then (LeftShift operation, tokens) else (RightShift operation, tokens)
     | Some TokenType.Not ->
         let tokens = tokens |> Seq.tail
         let operand, tokens = parseOperand tokens
@@ -199,79 +225,46 @@ let rec private parseOperation tokens =
         | _ -> (Read operand, tokens)
 
 let rec private parseInstruction tokens =
-    let firstDestination, tokens =
-        match Seq.take 2 tokens |> List.ofSeq with
-        | [ _; Arrow ] ->
-            let register, tokens = parseRegister tokens
-            let _, tokens = require Arrow tokens
-            (Some register, tokens)
-        | _ -> (None, tokens)
 
-    let firstOperation, tokens = parseOperation tokens
+    match tokens |> lookAhead 1 with
+    | [ Identifier "goto" ]
+    | [ Identifier "if" ] ->
 
-    let additional =
-        Seq.unfold (fun tokens ->
-            match Seq.take 2 tokens |> List.ofSeq with
-            | [ SemiColon; Identifier "if" ]
-            | [ SemiColon; Identifier "goto" ] -> None
-            | SemiColon :: _ ->
+        let condition, tokens =
+            match Seq.tryHead tokens with
+            | Some (Identifier "if") ->
                 let tokens = tokens |> Seq.tail
 
-                let destination, tokens =
-                    match Seq.take 2 tokens |> List.ofSeq with
-                    | [ _; Arrow ] ->
-                        let register, tokens = parseRegister tokens
-                        let _, tokens = require Arrow tokens
-                        (Some register, tokens)
-                    | _ -> (None, tokens)
-
-                let operation, tokens = parseOperation tokens
-                Some(((destination, operation), tokens), tokens)
-            | _ -> None) tokens
-        |> Seq.cache
-
-    let tokens =
-        additional
-        |> Seq.map snd
-        |> Seq.tryLast
-        |> Option.defaultValue tokens
-
-    let operations =
-        (firstDestination, firstOperation)
-        |> Seq.singleton
-        |> Seq.append (additional |> Seq.map fst)
-
-    let control, tokens =
-        match Seq.tryHead tokens with
-        | Some SemiColon ->
-            let tokens = tokens |> Seq.tail
-
-            let condition, tokens =
                 match Seq.tryHead tokens with
-                | Some (Identifier "if") ->
-                    let tokens = tokens |> Seq.tail
+                | Some (Identifier "N") -> (CondNegative |> Some, tokens |> Seq.tail)
+                | Some (Identifier "Z") -> (CondZero |> Some, tokens |> Seq.tail)
+                | _ -> failwith "Expected 'N' or 'Z' condition after 'if'"
+            | _ -> (None, tokens)
 
-                    match Seq.tryHead tokens with
-                    | Some (Identifier "N") -> (CondNegative |> Some, tokens |> Seq.tail)
-                    | Some (Identifier "Z") -> (CondZero |> Some, tokens |> Seq.tail)
-                    | _ -> failwith "Expected 'N' or 'Z' condition after 'if'"
-                | _ -> (None, tokens)
+        let tokens =
+            tokens
+            |> require (Identifier "goto")
+            |> snd
+            |> require Dot
+            |> snd
 
-            let tokens =
-                tokens
-                |> require (Identifier "goto")
-                |> snd
-                |> require Dot
-                |> snd
+        match tokens |> Seq.tryHead with
+        | Some (Identifier s) -> ((condition, s) |> Control, tokens |> Seq.tail)
+        | _ -> failwith "Expected identifier after 'goto'"
+    | [ Identifier "rd" ] -> (MemoryAccess.Read |> MemoryAccess, tokens |> Seq.tail)
+    | [ Identifier "wr" ] -> (MemoryAccess.Write |> MemoryAccess, tokens |> Seq.tail)
+    | _ ->
+        let destination, tokens =
+            match lookAhead 2 tokens with
+            | [ _; Arrow ] ->
+                let register, tokens = parseRegister tokens
+                let _, tokens = require Arrow tokens
+                (Some register, tokens)
+            | _ -> (None, tokens)
 
-            match tokens |> Seq.tryHead with
-            | Some (Identifier s) -> ((condition, s) |> Some, tokens |> Seq.tail)
-            | _ -> failwith "Expected identifier after 'goto'"
-        | _ -> (None, tokens)
+        let operation, tokens = parseOperation tokens
+        (Operation(destination, operation), tokens)
 
-    ({ Operations = operations |> List.ofSeq
-       Control = control },
-     tokens)
 
 let private parseFile tokens =
     { Lines =
@@ -286,11 +279,274 @@ let private parseFile tokens =
                   | _ -> failwith "Expected identifier after ':'"
               | _ ->
                   let result, tokens = parseInstruction tokens
-                  Some(InstructionLine result, tokens)) tokens
+
+                  let rec parseInstructionList tokens =
+                      match tokens |> Seq.tryHead with
+                      | Some SemiColon ->
+                          let result, tokens = tokens |> Seq.tail |> parseInstruction
+                          let list, tokens = parseInstructionList tokens
+                          (result :: list, tokens)
+                      | _ -> ([], tokens)
+
+                  let list, tokens = parseInstructionList tokens
+                  Some(InstructionLine(result :: list), tokens)) tokens
           |> List.ofSeq }
 
-let parseAssembly string =
-    let tree =
-        string |> List.ofSeq |> tokenize |> parseFile
+let rec private visitOperand operand =
+    match operand with
+    | One ->
+        { Operation.Default with
+              AMux = Some AMux.ABus
+              ABus = Some Bus.One }
+    | Zero ->
+        { Operation.Default with
+              AMux = Some AMux.ABus
+              ABus = Some Bus.One }
+    | NegOne ->
+        { Operation.Default with
+              AMux = Some AMux.ABus
+              ABus = Some Bus.NegOne }
+    | Parentheses operand -> visitOperation operand
+    | RegisterOperand reg ->
+        match reg with
+        | R0 ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.R0 }
+        | R1 ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.R1 }
+        | R2 ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.R2 }
+        | R3 ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.R3 }
+        | R4 ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.R4 }
+        | R5 ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.R5 }
+        | R6 ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.R6 }
+        | R7 ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.R7 }
+        | R8 ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.R8 }
+        | R9 ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.R9 }
+        | R10 ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.R10 }
+        | AC ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.AC }
+        | PC ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some Bus.PC }
+        | MBR ->
+            { Operation.Default with
+                  AMux = Some AMux.MBR }
+        | MAR -> failwith "MAR Register is write only"
 
-    ()
+and private visitOperation operation =
+    match operation with
+    | Read operand -> visitOperand operand
+    | Negate operand ->
+        { visitOperand operand with
+              ALU = Some ALU.Neg }
+    | LeftShift operation ->
+        let op = visitOperation operation
+
+        match op with
+        | { Shifter = (None
+            | Some Shifter.Noop) } -> { op with Shifter = Some Shifter.Left }
+        | _ -> failwith "Operation can't use the shifter twice"
+    | RightShift operation ->
+        let op = visitOperation operation
+
+        match op with
+        | { Shifter = (None
+            | Some Shifter.Noop) } -> { op with Shifter = Some Shifter.Right }
+        | _ -> failwith "Operation can't use the shifter twice"
+    | Add (lhs, rhs)
+    | And (lhs, rhs) ->
+        let lhs = visitOperand lhs
+        let rhs = visitOperand rhs
+
+        let kind =
+            match operation with
+            | Add _ -> ALU.Add
+            | And _ -> ALU.And
+            | _ -> failwith "Internal Compiler Error"
+
+        match (lhs, rhs) with
+        | { AMux = Some AMux.MBR }, { AMux = Some AMux.MBR } -> failwith "Cannot read MBR twice"
+        | { ABus = Some other }, { AMux = Some AMux.MBR }
+        | { AMux = Some AMux.MBR }, { ABus = Some other } ->
+            { Operation.Default with
+                  AMux = Some AMux.MBR
+                  BBus = Some other
+                  ALU = Some kind }
+        | { ABus = Some lhs }, { ABus = Some rhs } ->
+            { Operation.Default with
+                  AMux = Some AMux.ABus
+                  ABus = Some lhs
+                  BBus = Some rhs
+                  ALU = Some kind }
+        | _ -> failwith "Internal Compiler Error"
+
+let private visitInstructions instr =
+    let op = Operation.Default
+
+    let visitOperation current maybeDest operation =
+        let op =
+            match maybeDest with
+            | None -> Operation.Default
+            | Some MBR ->
+                { Operation.Default with
+                      MBRWrite = Some true }
+            | Some MAR ->
+                { Operation.Default with
+                      MARWrite = Some true }
+            | Some reg ->
+                { Operation.Default with
+                      SBus =
+                          (match reg with
+                           | R0 -> Bus.R0
+                           | R1 -> Bus.R1
+                           | R2 -> Bus.R2
+                           | R3 -> Bus.R3
+                           | R4 -> Bus.R4
+                           | R5 -> Bus.R5
+                           | R6 -> Bus.R6
+                           | R7 -> Bus.R7
+                           | R8 -> Bus.R8
+                           | R9 -> Bus.R9
+                           | R10 -> Bus.R10
+                           | PC -> Bus.PC
+                           | AC -> Bus.AC
+                           | _ -> failwith "Internal Compiler Error")
+                          |> Some }
+
+        let operation = visitOperation operation
+
+        let op =
+            match maybeDest, operation with
+            | Some MAR, { AMux = Some AMux.MBR } -> failwith "Can't write to MAR from MBR"
+            | Some MAR, { ALU = Some _ } -> failwith "Writes to MAR can only be done through a copy from a register"
+            | Some MAR, { ABus = Some aBus } ->
+                Operation.combine
+                    { operation with
+                          ABus = None
+                          BBus = Some aBus }
+                    op
+            | Some _, { ALU = Some _; Shifter = None } ->
+                Operation.combine
+                    { operation with
+                          Shifter = Some Shifter.Noop }
+                    op
+            | Some _, { ALU = None; Shifter = None } ->
+                Operation.combine
+                    { operation with
+                          Shifter = Some Shifter.Noop
+                          ALU = Some ALU.ABus }
+                    op
+            | Some _, { ALU = None; Shifter = Some _ } -> Operation.combine { operation with ALU = Some ALU.ABus } op
+            | _ -> Operation.combine operation op
+
+
+
+        match (op, current) with
+        | _ when Operation.canCombine op current -> Operation.combine op current
+        | { ABus = aBus
+            BBus = bBus
+            ALU = (None
+            | Some ALU.And
+            | Some ALU.Add)
+            MARWrite = (None
+            | Some false) },
+          _ when { op with BBus = aBus; ABus = bBus }
+                 |> Operation.canCombine current ->
+            { op with BBus = aBus; ABus = bBus }
+            |> Operation.combine current
+        | _,
+          { ABus = aBus
+            BBus = bBus
+            ALU = (None
+            | Some ALU.And
+            | Some ALU.Add)
+            MARWrite = (None
+            | Some false) } when { current with
+                                       BBus = aBus
+                                       ABus = bBus }
+                                 |> Operation.canCombine op ->
+            { current with
+                  BBus = aBus
+                  ABus = bBus }
+            |> Operation.combine op
+        | _ -> failwithf "Failed to combine '%s' and '%s'" (op.ToString()) (current.ToString())
+
+
+    instr
+    |> List.fold (fun current instr ->
+        match instr with
+        | Operation (maybeDest, operation) -> visitOperation current maybeDest operation
+        | Control (condition, address) ->
+            match (current, condition) with
+            | { Condition = Some _ }, _ -> failwith "Can't apply jumps to an instruction more than once"
+            | _, None ->
+                { op with
+                      Condition = Some Cond.None
+                      Address = Some address }
+            | _, Some CondZero ->
+                { op with
+                      Condition = Some Cond.Zero
+                      Address = Some address }
+            | _, Some CondNegative ->
+                { op with
+                      Condition = Some Cond.Neg
+                      Address = Some address }
+        | MemoryAccess memoryAccess ->
+            if current.MemoryAccess |> Option.isSome then
+                failwith "Can't apply memory access twice"
+            else
+                { op with
+                      MemoryAccess = Some memoryAccess }) op
+
+
+
+let private visitLine line =
+    match line with
+    | LabelLine s -> [ Label s ]
+    | InstructionLine instr -> [ visitInstructions instr |> AssemblyLine.Operation ]
+
+
+let private visitFile file =
+    file.Lines
+    |> Seq.map visitLine
+    |> Seq.reduce List.append
+
+let parseAssembly string =
+    string
+    |> List.ofSeq
+    |> tokenize
+    |> parseFile
+    |> visitFile

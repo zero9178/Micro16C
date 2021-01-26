@@ -4,7 +4,6 @@ module Tests
 open Micro16C.Backend
 open Micro16C.Backend.Assembly
 open Micro16C.MiddleEnd
-open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Tests.PassesTests
 open Xunit
 open FsUnit.Xunit
@@ -244,12 +243,158 @@ let ``Assembly folding`` () =
 
 [<Fact>]
 let ``Assembly parsing`` () =
-    """
-:entry
-    R0 <- lsh(1+1)
-    R0 <- R0 + 1
-    R1 <- lsh(1)
-    R1 <- R1 + 1
-    R2 <- R0 + R1; goto .entry
-    """
+    let first =
+        """
+    :entry
+        R0 <- lsh(1+1)
+        R0 <- R0 + 1
+        R1 <- lsh(1)
+        R1 <- R1 + 1
+        R2 <- R0 + R1; goto .entry
+        """
+        |> ParseAssembly.parseAssembly
+        |> asText
+
+    first
     |> ParseAssembly.parseAssembly
+    |> asText
+    |> should equal first
+
+    let first =
+        """
+    ### Aufgabe 6 ###
+R0 <- lsh(1)
+R0 <- lsh(R0 + 1)
+R0 <- R0 + 1
+R1 <- lsh(1)
+R1 <- lsh(R1)
+MAR <- R1; rd
+rd
+R1 <- MBR
+R2 <- 0
+R3 <- rsh(-1)
+R3 <- ~R3
+:maskLoop
+(R0); if Z goto .doneMask
+R2 <- rsh(R2)
+R2 <- R2 + R3
+R0 <- R0 + (-1); goto .maskLoop
+:doneMask
+R3 <- R1 & R2
+R3 <- ~R3
+R1 <- R3 & R1
+R2 <- R3 & R2
+R1 <- ~R1
+R2 <- ~R2
+R3 <- R1 & R2
+MBR <- ~R3; wr
+wr
+        """
+        |> ParseAssembly.parseAssembly
+        |> asText
+
+    first
+    |> ParseAssembly.parseAssembly
+    |> asText
+    |> should equal first
+
+    let first =
+        """
+    ### Aufgabe 7 ###
+R0 <- lsh(1)
+R0 <- lsh(R0+1)
+R0 <- lsh(R0+1)
+R0 <- R0 + 1
+R1 <- lsh(1)
+R1 <- lsh(R1 + 1)
+R1 <- lsh(R1)
+:euclid
+(R1); if Z goto .end
+R3 <- R0
+:mod
+R4 <- ~R1
+R4 <- R4 + 1
+(R3 + R4); if N goto .endMod
+R3 <- R3 + R4; goto .mod
+:endMod
+R0 <- R1
+R1 <- R3; goto .euclid
+:end
+R2 <- R1
+        """
+        |> ParseAssembly.parseAssembly
+        |> asText
+
+    first
+    |> ParseAssembly.parseAssembly
+    |> asText
+    |> should equal first
+
+    let first =
+        """
+    ### Aufgabe 8 ###
+R0 <- lsh(1)
+R0 <- lsh(R0 + 1)
+R0 <- R0 + 1
+R1 <- lsh(1)
+R1 <- lsh(R1)
+R1 <- lsh(R1)
+R1 <- lsh(R1)
+R1 <- R1 + 1
+:loop
+(R0); if N goto .end
+R2 <- ~R0; MAR <- R0; rd
+R2 <- R2 + 1; rd
+R3 <- MBR
+R2 <- R1 + R2
+MAR <- R2; rd
+rd
+R2 <- MBR
+MAR <- R2; rd
+rd
+MAR <- R0; wr
+wr
+MBR <- R3; MAR <- R2; wr
+wr
+R0 <- R0 + (-1)
+goto .loop
+:end
+        """
+        |> ParseAssembly.parseAssembly
+        |> asText
+
+    first
+    |> ParseAssembly.parseAssembly
+    |> asText
+    |> should equal first
+
+    let first =
+        """
+    ### Aufgabe 9 ###
+MAR <- 0; rd
+rd
+R0 <- MBR
+R1 <- 1
+:loop
+(R0); if Z goto .zero
+(R0 & 1); if Z goto .cond
+goto .found
+:cond
+R0 <- rsh(R0)
+R1 <- R1 + 1
+goto .loop
+:found
+MAR <- -1; MBR <- R1; wr
+goto .end; wr
+:zero
+MAR <- -1; MBR <- 0; wr
+goto .end; wr
+:end
+        """
+        |> ParseAssembly.parseAssembly
+        |> asText
+
+    first
+    |> ParseAssembly.parseAssembly
+    |> asText
+    |> should equal first

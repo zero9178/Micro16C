@@ -407,11 +407,14 @@ type AssemblyLine =
     | Operation of Operation
     | Label of string
 
-let printAssembly assemblyLine =
+let asText assemblyLine =
     assemblyLine
-    |> Seq.iter (fun x ->
+    |> Seq.fold (fun c x ->
         match x with
-        | Label s -> printfn ":%s" s
-        | Operation s -> printfn "%s" (s.ToString()))
+        | Label s -> c + sprintf ":%s\n" s
+        | Operation s -> c + sprintf "%s\n" (s.ToString())) ""
+
+let printAssembly assemblyLine =
+    assemblyLine |> asText |> printfn "%s"
 
     assemblyLine
