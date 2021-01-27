@@ -4,13 +4,14 @@ open Micro16C.Frontend
 open Micro16C.Frontend.Lex
 open Micro16C.Frontend.ErrorHandling
 open Micro16C.MiddleEnd.IR
+open Micro16C.MiddleEnd.Util
 
 type Context =
     { Builder: Builder
       Variables: Map<Sema.Declaration, Value ref>
-      Labels: Map<string * Sema.Statement, Value ref>
-      Continues: Map<Sema.LoopStatement, Value ref>
-      Breaks: Map<Sema.LoopStatement, Value ref> }
+      Labels: ImmutableMap<Sema.Statement ref, Value ref>
+      Continues: ImmutableMap<Sema.Statement ref, Value ref>
+      Breaks: ImmutableMap<Sema.Statement ref, Value ref> }
 
 module private Context =
 
@@ -191,8 +192,8 @@ let rec visitCompoundStatement (compoundItems: Sema.CompoundItem list) (context:
             declaration
             |> List.fold (fun context x -> visitDeclaration x context) context) context
 
-and visitStatement (statement: Sema.Statement) (context: Context): Context =
-    match statement with
+and visitStatement (statement: Sema.Statement ref) (context: Context): Context =
+    match !statement with
     | Sema.IfStatement (condition, trueStatement, falseStatement) ->
         let condition, context =
             visitExpression condition context ||> Op.toBool
@@ -238,7 +239,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
             context
             |> Context.setInsertPoint (Some continueBranch)
         | _ -> context
-    | Sema.DoWhileStatement statement ->
+    | Sema.DoWhileStatement (bodyStatement, expression) ->
         let body, context =
             Context.createBasicBlock "doWhileBody" context
 
@@ -250,34 +251,32 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
 
         let context =
             { context with
-                  Breaks =
-                      context.Breaks
-                      |> Map.add (Sema.DoWhileLoop statement) cont
+                  Breaks = context.Breaks |> ImmutableMap.add statement cont
                   Continues =
                       context.Continues
-                      |> Map.add (Sema.DoWhileLoop statement) cond }
+                      |> ImmutableMap.add statement cond }
 
         let value, context =
             context
             |> Context.createGoto body
             |> Context.setInsertPoint (Some body)
-            |> visitStatement statement.Statement
+            |> visitStatement bodyStatement
             |> Context.createGoto cond
             |> Context.setInsertPoint (Some cond)
-            |> visitExpression statement.Expression
+            |> visitExpression expression
             ||> Op.toBool
 
         context
         |> Context.createCondBr Zero value cont body
         |> Context.setInsertPoint (Some cont)
-    | Sema.WhileStatement statement ->
+    | Sema.WhileStatement (expression, bodyStatement) ->
         let cond, context = Context.createBasicBlock "cond" context
 
         let value, context =
             context
             |> Context.createGoto cond
             |> Context.setInsertPoint (Some cond)
-            |> visitExpression statement.Expression
+            |> visitExpression expression
             ||> Op.toBool
 
         let body, context =
@@ -288,65 +287,64 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
 
         let context =
             { context with
-                  Breaks =
-                      context.Breaks
-                      |> Map.add (Sema.WhileLoop statement) cont
+                  Breaks = context.Breaks |> ImmutableMap.add statement cont
                   Continues =
                       context.Continues
-                      |> Map.add (Sema.WhileLoop statement) cond }
+                      |> ImmutableMap.add statement cond }
 
         context
         |> Context.createCondBr Zero value cont body
         |> Context.setInsertPoint (Some body)
-        |> visitStatement statement.Statement
+        |> visitStatement bodyStatement
         |> Context.createGoto cond
         |> Context.setInsertPoint (Some cont)
     | Sema.CompoundStatement statement -> visitCompoundStatement statement context
     | Sema.ExpressionStatement None -> context
     | Sema.ExpressionStatement (Some expression) -> context |> visitExpression expression |> snd
-    | Sema.GotoStatement statement ->
-        match !statement with
+    | Sema.GotoStatement gotoStatement ->
+        match !gotoStatement with
         | None -> failwith "Internal Compiler Error: No corresponding label for Goto"
         | Some label ->
-            (match Map.tryFind label context.Labels with
+            (match ImmutableMap.tryFind label context.Labels with
              | None ->
-                 let bb, context =
-                     Context.createBasicBlock (fst label) context
+                 let bb, context = Context.createBasicBlock "" context
 
                  { context with
-                       Labels = Map.add label bb context.Labels }
+                       Labels = ImmutableMap.add label bb context.Labels }
                  |> pack2 bb
              | Some bb -> (bb, context))
             ||> Context.createGoto
             |> Context.setInsertPoint None
-    | Sema.LabelStatement (label, statement) ->
+    | Sema.LabelStatement labelStatement ->
         let bb, context =
-            (match Map.tryFind (label, statement) context.Labels with
+            (match ImmutableMap.tryFind statement context.Labels with
              | None ->
-                 let bb, context = Context.createBasicBlock label context
+                 let bb, context = Context.createBasicBlock "" context
 
                  (bb,
                   { context with
-                        Labels = Map.add (label, statement) bb context.Labels })
+                        Labels = ImmutableMap.add statement bb context.Labels })
              | Some bb -> (bb, context))
 
         context
         |> Context.createGoto bb
         |> Context.setInsertPoint (Some bb)
-        |> visitStatement statement
+        |> visitStatement labelStatement
     | Sema.ContinueStatement statement ->
         context
         |> Context.createGoto
             (context.Continues
-             |> Map.find (!statement |> Option.get))
+             |> ImmutableMap.find (!statement |> Option.get))
+        |> Context.setInsertPoint None
     | Sema.BreakStatement statement ->
         context
         |> Context.createGoto
             (context.Breaks
-             |> Map.find (!statement |> Option.get))
-    | Sema.ForStatement statement ->
+             |> ImmutableMap.find (!statement |> Option.get))
+        |> Context.setInsertPoint None
+    | Sema.ForStatement forStatement ->
         let context =
-            match statement.Initial with
+            match forStatement.Initial with
             | Sema.ForInitialExpression (Some expression) -> context |> visitExpression expression |> snd
             | Sema.ForInitialExpression None -> context
             | Sema.ForInitialDeclaration decl ->
@@ -356,7 +354,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
         let cond, context = Context.createBasicBlock "cond" context
 
         let condValue, context =
-            match statement.Condition with
+            match forStatement.Condition with
             | None ->
                 context
                 |> Context.createGoto cond
@@ -385,18 +383,16 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
 
         let context =
             { context with
-                  Breaks =
-                      context.Breaks
-                      |> Map.add (Sema.ForLoop statement) cont
+                  Breaks = context.Breaks |> ImmutableMap.add statement cont
                   Continues =
                       context.Continues
-                      |> Map.add (Sema.ForLoop statement) cond }
+                      |> ImmutableMap.add statement cond }
 
         context
         |> Context.setInsertPoint (Some body)
-        |> visitStatement statement.Statement
+        |> visitStatement forStatement.Statement
         |> (fun context ->
-            statement.Iteration
+            forStatement.Iteration
             |> Option.map (fun expr -> visitExpression expr context |> snd)
             |> Option.defaultValue context)
         |> Context.createGoto cond
@@ -577,9 +573,9 @@ let codegen (translationUnit: Sema.CompoundItem list) =
     let context =
         { Builder = Builder.fromModule irModule
           Variables = Map([])
-          Labels = Map([])
-          Continues = Map([])
-          Breaks = Map([]) }
+          Labels = ImmutableMap.empty
+          Continues = ImmutableMap.empty
+          Breaks = ImmutableMap.empty }
 
     let entry, context = Context.createBasicBlock "entry" context
 

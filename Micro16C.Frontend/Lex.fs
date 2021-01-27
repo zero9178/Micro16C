@@ -567,6 +567,12 @@ let tokenize (input: string) =
                   Length = 1
                   Type = SemiColon }
                 (tokenizeFirst (offset + 1) rest)
+        | ',' :: rest ->
+            comb
+                { Offset = offset
+                  Length = 1
+                  Type = Comma }
+                (tokenizeFirst (offset + 1) rest)
         | '-' :: rest ->
             comb
                 { Offset = offset

@@ -724,7 +724,7 @@ let rec parseStatement error (tokens: Token list) =
 
         let third, tokens =
             match tokens with
-            | { Type = CloseParentheses } :: tokens -> (None |> Ok, tokens)
+            | { Type = CloseParentheses } :: _ -> (None |> Ok, tokens)
             | _ ->
                 let expr, tokens = parseExpression error tokens
                 (expr |> Result.map Some, tokens)

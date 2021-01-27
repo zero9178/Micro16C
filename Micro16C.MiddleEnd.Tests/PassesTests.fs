@@ -727,9 +727,13 @@ let ``BasicBlock reordering`` () =
 
 %isZero:
     store 1 -> R2
+    goto %end
 
 %isNotZero:
     store 0 -> R2
+    goto %end
+
+%end:
 """
     |> IRReader.fromString
     |> Passes.reorderBasicBlocks
@@ -742,9 +746,13 @@ let ``BasicBlock reordering`` () =
 
 %isNotZero:
     store 0 -> R2
+    goto %end
 
 %isZero:
     store 1 -> R2
+    goto %end
+
+%end:
 
     """)
 

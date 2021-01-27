@@ -119,14 +119,6 @@ and Assignment =
       Expression: Expression
       Kind: AssignmentKind }
 
-and While =
-    { Expression: Expression
-      Statement: Statement }
-
-and DoWhile =
-    { Statement: Statement
-      Expression: Expression }
-
 and ForInitial =
     | ForInitialExpression of Expression option
     | ForInitialDeclaration of Declaration list
@@ -135,24 +127,19 @@ and For =
     { Initial: ForInitial
       Condition: Expression option
       Iteration: Expression option
-      Statement: Statement }
-
-and LoopStatement =
-    | WhileLoop of While
-    | DoWhileLoop of DoWhile
-    | ForLoop of For
+      Statement: Statement ref }
 
 and Statement =
-    | WhileStatement of While
-    | DoWhileStatement of DoWhile
+    | WhileStatement of Expression: Expression * Statement: Statement ref
+    | DoWhileStatement of Statement: Statement ref * Expression: Expression
     | ForStatement of For
-    | IfStatement of Expression * Statement * Statement option
-    | BreakStatement of LoopStatement option ref
-    | ContinueStatement of LoopStatement option ref
+    | IfStatement of Expression * Statement ref * Statement ref option
+    | BreakStatement of Statement ref option ref
+    | ContinueStatement of Statement ref option ref
     | CompoundStatement of CompoundItem list
     | ExpressionStatement of Expression option
-    | LabelStatement of string * Statement
-    | GotoStatement of (string * Statement) option ref
+    | LabelStatement of Statement ref
+    | GotoStatement of Statement ref option ref
 
 and Declaration =
     { Type: Type
@@ -160,7 +147,7 @@ and Declaration =
       Initializer: Expression option }
 
 and CompoundItem =
-    | CompoundItemStatement of Statement
+    | CompoundItemStatement of Statement ref
     | CompoundItemDeclaration of Declaration list
 
 module Expression =
@@ -209,10 +196,10 @@ let private lvalueConversion expression =
 
 type Context =
     { Scopes: Map<string, Declaration> list
-      Loops: LoopStatement option ref list
+      Loops: Statement ref option ref list
       SourceObject: SourceObject
-      Labels: Map<string, Statement>
-      Gotos: (Token * (string * Statement) option ref) list }
+      Labels: Map<string, Statement ref>
+      Gotos: (Token * Statement ref option ref) list }
 
 let rec visitExpression (context: Context) (expression: Parse.Expression): Result<Expression, string> =
     match expression.OptionalAssignmentExpressions with
@@ -851,10 +838,10 @@ let private applyDeclarator aType (declarator: Parse.Declarator) =
 
 let rec visitStatement (context: Context) (statement: Parse.Statement) =
     match statement with
-    | Parse.ExpressionStatement None -> (ExpressionStatement None |> Ok, context)
+    | Parse.ExpressionStatement None -> (ExpressionStatement None |> ref |> Ok, context)
     | Parse.ExpressionStatement (Some expression) ->
         (visitExpression context expression
-         |> Result.map (Some >> ExpressionStatement),
+         |> Result.map (Some >> ExpressionStatement >> ref),
          context)
     | Parse.WhileStatement (expression, statement) ->
         let whileLoop = ref None
@@ -869,9 +856,10 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
         let statement, context = visitStatement context statement
 
         (comb2 (fun x y ->
-            let whileObj = { While.Expression = x; Statement = y }
-            whileLoop := WhileLoop whileObj |> Some
-            WhileStatement whileObj) condition statement,
+            let whileObj = WhileStatement(x, y) |> ref
+
+            whileLoop := whileObj |> Some
+            whileObj) condition statement,
          { oldContext with
                Labels = context.Labels
                Gotos = context.Gotos })
@@ -888,12 +876,10 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
         let condition = visitExpression context expression
 
         (comb2 (fun x y ->
-            let doWhileObj =
-                { DoWhile.Expression = x
-                  Statement = y }
+            let doWhileObj = DoWhileStatement(y, x) |> ref
 
-            doWhileLoop := DoWhileLoop doWhileObj |> Some
-            DoWhileStatement doWhileObj) condition statement,
+            doWhileLoop := doWhileObj |> Some
+            doWhileObj) condition statement,
          { oldContext with
                Labels = context.Labels
                Gotos = context.Gotos })
@@ -909,8 +895,9 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
                 (Some elseBranch, context)
 
         match elseBranch with
-        | None -> (comb2 (fun x y -> IfStatement(x, y, None)) expression statement, context)
-        | Some elseBranch -> (comb3 (fun x y z -> IfStatement(x, y, Some z)) expression statement elseBranch, context)
+        | None -> (comb2 (fun x y -> IfStatement(x, y, None) |> ref) expression statement, context)
+        | Some elseBranch ->
+            (comb3 (fun x y z -> IfStatement(x, y, Some z) |> ref) expression statement elseBranch, context)
     | Parse.CompoundStatement list ->
         let oldContext = context
 
@@ -920,7 +907,7 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
 
         let items, context = visitCompoundStatement context list
 
-        (items |> Result.map CompoundStatement,
+        (items |> Result.map (CompoundStatement >> ref),
          { oldContext with
                Labels = context.Labels
                Gotos = context.Gotos })
@@ -931,7 +918,7 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
              |> context.SourceObject.emitError (ErrorTypeToken token)
              |> Error,
              context)
-        | loop :: _ -> (ContinueStatement loop |> Ok, context)
+        | loop :: _ -> (ContinueStatement loop |> ref |> Ok, context)
     | Parse.BreakStatement token ->
         match context.Loops with
         | [] ->
@@ -939,7 +926,7 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
              |> context.SourceObject.emitError (ErrorTypeToken token)
              |> Error,
              context)
-        | loop :: _ -> (BreakStatement loop |> Ok, context)
+        | loop :: _ -> (BreakStatement loop |> ref |> Ok, context)
     | Parse.ForStatementDecl (_, condition, iteration, body)
     | Parse.ForStatement (_, condition, iteration, body) ->
 
@@ -988,13 +975,15 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
 
         (comb4 (fun x y z w ->
             let forObj =
-                { Initial = x
-                  Condition = y
-                  Iteration = z
-                  Statement = w }
+                ForStatement
+                    { Initial = x
+                      Condition = y
+                      Iteration = z
+                      Statement = w }
+                |> ref
 
-            forLoop := ForLoop forObj |> Some
-            ForStatement forObj) initial condition iteration statement,
+            forLoop := forObj |> Some
+            forObj) initial condition iteration statement,
          { oldContext with
                Labels = context.Labels
                Gotos = context.Gotos })
@@ -1002,8 +991,7 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
         let statement, context = visitStatement context statement
 
         let statement =
-            statement
-            |> Result.map (pack2 (Token.identifier name) >> LabelStatement)
+            statement |> Result.map (LabelStatement >> ref)
 
         match statement with
         | Ok label ->
@@ -1021,18 +1009,18 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
         | _ -> (statement, context)
     | Parse.GotoStatement name ->
         match Map.tryFind (Token.identifier name) context.Labels with
-        | Some (LabelStatement (name, statement)) ->
-            ((name, statement)
+        | Some statement ->
+            (statement
              |> Some
              |> ref
              |> GotoStatement
+             |> ref
              |> Ok,
              context)
-        | Some _ -> failwith "Internal Compiler Error: Statement is not a Label"
         | None ->
             let noneRef = ref None
 
-            (noneRef |> GotoStatement |> Ok,
+            (noneRef |> GotoStatement |> ref |> Ok,
              { context with
                    Gotos = (name, noneRef) :: context.Gotos })
 
@@ -1120,10 +1108,9 @@ let analyse (sourceObject, translationUnit) =
         context.Gotos
         |> List.fold (fun result (token, ref) ->
             match Map.tryFind (Token.identifier token) context.Labels with
-            | Some (LabelStatement (name, statement)) ->
-                ref := Some(name, statement)
+            | Some statement ->
+                ref := statement |> Some
                 result
-            | Some _ -> failwith "Internal Compiler Error: Statement is not a Label"
             | None ->
                 let error =
                     sprintf "Unresolved label '%s'" (Token.identifier token)

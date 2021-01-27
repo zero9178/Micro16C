@@ -1,6 +1,7 @@
 module LexTests
 
 open System
+open Micro16C.Frontend.Sema
 open Xunit
 open FsUnit.Xunit
 
@@ -168,7 +169,7 @@ let Integers () =
 
 [<Fact>]
 let Operators () =
-    lexer "|| && == != <= >= += -= /= *= %= <<= >>= &= |= ^= << >> ++ -- ( ) { } ; - ~ ! + * / % & | ^ = < > ? :"
+    lexer "|| && == != <= >= += -= /= *= %= <<= >>= &= |= ^= << >> ++ -- ( ) { } ; - ~ ! + * / % & | ^ = < > ? : ,"
     |> List.map (fun { Type = x } -> x)
     |> should
         equal
@@ -211,7 +212,8 @@ let Operators () =
              LessThan
              GreaterThan
              QuestionMark
-             Colon ]
+             Colon
+             Comma ]
 
 [<Fact>]
 let Miscellaneous () =

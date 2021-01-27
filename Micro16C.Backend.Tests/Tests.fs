@@ -5,8 +5,29 @@ open Micro16C.Backend
 open Micro16C.Backend.Assembly
 open Micro16C.MiddleEnd
 open Micro16C.MiddleEnd.Tests.PassesTests
+open Micro16C.Simulator
 open Xunit
 open FsUnit.Xunit
+
+let private runIRWithState state irModule =
+    irModule
+    |> Passes.analyzeDominance
+    |> Passes.analyzeLiveness
+    |> RegisterAllocator.allocateRegisters
+    |> GenAssembly.genAssembly
+    |> GenAssembly.genMachineCode
+    |> Simulator.simulateWithState state
+    |> Seq.last
+
+let private runIR irModule =
+    irModule
+    |> Passes.analyzeDominance
+    |> Passes.analyzeLiveness
+    |> RegisterAllocator.allocateRegisters
+    |> GenAssembly.genAssembly
+    |> GenAssembly.genMachineCode
+    |> Simulator.simulate
+    |> Seq.last
 
 [<Fact>]
 let ``Legalize Constants`` () =
@@ -131,27 +152,22 @@ let ``Legalize instructions: Shifting`` () =
     """
     |> IRReader.fromString
     |> Legalize.legalizeInstructions
-    |> should
-        be
-           (structurallyEquivalentTo """
-%entry.1:
-        %0 = load R0
-        %1 = load R2
-        %2 = not %1
-        %3 = add 1 %2
-        goto %shlCond
-%shlCond:
-        %5 = phi (0,%entry.1) (%4,%shlBody)
-        %7 = phi (%0,%entry.1) (%6,%shlBody)
-        %8 = add %5 %3
-        br %8 < 0 %shlBody %entry.2
-%shlBody:
-        %6 = shl %7 1
-        %4 = add %5 1
-        goto %shlCond
-%entry.2:
-        store %7 -> R2
-    """)
+    |> runIRWithState
+        { Simulator.State.Default with
+              Registers =
+                  [| 3s
+                     0s
+                     5s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s |] }
+    |> (fun state -> state.Registers.[2])
+    |> should equal (3s <<< 5)
 
 [<Fact>]
 let ``Assembly folding`` () =

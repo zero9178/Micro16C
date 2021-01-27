@@ -29,6 +29,7 @@
     <ItemGroup>
         <ProjectReference Include="..\Micro16C.Backend\Micro16C.Backend.fsproj"/>
         <ProjectReference Include="..\Micro16C.MiddleEnd.Tests\Micro16C.MiddleEnd.Tests.fsproj"/>
+        <ProjectReference Include="..\Micro16C.Simulator\Micro16C.Simulator.fsproj"/>
     </ItemGroup>
 
 </Project>
