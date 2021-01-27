@@ -22,6 +22,10 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C-as", "Micro16C-as\
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Frontend.Codegen", "Micro16C.Frontend.Codegen\Micro16C.Frontend.Codegen.fsproj", "{66CB3E17-F5EE-43F0-914B-3CDDD8EDFCD9}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Simulator", "Micro16C.Simulator\Micro16C.Simulator.fsproj", "{4F840C4D-0BF2-4F92-A2AD-8681F6FC5046}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Simulator.Tests", "Micro16C.Simulator.Tests\Micro16C.Simulator.Tests.fsproj", "{206F97D0-4C4E-488E-9D6A-AF25D107C8E9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -72,5 +76,13 @@ Global
 		{66CB3E17-F5EE-43F0-914B-3CDDD8EDFCD9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{66CB3E17-F5EE-43F0-914B-3CDDD8EDFCD9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{66CB3E17-F5EE-43F0-914B-3CDDD8EDFCD9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4F840C4D-0BF2-4F92-A2AD-8681F6FC5046}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4F840C4D-0BF2-4F92-A2AD-8681F6FC5046}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4F840C4D-0BF2-4F92-A2AD-8681F6FC5046}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4F840C4D-0BF2-4F92-A2AD-8681F6FC5046}.Release|Any CPU.Build.0 = Release|Any CPU
+		{206F97D0-4C4E-488E-9D6A-AF25D107C8E9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{206F97D0-4C4E-488E-9D6A-AF25D107C8E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{206F97D0-4C4E-488E-9D6A-AF25D107C8E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{206F97D0-4C4E-488E-9D6A-AF25D107C8E9}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

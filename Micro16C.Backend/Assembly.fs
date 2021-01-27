@@ -402,7 +402,7 @@ module Operation =
               |> get 0xF 8
               |> LanguagePrimitives.EnumOfValue
               |> Some
-          Address = m |> get 0xF 18 |> string |> Some }
+          Address = m |> get 0xFF 0 |> string |> Some }
 
 type AssemblyLine =
     | Operation of Operation

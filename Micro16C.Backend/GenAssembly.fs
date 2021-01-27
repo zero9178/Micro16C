@@ -454,7 +454,7 @@ let genMachineCode assemblyList =
             | Label s ->
                 (result,
                  symbolTable
-                 |> Map.add s (4 * List.length result |> uint8))
+                 |> Map.add s (List.length result |> uint8))
             | Operation ({ Address = Some s } as op) -> ((op |> Operation.asMachineCode, Some s) :: result, symbolTable)
             | Operation op -> ((op |> Operation.asMachineCode, None) :: result, symbolTable)) ([], Map.empty)
 
