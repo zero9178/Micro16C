@@ -255,6 +255,26 @@ let private singleInstructionSimplify builder value =
         |> Value.replaceWith (Builder.createConstant 0s)
 
         true
+    // rem patterns
+    | BinOp URem (ConstOp c1, ConstOp c2) ->
+        value
+        |> Value.replaceWith (Builder.createConstant (((c1 |> uint16) % (c2 |> uint16)) |> int16))
+
+        true
+    | BinOp SRem (ConstOp c1, ConstOp c2) ->
+        value
+        |> Value.replaceWith (Builder.createConstant (c1 % c2))
+
+        true
+    // (X % Y) % Y -> X % Y
+    | BinOp SRem (BinOp SRem (_, y1) as op, y2) when y1 = y2 ->
+        value |> Value.replaceWith op
+
+        true
+    | BinOp URem (BinOp URem (_, y1) as op, y2) when y1 = y2 ->
+        value |> Value.replaceWith op
+
+        true
     // Not patterns
     | UnaryOp Not (ConstOp c) ->
         value
@@ -265,14 +285,67 @@ let private singleInstructionSimplify builder value =
     | UnaryOp Not (UnaryOp Not x) ->
         value |> Value.replaceWith x
         true
+    // Shl patterns
     | BinOp Shl (ConstOp lhs, ConstOp rhs) ->
         value
         |> Value.replaceWith (Builder.createConstant (lhs <<< (rhs |> int32)))
 
         true
+    // 0 << X -> 0
+    | BinOp Shl (ConstOp 0s, _) ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
+    // X << 0 -> X
+    | BinOp Shl (x, ConstOp 0s) ->
+        value |> Value.replaceWith x
+
+        true
+    // undef << X -> 0
+    | BinOp Shl (UndefOp, _) ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
+    // lshr patterns
     | BinOp LShr (ConstOp lhs, ConstOp rhs) ->
         value
         |> Value.replaceWith (Builder.createConstant ((lhs |> uint16) >>> (rhs |> int32) |> int16))
+
+        true
+    // 0 >> X -> 0
+    | BinOp LShr (ConstOp 0s, _) ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
+    // X >> 0 -> X
+    | BinOp LShr (x, ConstOp 0s) ->
+        value |> Value.replaceWith x
+
+        true
+    // ashr patterns
+    | BinOp AShr (ConstOp lhs, ConstOp rhs) ->
+        value
+        |> Value.replaceWith (Builder.createConstant (lhs >>> (rhs |> int)))
+
+        true
+    // 0 >> X -> 0
+    | BinOp AShr (ConstOp 0s, _) ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
+    // X >> 0 -> X
+    | BinOp AShr (x, ConstOp 0s) ->
+        value |> Value.replaceWith x
+
+        true
+    // -1 >> X -> -1
+    | BinOp AShr (ConstOp -1s, _) ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
 
         true
     | CondBrOp (Zero, ConstOp c, trueBranch, falseBranch) ->
