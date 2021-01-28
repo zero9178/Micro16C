@@ -29,6 +29,34 @@ let ``For loop`` () =
 
 [<Fact>]
 let ``Break and continue`` () =
+
+    let result =
+        """
+        int n = 0,i = 0;
+        for (;;)
+        {
+            if (i == 5)
+            {
+                break;
+            }
+            if (i % 2 == 0)
+            {
+                n += i;
+            }
+            i++;
+        }
+        R1 = n;
+        """
+        |> Micro16C.compile
+        |> Result.map
+            (GenAssembly.genMachineCode
+             >> Simulator.simulate
+             >> Seq.last)
+
+    match result with
+    | Error msg -> Assert.True(false, msg)
+    | Ok state -> state.Registers.[1] |> should equal 6s
+
     let result =
         """
         int n = 0,i = 0;

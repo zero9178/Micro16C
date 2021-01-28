@@ -479,7 +479,10 @@ let jumpThreading irModule =
                             |> List.find (snd >> (=) pred)
                             |> fst
 
-                        Some(replacement, replacement)
+                        if replacement = phi then
+                            Some(Value.UndefValue, Value.UndefValue)
+                        else
+                            Some(replacement, replacement)
                     | _ -> None) phi
                 |> Seq.skipWhile ((!) >> Value.parentBlock >> (=) (Some blockValue))
                 |> Seq.tryHead
@@ -997,9 +1000,9 @@ let mem2reg (irModule: Module ref) =
         let phis =
             Seq.unfold (fun (x: ImmutableSet<Value ref>) ->
                 let next =
-                    x |> ImmutableSet.union x |> dominanceFrontiers
+                    s |> ImmutableSet.union x |> dominanceFrontiers
 
-                if next |> ImmutableSet.equal x then None else Some(next, next)) s
+                if next = x then None else Some(next, next)) s
             |> Seq.tryLast
             |> Option.map
                 (Seq.map (fun block ->
@@ -1066,8 +1069,7 @@ let mem2reg (irModule: Module ref) =
                 |> List.iter (rename replacement)
 
         !irModule
-        |> Module.basicBlocks
-        |> List.tryHead
+        |> Module.entryBlock
         |> Option.map (rename Value.UndefValue)
         |> ignore
 
