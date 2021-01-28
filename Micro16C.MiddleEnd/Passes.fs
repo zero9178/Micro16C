@@ -285,6 +285,16 @@ let private singleInstructionSimplify builder value =
     | UnaryOp Not (UnaryOp Not x) ->
         value |> Value.replaceWith x
         true
+    // Negate patterns
+    | UnaryOp Negate (ConstOp c) ->
+        value
+        |> Value.replaceWith (Builder.createConstant -c)
+
+        true
+    // -(-X) -> X
+    | UnaryOp Negate (UnaryOp Negate x) ->
+        value |> Value.replaceWith x
+        true
     // Shl patterns
     | BinOp Shl (ConstOp lhs, ConstOp rhs) ->
         value

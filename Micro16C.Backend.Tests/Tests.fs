@@ -170,6 +170,58 @@ let ``Legalize instructions: Shifting`` () =
     |> should equal (3s <<< 5)
 
 [<Fact>]
+let ``Legalize instructions: Negate`` () =
+    """
+%entry:
+    %0 = load R0
+    %1 = neg %0
+    store %1 -> R0
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeInstructions
+    |> runIRWithState
+        { Simulator.State.Default with
+              Registers =
+                  [| 3s
+                     0s
+                     5s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s |] }
+    |> (fun state -> state.Registers.[0])
+    |> should equal -3s
+
+    """
+%entry:
+    %0 = load R0
+    %1 = neg %0
+    store %1 -> R0
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeInstructions
+    |> runIRWithState
+        { Simulator.State.Default with
+              Registers =
+                  [| -3s
+                     0s
+                     5s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s |] }
+    |> (fun state -> state.Registers.[0])
+    |> should equal 3s
+
+[<Fact>]
 let ``Assembly folding`` () =
     let assembly =
         """

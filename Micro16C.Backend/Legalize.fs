@@ -1,7 +1,6 @@
 module Micro16C.Backend.Legalize
 
 open Micro16C.MiddleEnd.IR
-open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
 
 let legalizeConstants irModule =
@@ -213,6 +212,16 @@ let legalizeInstructions irModule =
     |> Module.instructions
     |> Seq.iter (fun instr ->
         match instr with
+        | UnaryOp Negate op ->
+            let replacement =
+                builder
+                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                |> Builder.setInsertPoint (Before instr)
+                |> Builder.createUnary Not op
+                ||> Builder.createBinary (Builder.createConstant 1s) Add
+                |> fst
+
+            instr |> Value.replaceWith replacement
         | BinOp Sub (lhs, rhs) ->
 
             let replacement =

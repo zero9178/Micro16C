@@ -91,7 +91,8 @@ Grammar:
                  | <Value> '=' "and" <Operand> <Operand>
                  | <Value> '=' "not" <Operand>
                  | <Value> '=' "shl" <Operand>
-                 | <Value> '=' "shr" <Operand>
+                 | <Value> '=' "lshr" <Operand>
+                 | <Value> '=' "ashr" <Operand>
                  | <Value> '=' "load" <Operand>
                  | <Value> '=' "copy" <Operand>
                  | <Value> '=' "phi" '(' <Operand> ',' <Value> ')' { '(' <Operand> ',' <Value> ')' }
@@ -134,6 +135,7 @@ type private Instruction =
     | LShr of Value * Operand * Operand
     | AShr of Value * Operand * Operand
     | Not of Value * Operand
+    | Neg of Value * Operand
     | Load of Value * Operand
     | BrNeg of Operand * Value * Value
     | BrZero of Operand * Value * Value
@@ -210,6 +212,10 @@ let private parseBasicBlock tokens =
                 let op, tokens = parseOperand tokens
                 let result, tokens = parseInstruction tokens
                 (Not(value, op) :: result, tokens)
+            | Identifier "neg" :: tokens ->
+                let op, tokens = parseOperand tokens
+                let result, tokens = parseInstruction tokens
+                (Neg(value, op) :: result, tokens)
             | Identifier "shl" :: tokens ->
                 let lhs, tokens = parseOperand tokens
                 let rhs, tokens = parseOperand tokens
@@ -220,6 +226,11 @@ let private parseBasicBlock tokens =
                 let rhs, tokens = parseOperand tokens
                 let result, tokens = parseInstruction tokens
                 (LShr(value, lhs, rhs) :: result, tokens)
+            | Identifier "ashr" :: tokens ->
+                let lhs, tokens = parseOperand tokens
+                let rhs, tokens = parseOperand tokens
+                let result, tokens = parseInstruction tokens
+                (AShr(value, lhs, rhs) :: result, tokens)
             | Identifier "load" :: tokens ->
                 let op, tokens = parseOperand tokens
                 let result, tokens = parseInstruction tokens
@@ -463,10 +474,12 @@ let fromString text: Module ref =
                 let map = assignOperand bin 0 lhs map
                 let map = assignOperand bin 1 rhs map
                 defineValue value bin map
+            | Neg (value, operand)
             | Not (value, operand) ->
                 let kind =
                     match instr with
                     | Not _ -> UnaryKind.Not
+                    | Neg _ -> UnaryKind.Negate
                     | _ -> failwith "Not possible"
 
                 let unary =
