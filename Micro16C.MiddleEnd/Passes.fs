@@ -99,6 +99,36 @@ let private singleInstructionSimplify builder value =
         |> Value.replaceWith (Builder.createConstant -1s)
 
         true
+    // Xor patterns
+    | BinOp Xor (ConstOp c1, ConstOp c2) ->
+        value
+        |> Value.replaceWith (Builder.createConstant (c1 ^^^ c2))
+
+        true
+    // X ^ undef -> undef
+    | BinOp Xor (_, UndefOp) ->
+        value |> Value.replaceWith Value.UndefValue
+
+        true
+    // X ^ 0 -> X
+    | BinOp Xor (x, ConstOp 0s) ->
+        value |> Value.replaceWith x
+
+        true
+    // X ^ X -> 0
+    | BinOp Xor (x1, x2) when x1 = x2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
+    // X ^ ~X = ~X ^ X = -1
+    | BinOp Xor
+            (x1, UnaryOp Not x2
+            | UnaryOp Not x1, x2) when x1 = x2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant -1s)
+
+        true
     // Add patterns
     // X + undef -> undef
     | BinOp Add
@@ -133,7 +163,13 @@ let private singleInstructionSimplify builder value =
             | BinOp Sub (y, x2), x1) when x1 = x2 ->
         value |> Value.replaceWith y
         true
-    //TODO: X + -X = 0
+    | BinOp Add
+            (x1, UnaryOp Negate x2
+            | UnaryOp Negate x1, x2) when x1 = x2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
     // mul patterns
     // X * undef -> 0
     // X * 0 -> 0
@@ -168,6 +204,55 @@ let private singleInstructionSimplify builder value =
             (y1, BinOp UDiv (x, y2)
             | BinOp UDiv (x, y2), y1) when y1 = y2 ->
         value |> Value.replaceWith x
+
+        true
+    // Div patterns
+    | BinOp SDiv (ConstOp c1, ConstOp c2) ->
+        value
+        |> Value.replaceWith (Builder.createConstant (c1 / c2))
+
+        true
+    | BinOp UDiv (ConstOp c1, ConstOp c2) ->
+        value
+        |> Value.replaceWith (Builder.createConstant (int16 ((c1 |> uint16) / (c2 |> uint16))))
+
+        true
+    // undef / X -> 0
+    | BinOp UDiv (UndefOp, _)
+    | BinOp SDiv (UndefOp, _) ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
+    // 0 / X -> 0
+    | BinOp UDiv (ConstOp 0s, _)
+    | BinOp SDiv (ConstOp 0s, _) ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
+    // X / X -> 1
+    | BinOp UDiv (x1, x2)
+    | BinOp SDiv (x1, x2) when x1 = x2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant 1s)
+
+        true
+    // X / 1 -> X
+    | BinOp UDiv (x, ConstOp 1s)
+    | BinOp SDiv (x, ConstOp 1s) ->
+        value |> Value.replaceWith x
+
+        true
+    // (X rem Y) / Y -> 0
+    | BinOp UDiv
+            (BinOp SRem (_, y1), y2
+            | BinOp URem (_, y1), y2)
+    | BinOp SDiv
+            (BinOp SRem (_, y1), y2
+            | BinOp URem (_, y1), y2) when y1 = y2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
 
         true
     // Not patterns
