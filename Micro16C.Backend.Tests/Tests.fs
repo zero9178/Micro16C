@@ -326,18 +326,17 @@ let ``Legalize instructions: Multiply`` () =
 
     """
 %entry:
-    %0 = load R0
-    %1 = neg %0
-    store %1 -> R0
+    %0 = load R10
+    %1 = load R9
+    %2 = mul %0 %1
+    store %2 -> R8
     """
     |> IRReader.fromString
     |> Legalize.legalizeInstructions
     |> runIRWithState
         { Simulator.State.Default with
               Registers =
-                  [| -3s
-                     0s
-                     5s
+                  [| 0s
                      0s
                      0s
                      0s
@@ -345,9 +344,63 @@ let ``Legalize instructions: Multiply`` () =
                      0s
                      0s
                      0s
-                     0s |] }
-    |> (fun state -> state.Registers.[0])
-    |> should equal 3s
+                     0s
+                     -3s
+                     5s |] }
+    |> (fun state -> state.Registers.[8])
+    |> should equal -15s
+
+    """
+%entry:
+    %0 = load R10
+    %1 = load R9
+    %2 = mul %0 %1
+    store %2 -> R8
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeInstructions
+    |> runIRWithState
+        { Simulator.State.Default with
+              Registers =
+                  [| 0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     -3s
+                     -5s |] }
+    |> (fun state -> state.Registers.[8])
+    |> should equal 15s
+
+    """
+%entry:
+    %0 = load R10
+    %1 = load R9
+    %2 = mul %0 %1
+    store %2 -> R8
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeInstructions
+    |> runIRWithState
+        { Simulator.State.Default with
+              Registers =
+                  [| 0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     3s
+                     -5s |] }
+    |> (fun state -> state.Registers.[8])
+    |> should equal -15s
 
 [<Fact>]
 let ``Assembly folding`` () =
