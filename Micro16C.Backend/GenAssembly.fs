@@ -147,40 +147,42 @@ let private genPhiMoves block list =
              >> RegisterAllocator.registerToIndex)
         |> Seq.iter (fun i -> Array.set assigned i true)
 
-        let notZeroOutDegrees =
-            transfers
+        let notZeroOutDegrees seq =
+            seq
             |> Seq.filter (fun (x, y) -> x <> y)
             |> Seq.countBy fst
             |> Seq.map fst
-            |> Set
-
-        let mutable remapped = Map.empty
 
         let transfers, list =
-            transfers
-            |> List.fold (fun (transfers, list) (fromReg, toReg) ->
-                if toReg = fromReg
-                   || notZeroOutDegrees |> Set.contains toReg then
-                    ((remapped
-                      |> Map.tryFind fromReg
-                      |> Option.defaultValue fromReg,
-                      toReg)
-                     :: transfers,
-                     list)
-                else
-                    let list = list |> prependMove fromReg toReg
+            Seq.unfold (fun (transfers, list) ->
+                let newTransfer, list =
+                    transfers
+                    |> List.fold (fun (transfers, list) (fromReg, toReg) ->
+                        if toReg = fromReg
+                           || notZeroOutDegrees transfers |> Seq.contains toReg then
+                            (transfers, list)
+                        else
+                            let list = list |> prependMove fromReg toReg
 
-                    remapped <- remapped |> Map.add fromReg toReg
+                            fromReg
+                            |> Bus.toRegister
+                            |> Option.iter (fun reg ->
+                                Array.set assigned (reg |> RegisterAllocator.registerToIndex) false)
 
-                    fromReg
-                    |> Bus.toRegister
-                    |> Option.iter (fun reg -> Array.set assigned (reg |> RegisterAllocator.registerToIndex) false)
+                            let transfers =
+                                transfers
+                                |> List.choose (fun (a, b) ->
+                                    if a = fromReg && b = toReg then None
+                                    else if a = fromReg then Some(toReg, b)
+                                    else Some(a, b))
 
-                    let transfers =
-                        transfers
-                        |> List.map (fun (a, b) -> if a = fromReg then (toReg, b) else (a, b))
+                            (transfers, list)) (transfers, list)
 
-                    (transfers, list)) ([], list)
+                if List.length newTransfer = List.length transfers
+                then None
+                else Some((newTransfer, list), (newTransfer, list))) (transfers, list)
+            |> Seq.append (Seq.singleton (transfers, list))
+            |> Seq.last
 
         let maps =
             transfers

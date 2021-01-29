@@ -131,6 +131,11 @@ type private Instruction =
     | Goto of Value
     | Add of Value * Operand * Operand
     | And of Value * Operand * Operand
+    | Mul of Value * Operand * Operand
+    | UDiv of Value * Operand * Operand
+    | SDiv of Value * Operand * Operand
+    | URem of Value * Operand * Operand
+    | SRem of Value * Operand * Operand
     | Shl of Value * Operand * Operand
     | LShr of Value * Operand * Operand
     | AShr of Value * Operand * Operand
@@ -208,6 +213,31 @@ let private parseBasicBlock tokens =
                 let rhs, tokens = parseOperand tokens
                 let result, tokens = parseInstruction tokens
                 (And(value, lhs, rhs) :: result, tokens)
+            | Identifier "mul" :: tokens ->
+                let lhs, tokens = parseOperand tokens
+                let rhs, tokens = parseOperand tokens
+                let result, tokens = parseInstruction tokens
+                (Mul(value, lhs, rhs) :: result, tokens)
+            | Identifier "sdiv" :: tokens ->
+                let lhs, tokens = parseOperand tokens
+                let rhs, tokens = parseOperand tokens
+                let result, tokens = parseInstruction tokens
+                (SDiv(value, lhs, rhs) :: result, tokens)
+            | Identifier "udiv" :: tokens ->
+                let lhs, tokens = parseOperand tokens
+                let rhs, tokens = parseOperand tokens
+                let result, tokens = parseInstruction tokens
+                (UDiv(value, lhs, rhs) :: result, tokens)
+            | Identifier "srem" :: tokens ->
+                let lhs, tokens = parseOperand tokens
+                let rhs, tokens = parseOperand tokens
+                let result, tokens = parseInstruction tokens
+                (SRem(value, lhs, rhs) :: result, tokens)
+            | Identifier "urem" :: tokens ->
+                let lhs, tokens = parseOperand tokens
+                let rhs, tokens = parseOperand tokens
+                let result, tokens = parseInstruction tokens
+                (URem(value, lhs, rhs) :: result, tokens)
             | Identifier "not" :: tokens ->
                 let op, tokens = parseOperand tokens
                 let result, tokens = parseInstruction tokens
@@ -455,6 +485,11 @@ let fromString text: Module ref =
             | Shl (value, lhs, rhs)
             | LShr (value, lhs, rhs)
             | AShr (value, lhs, rhs)
+            | Mul (value, lhs, rhs)
+            | SDiv (value, lhs, rhs)
+            | UDiv (value, lhs, rhs)
+            | SRem (value, lhs, rhs)
+            | URem (value, lhs, rhs)
             | Add (value, lhs, rhs) ->
 
                 let kind =
@@ -464,6 +499,11 @@ let fromString text: Module ref =
                     | Shl _ -> BinaryKind.Shl
                     | LShr _ -> BinaryKind.LShr
                     | AShr _ -> BinaryKind.AShr
+                    | Mul _ -> BinaryKind.Mul
+                    | SDiv _ -> BinaryKind.SDiv
+                    | UDiv _ -> BinaryKind.UDiv
+                    | URem _ -> BinaryKind.URem
+                    | SRem _ -> BinaryKind.SRem
                     | _ -> failwith "Not possible"
 
                 let bin =

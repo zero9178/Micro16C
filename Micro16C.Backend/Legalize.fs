@@ -51,10 +51,15 @@ let legalizeConstants irModule =
             let (first, second) =
                 allBits |> List.ofSeq |> List.splitAt splitIndex
 
-            if (List.forall id first
-                && List.forall (id >> not) second)
-               || (List.forall (id >> not) first
-                   && List.forall id second) then
+            let perfectSplit =
+                (List.forall id first
+                 && List.forall (id >> not) second)
+                || (List.forall (id >> not) first
+                    && List.forall id second)
+
+            if (perfectSplit
+                && List.length first < List.length second) then
+
                 let pattern =
                     Seq.unfold (fun c ->
                         let c =
@@ -66,6 +71,27 @@ let legalizeConstants irModule =
                     |> Seq.last
 
                 if not first.[0] then
+                    instr |> Value.setOperand i pattern
+                else
+                    instr
+                    |> Value.setOperand i (Builder.createUnary Not pattern builder |> fst)
+            else
+            // if the number is of the form 00..00 11..11 and there are fewer 1s then 0s
+            // it is only faster to use left shifts on -1 if the amounts of 1s are higher than 3.
+            // Otherwise it's faster to build up the whole number using 1 constants instead
+            if perfectSplit
+               && (first.[0] || List.length second > 3) then
+                let pattern =
+                    Seq.unfold (fun c ->
+                        let c =
+                            Builder.createBinary c Shl (Builder.createConstant 1s) builder
+                            |> fst
+
+                        Some(c, c)) (Builder.createConstant -1s)
+                    |> Seq.take (List.length second)
+                    |> Seq.last
+
+                if first.[0] then
                     instr |> Value.setOperand i pattern
                 else
                     instr
@@ -280,6 +306,124 @@ let legalizeInstructions irModule =
                 |> fst
 
             instr |> Value.replaceWith replacement
+        | BinOp Mul (lhs, rhs) ->
+            (*
+            int mul(int l,int r)
+            {
+                int sum = 0;
+                while (l)
+                {
+                    if (l & 1)
+                    {
+                        sum += r;
+                    }
+                    r <<= 1;
+                    //logical shift right
+                    l >>= 1;
+                }
+                return sum;
+            }
+            *)
+
+            let beforeBlock, instrBlock, builder =
+                builder |> Builder.splitBlockAt (Before instr)
+
+            let loop, builder =
+                builder
+                |> Builder.createBasicBlockAt (After beforeBlock) ""
+
+            !beforeBlock
+            |> Value.asBasicBlock
+            |> BasicBlock.terminator
+            |> Value.replaceOperand instrBlock loop
+
+            let builder =
+                builder |> Builder.setInsertBlock (Some loop)
+
+            let sum =
+                builder
+                |> Builder.createPhi [ (Builder.createConstant 0s, beforeBlock)
+                                       (Value.UndefValue, Value.UndefValue) ]
+                |> fst
+
+            let lhs =
+                builder
+                |> Builder.createPhi [ (lhs, beforeBlock)
+                                       (Value.UndefValue, Value.UndefValue) ]
+                |> fst
+
+            let rhs =
+                builder
+                |> Builder.createPhi [ (rhs, beforeBlock)
+                                       (Value.UndefValue, Value.UndefValue) ]
+                |> fst
+
+            let body, builder =
+                builder
+                |> Builder.createBasicBlockAt (After loop) ""
+
+            builder
+            |> Builder.createCondBr Zero lhs instrBlock body
+            |> ignore
+
+            let builder =
+                builder |> Builder.setInsertBlock (Some body)
+
+            let bitSet =
+                builder
+                |> Builder.createBinary lhs And (Builder.createConstant 1s)
+                |> fst
+
+            let bitSetBlock, builder =
+                builder
+                |> Builder.createBasicBlockAt (After body) ""
+
+            let continueBlock, builder =
+                builder
+                |> Builder.createBasicBlockAt (After bitSetBlock) ""
+
+            builder
+            |> Builder.createCondBr Zero bitSet continueBlock bitSetBlock
+            |> ignore
+
+            let builder =
+                builder
+                |> Builder.setInsertBlock (Some bitSetBlock)
+
+            let sumWithAdd =
+                builder |> Builder.createBinary sum Add rhs |> fst
+
+            let sumWithAdd, builder =
+                builder
+                |> Builder.createGoto continueBlock
+                |> snd
+                |> Builder.setInsertBlock (Some continueBlock)
+                |> Builder.createPhi [ (sumWithAdd, bitSetBlock)
+                                       (sum, body) ]
+
+            sum |> Value.setOperand 2 sumWithAdd
+            sum |> Value.setOperand 3 continueBlock
+
+            let newLhs =
+                builder
+                |> Builder.createBinary lhs LShr (Builder.createConstant 1s)
+                |> fst
+
+            lhs |> Value.setOperand 2 newLhs
+            lhs |> Value.setOperand 3 continueBlock
+
+            let newRhs =
+                builder
+                |> Builder.createBinary rhs Shl (Builder.createConstant 1s)
+                |> fst
+
+            rhs |> Value.setOperand 2 newRhs
+            rhs |> Value.setOperand 3 continueBlock
+
+            builder |> Builder.createGoto loop |> ignore
+
+            instr |> Value.replaceWith sum
+
         | BinOp SRem (lhs, ConstOp c)
         | BinOp URem (lhs, ConstOp c) when (c &&& (c - 1s)) = 0s ->
             // lhs mod power of two can be lowered to a simple and

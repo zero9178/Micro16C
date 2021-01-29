@@ -11,6 +11,8 @@ open FsUnit.Xunit
 
 let private runIRWithState state irModule =
     irModule
+    |> Legalize.legalizeConstants
+    |> Legalize.breakPhiCriticalEdges
     |> Passes.analyzeDominance
     |> Passes.analyzeLiveness
     |> RegisterAllocator.allocateRegisters
@@ -21,6 +23,8 @@ let private runIRWithState state irModule =
 
 let private runIR irModule =
     irModule
+    |> Legalize.legalizeConstants
+    |> Legalize.breakPhiCriticalEdges
     |> Passes.analyzeDominance
     |> Passes.analyzeLiveness
     |> RegisterAllocator.allocateRegisters
@@ -97,6 +101,77 @@ let ``Legalize Constants`` () =
     %1 = lshr -1 1
     %2 = not %1
     %3 = add %0 %2
+    """)
+
+    """
+%entry:
+    %0 = load R1
+    %1 = add 16383 %0
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeConstants
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    %1 = lshr -1 1
+    %2 = lshr %1 1
+    %3 = add %0 %2
+    """)
+
+    """
+%entry:
+    %0 = load R1
+    %1 = add 15 %0
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeConstants
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    %1 = shl -1 1
+    %2 = shl %1 1
+    %3 = shl %2 1
+    %4 = shl %3 1
+    %5 = not %4
+    %6 = add %0 %5
+    """)
+
+    """
+%entry:
+    %0 = load R1
+    %1 = add 3 %0
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeConstants
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    %1 = shl 1 1
+    %2 = add 1 %1
+    %3 = add %2 %0
+    """)
+
+    """
+%entry:
+    %0 = load R1
+    %1 = add -4 %0
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeConstants
+    |> should
+        be
+           (structurallyEquivalentTo """
+%entry:
+    %0 = load R1
+    %1 = shl -1 1
+    %2 = shl %1 1
+    %3 = add %2 %0
     """)
 
 [<Fact>]
@@ -195,6 +270,59 @@ let ``Legalize instructions: Negate`` () =
                      0s |] }
     |> (fun state -> state.Registers.[0])
     |> should equal -3s
+
+    """
+%entry:
+    %0 = load R0
+    %1 = neg %0
+    store %1 -> R0
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeInstructions
+    |> runIRWithState
+        { Simulator.State.Default with
+              Registers =
+                  [| -3s
+                     0s
+                     5s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s |] }
+    |> (fun state -> state.Registers.[0])
+    |> should equal 3s
+
+[<Fact>]
+let ``Legalize instructions: Multiply`` () =
+    """
+%entry:
+    %0 = load R10
+    %1 = load R9
+    %2 = mul %0 %1
+    store %2 -> R8
+    """
+    |> IRReader.fromString
+    |> Legalize.legalizeInstructions
+    |> runIRWithState
+        { Simulator.State.Default with
+              Registers =
+                  [| 0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     0s
+                     3s
+                     5s |] }
+    |> (fun state -> state.Registers.[8])
+    |> should equal 15s
 
     """
 %entry:
