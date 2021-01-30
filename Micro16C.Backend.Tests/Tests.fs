@@ -647,3 +647,28 @@ goto .end; wr
     |> ParseAssembly.parseAssembly
     |> asText
     |> should equal first
+
+[<Fact>]
+let ``Remove redundant labels`` () =
+
+    """
+        goto .label3
+        :label1
+        :label2
+        :label3
+        R0 <- 1
+        """
+    |> ParseAssembly.parseAssembly
+    |> GenAssembly.removeRedundantLabels
+    |> GenAssembly.genMachineCode
+    |> List.ofSeq
+    |> should
+        matchList
+           ("""
+        goto .label1
+        :label1
+        R0 <- 1
+        """
+            |> ParseAssembly.parseAssembly
+            |> GenAssembly.genMachineCode
+            |> List.ofSeq)

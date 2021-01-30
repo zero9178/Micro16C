@@ -58,6 +58,7 @@ let compile text =
     |> Result.map RegisterAllocator.allocateRegisters
     |> Result.map GenAssembly.genAssembly
     |> Result.map GenAssembly.removeUnusedLabels
+    |> Result.map GenAssembly.removeRedundantLabels
 
 [<EntryPoint>]
 let main argv =

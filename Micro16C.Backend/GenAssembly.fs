@@ -449,6 +449,28 @@ let removeUnusedLabels assemblyList =
         | Label s -> usedLabels |> Set.contains s
         | _ -> true)
 
+let removeRedundantLabels assemblyList =
+    let replacements =
+        assemblyList
+        |> Seq.windowed 2
+        |> Seq.fold (fun replaced assembly ->
+            match assembly with
+            | [| Label first; Label second |] ->
+                match replaced |> Map.tryFind first with
+                | Some found -> replaced |> Map.add second found
+                | None -> replaced |> Map.add second first
+            | _ -> replaced) (Map.empty)
+
+    assemblyList
+    |> Seq.choose (fun assembly ->
+        match assembly with
+        | Operation ({ Address = Some s } as op) ->
+            match replacements |> Map.tryFind s with
+            | Some s -> Operation { op with Address = Some s } |> Some
+            | None -> Some assembly
+        | Label s when replacements |> Map.containsKey s -> None
+        | _ -> assembly |> Some)
+
 let genMachineCode assemblyList =
     let machineCode, symbolTable =
         assemblyList
