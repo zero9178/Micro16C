@@ -318,6 +318,12 @@ let private singleInstructionSimplify builder value =
         |> Value.replaceWith (Builder.createConstant 0s)
 
         true
+    // X << c -> 0 when c >= 16
+    | BinOp Shl (x, ConstOp c) when c >= 16s ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
     // lshr patterns
     | BinOp LShr (ConstOp lhs, ConstOp rhs) ->
         value
@@ -333,6 +339,12 @@ let private singleInstructionSimplify builder value =
     // X >> 0 -> X
     | BinOp LShr (x, ConstOp 0s) ->
         value |> Value.replaceWith x
+
+        true
+    // X >> c -> 0 when c >= 16
+    | BinOp LShr (x, ConstOp c) when c >= 16s ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
 
         true
     // ashr patterns
