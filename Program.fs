@@ -70,4 +70,6 @@ let main argv =
 
         match compile text |> Result.map Assembly.printAssembly with
         | Ok _ -> 0
-        | Error _ -> -1
+        | Error s ->
+            eprintfn "%s" s
+            -1

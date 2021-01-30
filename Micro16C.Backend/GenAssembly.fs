@@ -30,7 +30,7 @@ let private prependOperation operation list =
                    BBus = None
                    AMux = Some AMux.ABus
                    Condition = None } as op2) :: rest when sBus = aBus
-                                                           && Operation.canCombine
+                                                           && Operation.canCombineExclusive
                                                                { op1 with
                                                                      Shifter = None
                                                                      ALU = None
@@ -73,7 +73,7 @@ let private prependOperation operation list =
       Operation ({ Shifter = (None
                    | Some Shifter.Noop)
                    SBus = Some sBus } as op2) :: rest when aBus = sBus
-                                                           && Operation.canCombine
+                                                           && Operation.canCombineExclusive
                                                                { op1 with ALU = None; ABus = None }
                                                                   op2 ->
         let op =
@@ -86,14 +86,15 @@ let private prependOperation operation list =
         Condition = Some _ } as op1,
       Operation ({ Shifter = (None
                    | Some Shifter.Noop)
-                   MBRWrite = Some true } as op2) :: rest when Operation.canCombine
+                   MBRWrite = Some true } as op2) :: rest when Operation.canCombineExclusive
                                                                    { op1 with ALU = None; ABus = None }
                                                                    op2 ->
         let op =
             Operation.combine { op1 with ALU = None; ABus = None } op2
 
         Operation(op) :: rest
-    | op1, Operation op2 :: list when Operation.canCombine op1 op2 -> Operation(Operation.combine op1 op2) :: list
+    | op1, Operation op2 :: list when Operation.canCombineExclusive op1 op2 ->
+        Operation(Operation.combine op1 op2) :: list
     | operation, list -> (Operation operation) :: list
 
 let private prependMove fromReg toReg list =

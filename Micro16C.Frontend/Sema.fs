@@ -852,7 +852,10 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
             { context with
                   Loops = whileLoop :: context.Loops }
 
-        let condition = visitExpression context expression
+        let condition =
+            visitExpression context expression
+            |> Result.map lvalueConversion
+
         let statement, context = visitStatement context statement
 
         (comb2 (fun x y ->
@@ -873,7 +876,10 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
                   Loops = doWhileLoop :: context.Loops }
 
         let statement, context = visitStatement context statement
-        let condition = visitExpression context expression
+
+        let condition =
+            visitExpression context expression
+            |> Result.map lvalueConversion
 
         (comb2 (fun x y ->
             let doWhileObj = DoWhileStatement(y, x) |> ref
@@ -884,7 +890,10 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
                Labels = context.Labels
                Gotos = context.Gotos })
     | Parse.IfStatement (expression, statement, elseBranch) ->
-        let expression = visitExpression context expression
+        let expression =
+            visitExpression context expression
+            |> Result.map lvalueConversion
+
         let statement, context = visitStatement context statement
 
         let elseBranch, context =
@@ -957,7 +966,9 @@ let rec visitStatement (context: Context) (statement: Parse.Statement) =
 
         let condition =
             condition
-            |> Option.map (visitExpression context)
+            |> Option.map
+                (visitExpression context
+                 >> Result.map lvalueConversion)
             |> oRtoRo
 
         let iteration =

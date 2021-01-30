@@ -219,27 +219,7 @@ module Operation =
         && comp op1.Condition op2.Condition
         && comp op1.ALU op2.ALU
         && comp op1.Shifter op2.Shifter
-        && (((op1.MemoryAccess |> Option.isSome)
-             && (op2.MemoryAccess |> Option.isSome))
-            |> not)
-        && (((op1.MemoryAccess |> Option.isSome)
-             && (op2.MARWrite |> Option.isSome))
-            |> not)
-        && (((op2.MemoryAccess |> Option.isSome)
-             && (op1.MARWrite |> Option.isSome))
-            |> not)
-        && (((op1.MemoryAccess |> Option.isSome)
-             && (op2.MBRWrite |> Option.isSome))
-            |> not)
-        && (((op2.MemoryAccess |> Option.isSome)
-             && (op1.MBRWrite |> Option.isSome))
-            |> not)
-        && (((op1.MemoryAccess |> Option.isSome)
-             && (op2.AMux = Some AMux.MBR))
-            |> not)
-        && (((op2.MemoryAccess |> Option.isSome)
-             && (op1.AMux = Some AMux.MBR))
-            |> not)
+        && comp op1.MemoryAccess op2.MemoryAccess
         && comp op1.MARWrite op2.MARWrite
         && comp op1.MBRWrite op2.MBRWrite
         && comp op1.SBus op2.SBus
@@ -268,6 +248,47 @@ module Operation =
           BBus = optionalXOR op1.BBus op2.BBus
           ABus = optionalXOR op1.ABus op2.ABus
           Address = optionalXOR op1.Address op2.Address }
+
+    let canCombineExclusive op1 op2 =
+
+        let comp optional1 optional2 =
+            match optional1, optional2 with
+            | None, None
+            | None, Some _ -> true
+            | Some _, None -> true
+            | Some _, Some _ -> false
+
+        comp op1.AMux op2.AMux
+        && comp op1.Condition op2.Condition
+        && comp op1.ALU op2.ALU
+        && comp op1.Shifter op2.Shifter
+        && (((op1.MemoryAccess |> Option.isSome)
+             && (op2.MemoryAccess |> Option.isSome))
+            |> not)
+        && (((op1.MemoryAccess |> Option.isSome)
+             && (op2.MARWrite |> Option.isSome))
+            |> not)
+        && (((op2.MemoryAccess |> Option.isSome)
+             && (op1.MARWrite |> Option.isSome))
+            |> not)
+        && (((op1.MemoryAccess |> Option.isSome)
+             && (op2.MBRWrite |> Option.isSome))
+            |> not)
+        && (((op2.MemoryAccess |> Option.isSome)
+             && (op1.MBRWrite |> Option.isSome))
+            |> not)
+        && (((op1.MemoryAccess |> Option.isSome)
+             && (op2.AMux = Some AMux.MBR))
+            |> not)
+        && (((op2.MemoryAccess |> Option.isSome)
+             && (op1.AMux = Some AMux.MBR))
+            |> not)
+        && comp op1.MARWrite op2.MARWrite
+        && comp op1.MBRWrite op2.MBRWrite
+        && comp op1.SBus op2.SBus
+        && comp op1.BBus op2.BBus
+        && comp op1.ABus op2.ABus
+        && comp op1.Address op2.Address
 
     let asText (op: Operation) = op.ToString()
 

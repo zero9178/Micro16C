@@ -523,14 +523,14 @@ and visitExpression (expression: Sema.Expression) (context: Context) =
 
             let context =
                 (loaded, context)
-                ||> Op.minus (Builder.createConstant 1s)
+                ||> fun x -> Op.minus x (Builder.createConstant 1s)
                 ||> Context.createStore value
 
             (loaded, context)
         | Sema.PreDecrement ->
             (value, context)
             ||> Context.createLoad
-            ||> Op.minus (Builder.createConstant 1s)
+            ||> fun x -> Op.minus x (Builder.createConstant 1s)
             ||> Context.createStore value
             |> Context.createLoad value
         | Sema.LogicalNegate -> (value, context) ||> Op.toBool ||> Op.boolInvert

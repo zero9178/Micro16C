@@ -32,6 +32,6 @@ let comb4 (successComb: 'a -> 'b -> 'c -> 'd -> 'e)
 
 let prependResult x y = comb2 (fun x y -> x :: y) x y
 
-let foldResults (list: Result<'a, string> list) =
-    list
-    |> List.fold (fun x y -> prependResult y x) ([] |> Ok)
+let foldResults (seq: seq<Result<'a, string>>) =
+    seq
+    |> Seq.fold (fun x y -> prependResult y x) ([] |> Ok)
