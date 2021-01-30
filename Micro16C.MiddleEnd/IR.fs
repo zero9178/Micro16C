@@ -827,7 +827,7 @@ module Module =
     let forwardAnalysis transform join =
         entryBlock
         >> Option.iter
-            (Graphs.singleForwardAnalysis
+            (Graphs.forwardAnalysis
                 transform
                  join
                  ((!) >> BasicBlock.predecessors >> Seq.ofList)

@@ -4,53 +4,45 @@ module Micro16C.MiddleEnd.Graphs
 open Micro16C.MiddleEnd.Util
 
 let preOrder (successorsFunc: 'Node -> seq<'Node>) (root: 'Node) =
-    let mutable set = ImmutableSet.empty
 
-    let rec seqImpl current =
-        if set |> ImmutableSet.contains current then
-            Seq.empty
-        else
-            set <- set |> ImmutableSet.add current
-
-            seq {
-                yield current
-
-                yield!
-                    current
-                    |> successorsFunc
-                    |> Seq.map seqImpl
-                    |> Seq.concat
-            }
-
-    root |> seqImpl
+    Seq.unfold (fun (list, set) ->
+        match list with
+        | [] -> None
+        | head :: rest when set |> ImmutableSet.contains head -> Some(None, (rest, set))
+        | head :: rest ->
+            let set = set |> ImmutableSet.add head
+            Some(Some head, ((head |> successorsFunc |> List.ofSeq) @ rest, set))) ([ root ], ImmutableSet.empty)
+    |> Seq.choose id
 
 let postOrder (successorsFunc: 'Node -> seq<'Node>) (root: 'Node) =
-    let mutable set = ImmutableSet.empty
 
-    let rec seqImpl current =
-        if set |> ImmutableSet.contains current then
-            Seq.empty
-        else
-            set <- set |> ImmutableSet.add current
+    Seq.unfold (fun (list, set, outputted) ->
+        match list with
+        | [] -> None
+        | head :: rest when set |> ImmutableSet.contains head ->
+            let successors = head |> successorsFunc |> List.ofSeq
 
-            seq {
-                yield!
-                    current
-                    |> successorsFunc
-                    |> Seq.map seqImpl
-                    |> Seq.concat
+            if outputted |> ImmutableSet.contains head |> not
+               && successors
+                  |> List.forall (fun x -> set |> ImmutableSet.contains x) then
+                let outputted = outputted |> ImmutableSet.add head
+                Some(Some head, (rest, set, outputted))
+            else
+                Some(None, (rest, set, outputted))
+        | head :: _ ->
+            let successors =
+                head
+                |> successorsFunc
+                |> Seq.filter (fun x -> set |> ImmutableSet.contains x |> not)
+                |> List.ofSeq
 
-                yield current
-            }
+            let set = set |> ImmutableSet.add head
+            Some(None, (successors @ list, set, outputted))) ([ root ], ImmutableSet.empty, ImmutableSet.empty)
+    |> Seq.choose id
 
-    root |> seqImpl
+let reversePostOrder successorsFunc root = postOrder successorsFunc root |> Seq.rev
 
-let reversePostOrder successorsFunc root =
-    postOrder successorsFunc root
-    |> Seq.rev
-    |> Seq.cache
-
-let singleForwardAnalysis transform join predecessorsFun successorsFunc root =
+let forwardAnalysis transform join predecessorsFun successorsFunc root =
     let mutable outs = ImmutableMap.empty
 
     let seq =
