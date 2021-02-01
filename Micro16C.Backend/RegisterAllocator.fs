@@ -79,8 +79,8 @@ let allocateRegisters irModule =
                     |> Seq.find (snd >> Seq.contains operand)
                     |> fst = value
 
-            match !value with
-            | { Content = PhiInstruction _ } -> ()
+            match value with
+            | PhiOp _ -> ()
             | _ ->
                 !value
                 |> Value.operands

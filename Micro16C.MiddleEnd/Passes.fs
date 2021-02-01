@@ -444,21 +444,19 @@ let simplifyCFG (irModule: Module ref) =
             // this optimization may be invalid if the basic block is used in a Phi. For now I'll be conservative and
             // not remove such basic blocks. As a future TODO I could check for semantic changes
             match block |> BasicBlock.revInstructions with
-            | [ Ref { Content = GotoInstruction { BasicBlock = destination } } ] when !blockValue
-                                                                                      |> Value.users
-                                                                                      |> List.exists (function
-                                                                                          | Ref { Content = PhiInstruction _ } ->
-                                                                                              true
-                                                                                          | _ -> false)
-                                                                                      |> not ->
+            | [ GotoOp destination ] when !blockValue
+                                          |> Value.users
+                                          |> List.exists (function
+                                              | PhiOp _ -> true
+                                              | _ -> false)
+                                          |> not ->
                 blockValue |> Value.replaceWith destination
                 true
-            | Ref { Content = GotoInstruction { BasicBlock = destination } } as terminator :: _ when (!destination
-                                                                                                      |> BasicBlock.hasSinglePredecessor)
-                                                                                                     && (!destination
-                                                                                                         |> Value.asBasicBlock
-                                                                                                         |> BasicBlock.phis
-                                                                                                         |> List.isEmpty) ->
+            | GotoOp destination as terminator :: _ when (!destination |> BasicBlock.hasSinglePredecessor)
+                                                         && (!destination
+                                                             |> Value.asBasicBlock
+                                                             |> BasicBlock.phis
+                                                             |> List.isEmpty) ->
                 terminator |> Value.destroy
 
                 let builder =
@@ -651,7 +649,7 @@ let jumpThreading irModule =
             phis
             |> List.fold (fun result phi ->
                 Seq.unfold (function
-                    | Ref { Content = PhiInstruction _ } as phi ->
+                    | PhiOp _ as phi ->
                         let replacement =
                             !phi
                             |> Value.operands
@@ -729,7 +727,7 @@ let jumpThreading irModule =
                          >> Value.asBasicBlock
                          >> BasicBlock.tryTerminator
                          >> Option.filter (function
-                             | Ref { Content = GotoInstruction _ } -> false
+                             | GotoOp _ -> false
                              | _ -> true)
                          >> Option.isNone))
 
@@ -920,8 +918,8 @@ let analyzeAlloc (irModule: Module ref) =
             let addressTaken =
                 users
                 |> List.exists (function
-                    | Ref { Content = LoadInstruction _ } -> false
-                    | Ref { Content = StoreInstruction { Value = value } } when value <> instr -> false
+                    | LoadOp _ -> false
+                    | StoreOp (value, _) when value <> instr -> false
                     | _ -> true)
 
             instr
@@ -946,9 +944,9 @@ let removeRedundantLoadStores (irModule: Module ref) =
             // replace all loads first therefore making all stores but the last redundant
             instr
             |> List.fold (fun replacement x ->
-                match !x with
-                | { Content = StoreInstruction { Value = passThrough } } -> passThrough |> Some
-                | { Content = LoadInstruction _ } ->
+                match x with
+                | StoreOp (passThrough, _) -> passThrough |> Some
+                | LoadOp _ ->
                     match replacement with
                     | Some value ->
                         x |> Value.replaceWith value
@@ -965,7 +963,7 @@ let removeRedundantLoadStores (irModule: Module ref) =
             // Remove all but the last store
             instr
             |> List.filter (function
-                | Ref { Content = StoreInstruction _ } -> true
+                | StoreOp _ -> true
                 | _ -> false)
             |> List.rev
             |> safeTail
@@ -974,18 +972,17 @@ let removeRedundantLoadStores (irModule: Module ref) =
         block
         |> BasicBlock.instructions
         |> List.filter (function
-            | Ref { Content = LoadInstruction { Source = Ref { Content = AllocationInstruction { Aliased = Some false } } } }
-            | Ref { Content = StoreInstruction { Destination = Ref { Content = AllocationInstruction { Aliased = Some false } } } } ->
-                true
+            | LoadOp (AllocaOp (Some false))
+            | StoreOp (_, AllocaOp (Some false)) -> true
             | _ -> false)
         |> List.groupBy (function
-            | Ref { Content = LoadInstruction { Source = alloca } }
-            | Ref { Content = StoreInstruction { Destination = alloca } } -> alloca
+            | LoadOp alloca
+            | StoreOp (_, alloca) -> alloca
             | _ -> failwith "Internal Compiler error")
         |> List.map (fun (_, x) ->
-            match !(List.head x) with
-            | { Content = LoadInstruction { Source = alloca } }
-            | { Content = StoreInstruction { Destination = alloca } } -> (alloca, x)
+            match (List.head x) with
+            | LoadOp alloca
+            | StoreOp (_, alloca) -> (alloca, x)
             | _ -> failwith "Internal Compiler error")
         |> List.iter (snd >> simplifyLoadStoreSeries)
 
@@ -1155,8 +1152,8 @@ let mem2reg (irModule: Module ref) =
     !irModule
     |> Module.instructions
     |> List.choose (fun x ->
-        match !x with
-        | { Content = AllocationInstruction { Aliased = Some false } } -> Some(x, (!x).Users |> ImmutableSet.ofList)
+        match x with
+        | AllocaOp (Some false) -> Some(x, (!x).Users |> ImmutableSet.ofList)
         | _ -> None)
     |> List.iter (fun (alloca, loadStores) ->
         let s =
@@ -1218,14 +1215,14 @@ let mem2reg (irModule: Module ref) =
                 |> Value.asBasicBlock
                 |> BasicBlock.instructions
                 |> List.fold (fun replacement x ->
-                    match !x with
-                    | { Content = StoreInstruction { Value = passThrough } } when loadStores |> ImmutableSet.contains x ->
+                    match x with
+                    | StoreOp (passThrough, _) when loadStores |> ImmutableSet.contains x ->
                         x |> Value.destroy
                         passThrough
-                    | { Content = LoadInstruction _ } when loadStores |> ImmutableSet.contains x ->
+                    | LoadOp _ when loadStores |> ImmutableSet.contains x ->
                         x |> Value.replaceWith replacement
                         replacement
-                    | { Content = PhiInstruction _ } when phis |> ImmutableSet.contains x -> x
+                    | PhiOp _ when phis |> ImmutableSet.contains x -> x
                     | _ -> replacement) replacement
 
             phiPredBlocks
@@ -1261,8 +1258,8 @@ let analyzeLiveness irModule =
                 |> List.fold (fun set instr ->
 
                     let set, upwardsExposed =
-                        match !instr with
-                        | { Content = PhiInstruction _ } -> (set, [ instr ])
+                        match instr with
+                        | PhiOp _ -> (set, [ instr ])
                         | _ ->
                             let set =
                                 if !instr |> Value.producesValue then set |> ImmutableSet.remove instr else set

@@ -12,8 +12,8 @@ let legalizeConstants irModule =
         |> Value.operands
         |> List.indexed
         |> List.choose (fun (i, x) ->
-            match !x with
-            | { Content = Constant { Value = c } } when c <> 0s && c <> 1s && c <> -1s -> Some(i, c)
+            match x with
+            | ConstOp c when c <> 0s && c <> 1s && c <> -1s -> Some(i, c)
             | _ -> None)
         |> List.iter (fun (i, c) ->
 
@@ -21,8 +21,8 @@ let legalizeConstants irModule =
             // at the start of a basic block before any non phi instructions. Instead we'll check the predecessor
             // where the constant comes from and put the instructions before it's terminating instruction
             let builder =
-                match !instr with
-                | { Content = PhiInstruction { Incoming = _ } } ->
+                match instr with
+                | PhiOp _ ->
                     let pred =
                         !instr |> Value.operands |> List.item (i + 1)
 
@@ -129,32 +129,31 @@ let legalizeConstants irModule =
                     |> Seq.fold (fun (op, builder) bitPair ->
                         match bitPair with
                         | 0b00s ->
-                            match !op with
-                            | { Content = Constant { Value = 0s } } -> (op, builder)
+                            match op with
+                            | ConstOp 0s -> (op, builder)
                             | _ ->
                                 builder
                                 |> Builder.createBinary op Add op
                                 ||> shiftLeft
                         | 0b01s ->
-                            match !op with
-                            | { Content = Constant { Value = 0s } } -> (Builder.createConstant 1s, builder)
+                            match op with
+                            | ConstOp 0s -> (Builder.createConstant 1s, builder)
                             | _ ->
                                 (op, builder)
                                 ||> shiftLeft
                                 ||> shiftLeft
                                 ||> Builder.createBinary (Builder.createConstant 1s) Add
                         | 0b10s ->
-                            match !op with
-                            | { Content = Constant { Value = 0s } } ->
-                                (Builder.createConstant 1s, builder) ||> shiftLeft
+                            match op with
+                            | ConstOp 0s -> (Builder.createConstant 1s, builder) ||> shiftLeft
                             | _ ->
                                 (op, builder)
                                 ||> shiftLeft
                                 ||> Builder.createBinary (Builder.createConstant 1s) Add
                                 ||> shiftLeft
                         | 0b11s ->
-                            match !op with
-                            | { Content = Constant { Value = 0s } } ->
+                            match op with
+                            | ConstOp 0s ->
                                 (Builder.createConstant 1s, builder)
                                 ||> shiftLeft
                                 ||> Builder.createBinary (Builder.createConstant 1s) Add

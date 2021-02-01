@@ -1341,6 +1341,11 @@ let (|UndefOp|_|) instr =
     | { Content = Undef } -> Some UndefOp
     | _ -> None
 
+let (|RegisterOp|_|) instr =
+    match !instr with
+    | { Content = Register reg } -> Some reg
+    | _ -> None
+
 let (|CondBrOp|_|) instr =
     match !instr with
     | { Content = CondBrInstruction { Kind = cKind
@@ -1349,7 +1354,28 @@ let (|CondBrOp|_|) instr =
                                       FalseBranch = falseBranch } } -> Some(cKind, condition, trueBranch, falseBranch)
     | _ -> None
 
+let (|GotoOp|_|) instr =
+    match !instr with
+    | { Content = GotoInstruction { BasicBlock = value } } -> Some value
+    | _ -> None
+
 let (|PhiOp|_|) instr =
     match !instr with
     | { Content = PhiInstruction { Incoming = list } } -> Some list
+    | _ -> None
+
+let (|LoadOp|_|) instr =
+    match !instr with
+    | { Content = LoadInstruction { Source = value } } -> Some value
+    | _ -> None
+
+let (|StoreOp|_|) instr =
+    match !instr with
+    | { Content = StoreInstruction { Value = value
+                                     Destination = destination } } -> Some(value, destination)
+    | _ -> None
+
+let (|AllocaOp|_|) instr =
+    match !instr with
+    | { Content = AllocationInstruction { Aliased = value } } -> value |> Some
     | _ -> None

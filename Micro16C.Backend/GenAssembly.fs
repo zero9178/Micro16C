@@ -6,11 +6,11 @@ open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
 
 let private operandToBus operand =
-    match !operand with
-    | { Content = Constant { Value = 0s } } -> Bus.Zero |> Some
-    | { Content = Constant { Value = 1s } } -> Bus.One |> Some
-    | { Content = Constant { Value = -1s } } -> Bus.NegOne |> Some
-    | { Content = Register reg } -> Register.toBus reg |> Some
+    match operand with
+    | ConstOp 0s -> Bus.Zero |> Some
+    | ConstOp 1s -> Bus.One |> Some
+    | ConstOp -1s -> Bus.NegOne |> Some
+    | RegisterOp reg -> Register.toBus reg |> Some
     | _ ->
         !operand
         |> Value.register
@@ -131,7 +131,7 @@ let private genPhiMoves block list =
                       |> Seq.pairwise
                       |> Seq.find (snd >> (=) block)
                       |> fst with
-                | Ref { Content = Undef } -> list
+                | UndefOp -> list
                 | source ->
                     (source |> operandToBus |> Option.get, phi |> operandToBus |> Option.get)
                     :: list) []
@@ -304,26 +304,29 @@ let genAssembly irModule: AssemblyLine list =
                 then genPhiMoves (!instr |> Value.parentBlock |> Option.get) list
                 else list
 
-            match !instr with
-            | { Content = LoadInstruction { Source = Ref { Content = Register _ } as op } } ->
+            match instr with
+            | LoadOp (RegisterOp _ as op) ->
                 prependMove (operandToBus op |> Option.get) (operandToBus instr |> Option.get) list
-            | { Content = StoreInstruction { Destination = Ref { Content = Register _ } as instr
-                                             Value = op } } ->
+            | StoreOp (op, (RegisterOp _ as instr)) ->
                 prependMove (operandToBus op |> Option.get) (operandToBus instr |> Option.get) list
-            | { Content = BinaryInstruction { Left = lhs
-                                              Right = rhs
-                                              Kind = (Add
-                                              | And) as kind } } ->
+            | BinOp Add (lhs, rhs)
+            | BinOp And (lhs, rhs) ->
+                let kind =
+                    match instr with
+                    | BinOp Add _ -> ALU.Add
+                    | BinOp And _ -> ALU.And
+                    | _ -> failwith "Internal Compiler Error"
+
                 prependOperation
                     { Operation.Default with
                           AMux = Some AMux.ABus
                           SBus = instr |> operandToBus
                           ABus = lhs |> operandToBus
                           BBus = rhs |> operandToBus
-                          ALU = Some(if kind = Add then ALU.Add else ALU.And)
+                          ALU = kind |> Some
                           Shifter = Some Shifter.Noop }
                     list
-            | { Content = UnaryInstruction { Value = value; Kind = Not } } ->
+            | UnaryOp Not value ->
                 prependOperation
                     { Operation.Default with
                           AMux = Some AMux.ABus
@@ -332,9 +335,7 @@ let genAssembly irModule: AssemblyLine list =
                           ALU = Some ALU.Neg
                           Shifter = Some Shifter.Noop }
                     list
-            | { Content = BinaryInstruction { Left = value
-                                              Kind = Shl
-                                              Right = Ref { Content = Constant { Value = 1s } } } } ->
+            | BinOp Shl (value, ConstOp 1s) ->
                 prependOperation
                     { Operation.Default with
                           AMux = Some AMux.ABus
@@ -343,9 +344,7 @@ let genAssembly irModule: AssemblyLine list =
                           ALU = Some ALU.ABus
                           Shifter = Some Shifter.Left }
                     list
-            | { Content = BinaryInstruction { Left = value
-                                              Kind = LShr
-                                              Right = Ref { Content = Constant { Value = 1s } } } } ->
+            | BinOp LShr (value, ConstOp 1s) ->
                 prependOperation
                     { Operation.Default with
                           AMux = Some AMux.ABus
@@ -354,7 +353,7 @@ let genAssembly irModule: AssemblyLine list =
                           ALU = Some ALU.ABus
                           Shifter = Some Shifter.Right }
                     list
-            | { Content = GotoInstruction { BasicBlock = branch } } ->
+            | GotoOp branch ->
 
                 if Some branch
                    <> Array.tryItem (bbIndex + 1) basicBlocks then
@@ -365,10 +364,7 @@ let genAssembly irModule: AssemblyLine list =
                         list
                 else
                     list
-            | { Content = CondBrInstruction { Kind = kind
-                                              Value = value
-                                              FalseBranch = falseBranch
-                                              TrueBranch = trueBranch } } ->
+            | CondBrOp (kind, value, falseBranch, trueBranch) ->
                 let list =
                     prependOperation
                         { Operation.Default with
@@ -388,7 +384,7 @@ let genAssembly irModule: AssemblyLine list =
                               Address = falseBranch |> getName |> Some
                               Condition = Some Cond.None }
                         list
-            | { Content = LoadInstruction { Source = value } } ->
+            | LoadOp value ->
                 let list =
                     prependOperation
                         { Operation.Default with
@@ -411,8 +407,7 @@ let genAssembly irModule: AssemblyLine list =
                           ALU = Some ALU.ABus
                           Shifter = Some Shifter.Noop }
                     list
-            | { Content = StoreInstruction { Value = value
-                                             Destination = destination } } ->
+            | StoreOp (value, destination) ->
                 let list =
                     prependOperation
                         { Operation.Default with
@@ -432,7 +427,7 @@ let genAssembly irModule: AssemblyLine list =
                           MBRWrite = Some false
                           MARWrite = Some false }
                     list
-            | { Content = PhiInstruction _ } -> list
+            | PhiOp _ -> list
             | _ -> failwith "Internal Compiler Error: Can't compile IR instruction to assembly") list) []
     |> List.rev
 
