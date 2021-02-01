@@ -1059,6 +1059,7 @@ let analyzeDominance (irModule: Module ref) =
 
     !irModule
     |> Module.reversePostOrder
+    |> Seq.cache
     |> processBlocks
 
     !irModule
@@ -1303,6 +1304,7 @@ let analyzeLiveness irModule =
                            |> Option.defaultValue result
                        | instr -> result |> ImmutableSet.add instr) ImmutableSet.empty)
                |> ImmutableSet.unionMany)
+    |> ignore
 
     irModule
 

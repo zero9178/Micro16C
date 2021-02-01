@@ -317,7 +317,7 @@ module internal BasicBlockInternal =
             | { Content = BasicBlockValue block } -> block
             | _ -> failwith "")
             |> immediateDominator
-            |> Option.filter ((=) blockValue)
+            |> Option.filter ((<>) blockValue)
             |> Option.map (fun x -> (x, x)))
 
     let dominators block =
@@ -826,16 +826,23 @@ module Module =
 
     let forwardAnalysis transform join =
         entryBlock
-        >> Option.iter
-            (Graphs.forwardAnalysis
+        >> Option.map
+            (Graphs.dataFlowAnalysis
                 transform
                  join
                  ((!) >> BasicBlock.predecessors >> Seq.ofList)
                  ((!) >> BasicBlock.successors >> Seq.ofList))
+        >> Option.defaultValue ImmutableMap.empty
 
     let backwardAnalysis transform join =
-        entryBlock
-        >> Option.iter (Graphs.backwardAnalysis transform join ((!) >> BasicBlock.successors >> Seq.ofList))
+        exitBlock
+        >> Option.map
+            (Graphs.dataFlowAnalysis
+                transform
+                 join
+                 ((!) >> BasicBlock.successors >> Seq.ofList)
+                 ((!) >> BasicBlock.predecessors >> Seq.ofList))
+        >> Option.defaultValue ImmutableMap.empty
 
 type InsertPoint =
     | Before of Value ref

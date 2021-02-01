@@ -42,68 +42,35 @@ let postOrder (successorsFunc: 'Node -> seq<'Node>) (root: 'Node) =
 
 let reversePostOrder successorsFunc root = postOrder successorsFunc root |> Seq.rev
 
-let forwardAnalysis transform join predecessorsFun successorsFunc root =
-    let mutable outs = ImmutableMap.empty
+let dataFlowAnalysis transform join predecessorsFun successorsFunc root =
 
-    let seq =
-        reversePostOrder successorsFunc root |> Seq.cache
+    Seq.unfold (fun (workList, outs) ->
+        match workList |> Seq.tryHead with
+        | None -> None
+        | Some head ->
 
-    Seq.initInfinite (fun _ ->
-        Seq.fold (fun changes b ->
+            let workList = workList |> ImmutableSet.remove head
 
             let inValue =
-                b
+                head
                 |> predecessorsFun
                 |> Seq.map (fun x -> (x, outs |> ImmutableMap.tryFind x))
-                |> join b
+                |> join head
 
-            let out = transform inValue b
+            let out = transform inValue head
 
-            let changes =
-                (match outs |> ImmutableMap.tryFind b with
-                 | None ->
-                     outs <- outs |> ImmutableMap.add b out
-                     true
-                 | Some before when before <> out ->
-                     outs <- outs |> ImmutableMap.add b out
-                     true
-                 | _ -> false)
-                || changes
+            let outs, changes =
+                (match outs |> ImmutableMap.tryFind head with
+                 | None -> (outs |> ImmutableMap.add head out, true)
+                 | Some before when before <> out -> (outs |> ImmutableMap.add head out, true)
+                 | _ -> (outs, false))
 
-            changes) false seq)
-    |> Seq.takeWhile id
-    |> Seq.tryLast
-    |> ignore
+            if changes then
+                let workList =
+                    workList
+                    |> ImmutableSet.union (head |> successorsFunc |> ImmutableSet.ofSeq)
 
-let backwardAnalysis transform join successorsFunc root =
-    let mutable outs = ImmutableMap.empty
-
-    let seq =
-        postOrder successorsFunc root |> Seq.cache
-
-    Seq.initInfinite (fun _ ->
-        Seq.fold (fun changes b ->
-
-            let inValue =
-                b
-                |> successorsFunc
-                |> Seq.map (fun x -> (x, outs |> ImmutableMap.tryFind x))
-                |> join b
-
-            let out = transform inValue b
-
-            let changes =
-                (match outs |> ImmutableMap.tryFind b with
-                 | None ->
-                     outs <- outs |> ImmutableMap.add b out
-                     true
-                 | Some before when before <> out ->
-                     outs <- outs |> ImmutableMap.add b out
-                     true
-                 | _ -> false)
-                || changes
-
-            changes) false seq)
-    |> Seq.takeWhile id
-    |> Seq.tryLast
-    |> ignore
+                Some(outs, (workList, outs))
+            else
+                Some(outs, (workList, outs))) (ImmutableSet.ofList [ root ], ImmutableMap.empty)
+    |> Seq.last
