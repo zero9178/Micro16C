@@ -936,62 +936,6 @@ let analyzeAlloc (irModule: Module ref) =
 
     irModule
 
-let removeRedundantLoadStores (irModule: Module ref) =
-    let removeRedundantLoadStoresInBlock blockValue =
-        let block = !blockValue |> Value.asBasicBlock
-
-        let simplifyLoadStoreSeries instr =
-            // replace all loads first therefore making all stores but the last redundant
-            instr
-            |> List.fold (fun replacement x ->
-                match x with
-                | StoreOp (passThrough, _) -> passThrough |> Some
-                | LoadOp _ ->
-                    match replacement with
-                    | Some value ->
-                        x |> Value.replaceWith value
-                        replacement
-                    | None -> Some x
-                | _ -> failwith "Internal Compiler Error") None
-            |> ignore
-
-            let safeTail list =
-                match list with
-                | _ :: tail -> tail
-                | _ -> []
-
-            // Remove all but the last store
-            instr
-            |> List.filter (function
-                | StoreOp _ -> true
-                | _ -> false)
-            |> List.rev
-            |> safeTail
-            |> List.iter Value.destroy
-
-        block
-        |> BasicBlock.instructions
-        |> List.filter (function
-            | LoadOp (AllocaOp (Some false))
-            | StoreOp (_, AllocaOp (Some false)) -> true
-            | _ -> false)
-        |> List.groupBy (function
-            | LoadOp alloca
-            | StoreOp (_, alloca) -> alloca
-            | _ -> failwith "Internal Compiler error")
-        |> List.map (fun (_, x) ->
-            match (List.head x) with
-            | LoadOp alloca
-            | StoreOp (_, alloca) -> (alloca, x)
-            | _ -> failwith "Internal Compiler error")
-        |> List.iter (snd >> simplifyLoadStoreSeries)
-
-    !irModule
-    |> Module.revBasicBlocks
-    |> List.iter removeRedundantLoadStoresInBlock
-
-    irModule
-
 let analyzeDominance (irModule: Module ref) =
     let map = Dictionary(HashIdentity.Reference)
 

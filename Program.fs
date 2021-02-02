@@ -47,7 +47,6 @@ let compile text =
     |> Result.map Passes.deadCodeElimination
     |> Result.map Passes.removeUnreachableBlocks
     |> Result.map Passes.simplifyCFG
-    |> Result.map Passes.removeRedundantLoadStores
     |> Result.map (debugModulePasses "End of optimizations:")
     |> Result.map Legalize.legalizeConstants
     |> Result.map Legalize.breakPhiCriticalEdges
