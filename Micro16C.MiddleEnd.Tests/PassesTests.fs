@@ -198,19 +198,6 @@ let ``Instruction Simplify: And patterns`` () =
     """)
 
     """%entry:
-        %1 = and 17 5
-        store %1 -> R1
-    """
-    |> IRReader.fromString
-    |> Passes.instructionSimplify
-    |> should
-        be
-           (structurallyEquivalentTo """
-    %entry:
-        store 1 -> R1
-    """)
-
-    """%entry:
         %0 = load R0
         %1 = and %0 %0
         store %1 -> R1
@@ -243,19 +230,6 @@ let ``Instruction Simplify: Add patterns`` () =
     """)
 
     """%entry:
-        %1 = add 6 17
-        store %1 -> R1
-    """
-    |> IRReader.fromString
-    |> Passes.instructionSimplify
-    |> should
-        be
-           (structurallyEquivalentTo """
-    %entry:
-        store 23 -> R1
-    """)
-
-    """%entry:
     %0 = load R0
     %1 = add %0 %0
     store %1 -> R1
@@ -272,48 +246,10 @@ let ``Instruction Simplify: Add patterns`` () =
     """)
 
 [<Fact>]
-let ``Instruction Simplify: Shift patterns`` () =
-    """%entry:
-    %0 = shl 3 1
-    store %0 -> R1
-"""
-    |> IRReader.fromString
-    |> Passes.instructionSimplify
-    |> should
-        be
-           (structurallyEquivalentTo """
-%entry:
-    store 6 -> R1
-    """)
-
-    """%entry:
-    %0 = lshr 3 1
-    store %0 -> R1
-"""
-    |> IRReader.fromString
-    |> Passes.instructionSimplify
-    |> should
-        be
-           (structurallyEquivalentTo """
-%entry:
-    store 1 -> R1
-    """)
+let ``Instruction Simplify: Shift patterns`` () = ()
 
 [<Fact>]
 let ``Instruction Simplify: Not patterns`` () =
-
-    """%entry:
-    %0 = not 3
-    store %0 -> R1
-"""
-    |> IRReader.fromString
-    |> Passes.instructionSimplify
-    |> should
-        be
-           (structurallyEquivalentTo """
-%entry:
-    store -4 -> R1
-    """)
 
     """%entry:
     %0 = load R1
@@ -334,45 +270,6 @@ let ``Instruction Simplify: Not patterns`` () =
 
 [<Fact>]
 let ``Instruction Simplify: Branch patterns`` () =
-    """%entry:
-    br 0 = 0 %true %false
-%true:
-    store 3 -> R0
-%false:
-    store 5 -> R0
-"""
-    |> IRReader.fromString
-    |> Passes.instructionSimplify
-    |> should
-        be
-           (structurallyEquivalentTo """
-%entry:
-    goto %true
-%true:
-    store 3 -> R0
-%false:
-    store 5 -> R0
-    """)
-
-    """%entry:
-    br 0 < 0 %true %false
-%true:
-    store 3 -> R0
-%false:
-    store 5 -> R0
-"""
-    |> IRReader.fromString
-    |> Passes.instructionSimplify
-    |> should
-        be
-           (structurallyEquivalentTo """
-%entry:
-    goto %false
-%true:
-    store 3 -> R0
-%false:
-    store 5 -> R0
-    """)
 
     """%entry:
     br 0 < 0 %true %true

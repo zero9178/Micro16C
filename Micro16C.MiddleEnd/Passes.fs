@@ -23,11 +23,6 @@ let private singleInstructionSimplify builder value =
             | passThrough, ConstOp -1s) ->
         value |> Value.replaceWith passThrough
         true
-    | BinOp And (ConstOp lhs, ConstOp rhs) ->
-        value
-        |> Value.replaceWith (Builder.createConstant (lhs &&& rhs))
-
-        true
     | BinOp And (lhs, rhs) when lhs = rhs ->
         value |> Value.replaceWith lhs
         true
@@ -100,11 +95,6 @@ let private singleInstructionSimplify builder value =
 
         true
     // Xor patterns
-    | BinOp Xor (ConstOp c1, ConstOp c2) ->
-        value
-        |> Value.replaceWith (Builder.createConstant (c1 ^^^ c2))
-
-        true
     // X ^ undef -> undef
     | BinOp Xor (_, UndefOp) ->
         value |> Value.replaceWith Value.UndefValue
@@ -141,11 +131,6 @@ let private singleInstructionSimplify builder value =
             (passThrough, ConstOp 0s
             | ConstOp 0s, passThrough) ->
         value |> Value.replaceWith passThrough
-        true
-    | BinOp Add (ConstOp lhs, ConstOp rhs) ->
-        value
-        |> Value.replaceWith (Builder.createConstant (lhs + rhs))
-
         true
     // X + X -> lsh(X)
     | BinOp Add (lhs, rhs) when lhs = rhs ->
@@ -184,11 +169,6 @@ let private singleInstructionSimplify builder value =
         |> Value.replaceWith (Builder.createConstant 0s)
 
         true
-    | BinOp Mul (ConstOp c1, ConstOp c2) ->
-        value
-        |> Value.replaceWith (Builder.createConstant (c1 * c2))
-
-        true
     // X * 1 -> X
     | BinOp Mul
             (ConstOp 1s, x
@@ -207,16 +187,6 @@ let private singleInstructionSimplify builder value =
 
         true
     // Div patterns
-    | BinOp SDiv (ConstOp c1, ConstOp c2) ->
-        value
-        |> Value.replaceWith (Builder.createConstant (c1 / c2))
-
-        true
-    | BinOp UDiv (ConstOp c1, ConstOp c2) ->
-        value
-        |> Value.replaceWith (Builder.createConstant (int16 ((c1 |> uint16) / (c2 |> uint16))))
-
-        true
     // undef / X -> 0
     | BinOp UDiv (UndefOp, _)
     | BinOp SDiv (UndefOp, _) ->
@@ -256,16 +226,6 @@ let private singleInstructionSimplify builder value =
 
         true
     // rem patterns
-    | BinOp URem (ConstOp c1, ConstOp c2) ->
-        value
-        |> Value.replaceWith (Builder.createConstant (((c1 |> uint16) % (c2 |> uint16)) |> int16))
-
-        true
-    | BinOp SRem (ConstOp c1, ConstOp c2) ->
-        value
-        |> Value.replaceWith (Builder.createConstant (c1 % c2))
-
-        true
     // (X % Y) % Y -> X % Y
     | BinOp SRem (BinOp SRem (_, y1) as op, y2) when y1 = y2 ->
         value |> Value.replaceWith op
@@ -276,31 +236,16 @@ let private singleInstructionSimplify builder value =
 
         true
     // Not patterns
-    | UnaryOp Not (ConstOp c) ->
-        value
-        |> Value.replaceWith (Builder.createConstant (~~~c))
-
-        true
     // ~(~X) -> X
     | UnaryOp Not (UnaryOp Not x) ->
         value |> Value.replaceWith x
         true
     // Negate patterns
-    | UnaryOp Negate (ConstOp c) ->
-        value
-        |> Value.replaceWith (Builder.createConstant -c)
-
-        true
     // -(-X) -> X
     | UnaryOp Negate (UnaryOp Negate x) ->
         value |> Value.replaceWith x
         true
     // Shl patterns
-    | BinOp Shl (ConstOp lhs, ConstOp rhs) ->
-        value
-        |> Value.replaceWith (Builder.createConstant (lhs <<< (rhs |> int32)))
-
-        true
     // 0 << X -> 0
     | BinOp Shl (ConstOp 0s, _) ->
         value
@@ -325,11 +270,6 @@ let private singleInstructionSimplify builder value =
 
         true
     // lshr patterns
-    | BinOp LShr (ConstOp lhs, ConstOp rhs) ->
-        value
-        |> Value.replaceWith (Builder.createConstant ((lhs |> uint16) >>> (rhs |> int32) |> int16))
-
-        true
     // 0 >> X -> 0
     | BinOp LShr (ConstOp 0s, _) ->
         value
@@ -348,11 +288,6 @@ let private singleInstructionSimplify builder value =
 
         true
     // ashr patterns
-    | BinOp AShr (ConstOp lhs, ConstOp rhs) ->
-        value
-        |> Value.replaceWith (Builder.createConstant (lhs >>> (rhs |> int)))
-
-        true
     // 0 >> X -> 0
     | BinOp AShr (ConstOp 0s, _) ->
         value
@@ -368,24 +303,6 @@ let private singleInstructionSimplify builder value =
     | BinOp AShr (ConstOp -1s, _) ->
         value
         |> Value.replaceWith (Builder.createConstant 0s)
-
-        true
-    | CondBrOp (Zero, ConstOp c, trueBranch, falseBranch) ->
-        if c = 0s then
-            value
-            |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
-        else
-            value
-            |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
-
-        true
-    | CondBrOp (Negative, ConstOp c, trueBranch, falseBranch) ->
-        if c < 0s then
-            value
-            |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
-        else
-            value
-            |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
 
         true
     | CondBrOp (_, _, trueBranch, falseBranch) when trueBranch = falseBranch ->
@@ -623,6 +540,69 @@ let private singleInstructionCombine builder value =
         true
     | _ -> false
 
+let private localConstantFolding builder instructions =
+    instructions
+    |> List.iter (fun value ->
+        match value with
+        | BinOp And (ConstOp lhs, ConstOp rhs) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (lhs &&& rhs))
+        | BinOp Or (ConstOp lhs, ConstOp rhs) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (lhs ||| rhs))
+        | BinOp Xor (ConstOp c1, ConstOp c2) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (c1 ^^^ c2))
+        | BinOp Add (ConstOp lhs, ConstOp rhs) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (lhs + rhs))
+        | BinOp Mul (ConstOp c1, ConstOp c2) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (c1 * c2))
+        | BinOp SDiv (ConstOp c1, ConstOp c2) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (c1 / c2))
+        | BinOp UDiv (ConstOp c1, ConstOp c2) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (int16 ((c1 |> uint16) / (c2 |> uint16))))
+        | BinOp URem (ConstOp c1, ConstOp c2) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (((c1 |> uint16) % (c2 |> uint16)) |> int16))
+
+        | BinOp SRem (ConstOp c1, ConstOp c2) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (c1 % c2))
+        | UnaryOp Not (ConstOp c) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (~~~c))
+        | UnaryOp Negate (ConstOp c) ->
+            value
+            |> Value.replaceWith (Builder.createConstant -c)
+        | BinOp Shl (ConstOp lhs, ConstOp rhs) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (lhs <<< (rhs |> int32)))
+        | BinOp LShr (ConstOp lhs, ConstOp rhs) ->
+            value
+            |> Value.replaceWith (Builder.createConstant ((lhs |> uint16) >>> (rhs |> int32) |> int16))
+        | BinOp AShr (ConstOp lhs, ConstOp rhs) ->
+            value
+            |> Value.replaceWith (Builder.createConstant (lhs >>> (rhs |> int)))
+        | CondBrOp (Zero, ConstOp c, trueBranch, falseBranch) ->
+            if c = 0s then
+                value
+                |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
+            else
+                value
+                |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
+        | CondBrOp (Negative, ConstOp c, trueBranch, falseBranch) ->
+            if c < 0s then
+                value
+                |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
+            else
+                value
+                |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
+        | _ -> ())
+
 let jumpThreading irModule =
 
     let builder = Builder.fromModule irModule
@@ -684,14 +664,7 @@ let jumpThreading irModule =
                     ((!)
                      >> Value.asBasicBlock
                      >> BasicBlock.instructions
-                     >> List.iter (singleInstructionSimplify builder >> ignore))
-
-                newBlock
-                |> Option.iter
-                    ((!)
-                     >> Value.asBasicBlock
-                     >> BasicBlock.instructions
-                     >> List.iter (singleInstructionCombine builder >> ignore))
+                     >> localConstantFolding builder)
 
                 newBlock |> Option.map (fun x -> (x, pred)))
 
@@ -837,9 +810,13 @@ let jumpThreading irModule =
 
                 escapingValues
                 |> List.iter (fun oldValue ->
-                    let incomingList =
-                        copies
-                        |> List.map (fun (block, replacements) -> (replacements |> ImmutableMap.find oldValue, block))
+                    let incomingList bb =
+                        !bb
+                        |> BasicBlock.predecessors
+                        |> List.map (fun block ->
+                            match copies |> List.tryFind (fst >> (=) block) with
+                            | None -> (Value.UndefValue, block)
+                            | Some (_, replacements) -> (replacements |> ImmutableMap.find oldValue, block))
 
                     let mergeIncoming =
                         !blockValue
@@ -849,7 +826,7 @@ let jumpThreading irModule =
                                 builder
                                 |> Builder.setInsertBlock (Some bb)
                                 |> Builder.setInsertPoint Start
-                                |> Builder.createPhi incomingList
+                                |> Builder.createPhi (incomingList bb)
                                 |> fst
 
                             !oldValue

@@ -665,7 +665,7 @@ module Value =
 
                 let parentBlock = !parentBlockValue |> asBasicBlock
 
-                let (first, second) =
+                let first, second =
                     parentBlock.Instructions |> List.splitAt index
 
                 parentBlockValue
@@ -880,7 +880,7 @@ module Builder =
         | None -> (value, builder)
         | Some (Ref { Content = BasicBlockValue block } as blockVal) ->
 
-            let (first, second) =
+            let first, second =
                 block.Instructions
                 |> List.splitAt builder.InsertIndex
 
