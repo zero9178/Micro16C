@@ -9,9 +9,9 @@ open Micro16C.MiddleEnd.Util
 type Context =
     { Builder: Builder
       Variables: Map<Sema.Declaration, Value ref>
-      Labels: ImmutableMap<Sema.Statement ref, Value ref>
-      Continues: ImmutableMap<Sema.Statement ref, Value ref>
-      Breaks: ImmutableMap<Sema.Statement ref, Value ref> }
+      Labels: ImmutableMap<Sema.Statement, Value ref>
+      Continues: ImmutableMap<Sema.Statement, Value ref>
+      Breaks: ImmutableMap<Sema.Statement, Value ref> }
 
 module private Context =
 
@@ -192,8 +192,8 @@ let rec visitCompoundStatement (compoundItems: Sema.CompoundItem list) (context:
             declaration
             |> List.fold (fun context x -> visitDeclaration x context) context) context
 
-and visitStatement (statement: Sema.Statement ref) (context: Context): Context =
-    match !statement with
+and visitStatement (statement: Sema.Statement) (context: Context): Context =
+    match statement with
     | Sema.IfStatement (condition, trueStatement, falseStatement) ->
         let condition, context =
             visitExpression condition context ||> Op.toBool
@@ -302,7 +302,7 @@ and visitStatement (statement: Sema.Statement ref) (context: Context): Context =
     | Sema.ExpressionStatement None -> context
     | Sema.ExpressionStatement (Some expression) -> context |> visitExpression expression |> snd
     | Sema.GotoStatement gotoStatement ->
-        match !gotoStatement with
+        match gotoStatement.Force() with
         | None -> failwith "Internal Compiler Error: No corresponding label for Goto"
         | Some label ->
             (match ImmutableMap.tryFind label context.Labels with
@@ -334,13 +334,13 @@ and visitStatement (statement: Sema.Statement ref) (context: Context): Context =
         context
         |> Context.createGoto
             (context.Continues
-             |> ImmutableMap.find (!statement |> Option.get))
+             |> ImmutableMap.find (statement.Force() |> Option.get))
         |> Context.setInsertPoint None
     | Sema.BreakStatement statement ->
         context
         |> Context.createGoto
             (context.Breaks
-             |> ImmutableMap.find (!statement |> Option.get))
+             |> ImmutableMap.find (statement.Force() |> Option.get))
         |> Context.setInsertPoint None
     | Sema.ForStatement forStatement ->
         let context =
