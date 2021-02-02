@@ -1273,3 +1273,195 @@ let reorderBasicBlocks irModule =
             |> Module.swapBlocks successors.[0] successors.[1])
 
     irModule
+
+type private LatticeValues =
+    | Top
+    | Constant of int16
+    | Bottom
+
+let constantPropagation irModule =
+
+    let mutable executableEdges = ImmutableMap.empty
+
+    let addEdge fromEdge toEdge map =
+        match map |> ImmutableMap.tryFind fromEdge with
+        | None ->
+            map
+            |> ImmutableMap.add fromEdge (ImmutableSet.ofList [ toEdge ])
+        | Some set ->
+            map
+            |> ImmutableMap.add fromEdge (set |> ImmutableSet.add toEdge)
+
+    let rewrites =
+        !irModule
+        |> Module.entryBlock
+        |> Option.map
+            (Graphs.dataFlowAnalysis
+                (fun replacements current ->
+                    !current
+                    |> Value.asBasicBlock
+                    |> BasicBlock.nonPhiInstructions
+                    |> Seq.fold (fun replacements instr ->
+                        let operands =
+                            !instr
+                            |> Value.operands
+                            |> List.map (function
+                                | ConstOp c -> Constant c
+                                | instr when !instr |> Value.producesValue -> replacements |> ImmutableMap.find instr
+                                | _ -> Bottom)
+                            |> Array.ofSeq
+
+                        let result =
+                            match instr, operands with
+                            | BinOp And _, [| Constant c1; Constant c2 |] -> c1 &&& c2 |> Constant |> Some
+                            | BinOp Add _, [| Constant c1; Constant c2 |] -> c1 + c2 |> Constant |> Some
+                            | BinOp Or _, [| Constant c1; Constant c2 |] -> c1 ||| c2 |> Constant |> Some
+                            | BinOp Xor _, [| Constant c1; Constant c2 |] -> c1 ^^^ c2 |> Constant |> Some
+                            | BinOp Sub _, [| Constant c1; Constant c2 |] -> c1 - c2 |> Constant |> Some
+                            | BinOp Mul _, [| Constant c1; Constant c2 |] -> c1 * c2 |> Constant |> Some
+                            | BinOp SDiv _, [| Constant c1; Constant c2 |] -> c1 / c2 |> Constant |> Some
+                            | BinOp SRem _, [| Constant c1; Constant c2 |] -> c1 % c2 |> Constant |> Some
+                            | BinOp Shl _, [| Constant c1; Constant c2 |] -> c1 <<< (c2 |> int) |> Constant |> Some
+                            | BinOp AShr _, [| Constant c1; Constant c2 |] -> c1 >>> (c2 |> int) |> Constant |> Some
+                            | BinOp UDiv _, [| Constant c1; Constant c2 |] ->
+                                (c1 |> uint16) / (c2 |> uint16)
+                                |> int16
+                                |> Constant
+                                |> Some
+                            | BinOp URem _, [| Constant c1; Constant c2 |] ->
+                                (c1 |> uint16) % (c2 |> uint16)
+                                |> int16
+                                |> Constant
+                                |> Some
+                            | BinOp LShr _, [| Constant c1; Constant c2 |] ->
+                                (c1 |> uint16) >>> (c2 |> int)
+                                |> int16
+                                |> Constant
+                                |> Some
+                            | UnaryOp Negate _, [| Constant c |] -> -c |> Constant |> Some
+                            | UnaryOp Not _, [| Constant c |] -> ~~~c |> Constant |> Some
+                            | CondBrOp (Zero, _, trueBranch, falseBranch), [| Constant c; _; _ |] ->
+                                if c = 0s
+                                then executableEdges <- executableEdges |> addEdge current trueBranch
+                                else executableEdges <- executableEdges |> addEdge current falseBranch
+
+                                None
+                            | CondBrOp (Negative, _, trueBranch, falseBranch), [| Constant c; _; _ |] ->
+                                if c < 0s
+                                then executableEdges <- executableEdges |> addEdge current trueBranch
+                                else executableEdges <- executableEdges |> addEdge current falseBranch
+
+                                None
+                            | CondBrOp (_, _, trueBranch, falseBranch), _ ->
+                                executableEdges <- executableEdges |> addEdge current trueBranch
+                                executableEdges <- executableEdges |> addEdge current falseBranch
+                                None
+                            | GotoOp destination, _ ->
+                                executableEdges <- executableEdges |> addEdge current destination
+                                None
+                            | instr, _ when !instr |> Value.producesValue |> not -> None
+                            | _, _ -> Some Bottom
+
+                        match result with
+                        | None -> replacements
+                        | Some result -> replacements |> ImmutableMap.add instr result) replacements)
+                 (fun current predecessors ->
+                     predecessors
+                     |> Seq.choose (fun (a, b) ->
+                         match b with
+                         | None -> None
+                         | Some b -> Some(a, b))
+                     |> Seq.map (fun (predecessor, replacement) ->
+                         !current
+                         |> Value.asBasicBlock
+                         |> BasicBlock.phis
+                         |> List.fold (fun replacement phi ->
+                             let phiOp =
+                                 !phi
+                                 |> Value.operands
+                                 |> List.pairwise
+                                 |> List.find (snd >> (=) predecessor)
+                                 |> fst
+
+                             let phiRepl =
+                                 match phiOp with
+                                 | ConstOp c -> Constant c
+                                 | instr when !instr |> Value.producesValue ->
+                                     replacement
+                                     |> ImmutableMap.tryFind phiOp
+                                     |> Option.defaultValue Top
+                                 | UndefOp -> Top
+                                 | _ -> Bottom
+
+                             replacement |> ImmutableMap.add phi phiRepl) replacement)
+                     |> List.ofSeq
+                     |> Some
+                     |> Option.filter (List.isEmpty >> not)
+                     |> Option.map
+                         (List.reduce (fun map1 map2 ->
+                             Seq.append map1 map2
+                             |> Seq.groupBy (fun (kv: KeyValuePair<Value ref, LatticeValues>) -> kv.Key)
+                             |> Seq.map (fun (key, value) ->
+                                 (key,
+                                  value
+                                  |> Seq.map (fun kv -> kv.Value)
+                                  |> Seq.reduce (fun op1 op2 ->
+                                      match op1, op2 with
+                                      | Top, _ -> op2
+                                      | _, Top -> op1
+                                      | Constant c1, Constant c2 when c1 = c2 -> op1
+                                      | _, _ -> Bottom)))
+                             |> ImmutableMap.ofSeq))
+                     |> Option.defaultValue ImmutableMap.empty)
+                 ((!) >> BasicBlock.predecessors >> Seq.ofList)
+                 (fun x ->
+                     executableEdges
+                     |> ImmutableMap.tryFind x
+                     |> Option.defaultValue ImmutableSet.empty))
+        |> Option.defaultValue ImmutableMap.empty
+
+    !irModule
+    |> Module.exitBlock
+    |> Option.bind (fun x -> rewrites |> ImmutableMap.tryFind x)
+    |> Option.defaultValue ImmutableMap.empty
+    |> Seq.choose (fun kv ->
+        let value, latticeValue = kv.Deconstruct()
+
+        match latticeValue with
+        | Constant c -> Some(value, c)
+        | _ -> None)
+    |> Seq.iter (fun (value, repl) ->
+        value
+        |> Value.replaceWith (Builder.createConstant repl))
+
+    let builder = Builder.fromModule irModule
+
+    !irModule
+    |> Module.revBasicBlocks
+    |> Seq.choose (fun bb ->
+        match executableEdges |> ImmutableMap.tryFind bb with
+        | Some successors when successors |> ImmutableSet.count = 1
+                               && !bb |> BasicBlock.successors |> List.length > 1 -> Some(bb, successors |> Seq.head)
+        | _ -> None)
+    |> Seq.iter (fun (bb, succ) ->
+        !bb
+        |> Value.asBasicBlock
+        |> BasicBlock.terminator
+        |> Value.replaceWith (builder |> Builder.createGoto succ |> fst))
+
+    let reachable =
+        executableEdges
+        |> Seq.map (fun kv -> kv.Value)
+        |> ImmutableSet.unionMany
+        |> ImmutableSet.union
+            (!irModule
+             |> Module.entryBlock
+             |> Option.toList
+             |> ImmutableSet.ofList)
+
+    !irModule
+    |> Module.revBasicBlocks
+    |> Seq.filter (fun x -> reachable |> ImmutableSet.contains x |> not)
+    |> Seq.iter Value.destroy
+
+    irModule
