@@ -319,7 +319,7 @@ let private singleInstructionSimplify builder value =
 
         true
     // X << c -> 0 when c >= 16
-    | BinOp Shl (x, ConstOp c) when c >= 16s ->
+    | BinOp Shl (_, ConstOp c) when c >= 16s ->
         value
         |> Value.replaceWith (Builder.createConstant 0s)
 
@@ -342,7 +342,7 @@ let private singleInstructionSimplify builder value =
 
         true
     // X >> c -> 0 when c >= 16
-    | BinOp LShr (x, ConstOp c) when c >= 16s ->
+    | BinOp LShr (_, ConstOp c) when c >= 16s ->
         value
         |> Value.replaceWith (Builder.createConstant 0s)
 
@@ -1207,36 +1207,47 @@ let mem2reg (irModule: Module ref) =
             |> Seq.map (fun (x, y) -> (x, y |> List.ofSeq |> List.map snd))
             |> ImmutableMap.ofSeq
 
-        !irModule
-        |> Module.reversePostOrder
-        |> Seq.fold (fun replacement blockValue ->
-            let replacement =
+        let mutable alreadyVisited = ImmutableSet.empty
+
+        let rec rename replacement blockValue =
+            if ImmutableSet.contains blockValue alreadyVisited then
+                ()
+            else
+                alreadyVisited <- ImmutableSet.add blockValue alreadyVisited
+
+                let replacement =
+                    !blockValue
+                    |> Value.asBasicBlock
+                    |> BasicBlock.instructions
+                    |> List.fold (fun replacement x ->
+                        match x with
+                        | StoreOp (passThrough, _) when loadStores |> ImmutableSet.contains x ->
+                            x |> Value.destroy
+                            passThrough
+                        | LoadOp _ when loadStores |> ImmutableSet.contains x ->
+                            x |> Value.replaceWith replacement
+                            replacement
+                        | PhiOp _ when phis |> ImmutableSet.contains x -> x
+                        | _ -> replacement) replacement
+
+                phiPredBlocks
+                |> ImmutableMap.tryFind blockValue
+                |> Option.iter
+                    (List.iter (fun phiValue ->
+                        !phiValue
+                        |> Value.operands
+                        |> List.indexed
+                        |> List.pairwise
+                        |> List.filter (fun (_, (_, bb)) -> bb = blockValue)
+                        |> List.iter (fun ((i, _), _) -> phiValue |> Value.setOperand i replacement)))
+
                 !blockValue
-                |> Value.asBasicBlock
-                |> BasicBlock.instructions
-                |> List.fold (fun replacement x ->
-                    match x with
-                    | StoreOp (passThrough, _) when loadStores |> ImmutableSet.contains x ->
-                        x |> Value.destroy
-                        passThrough
-                    | LoadOp _ when loadStores |> ImmutableSet.contains x ->
-                        x |> Value.replaceWith replacement
-                        replacement
-                    | PhiOp _ when phis |> ImmutableSet.contains x -> x
-                    | _ -> replacement) replacement
+                |> BasicBlock.successors
+                |> List.iter (rename replacement)
 
-            phiPredBlocks
-            |> ImmutableMap.tryFind blockValue
-            |> Option.iter
-                (List.iter (fun phiValue ->
-                    !phiValue
-                    |> Value.operands
-                    |> List.indexed
-                    |> List.pairwise
-                    |> List.filter (fun (_, (_, bb)) -> bb = blockValue)
-                    |> List.iter (fun ((i, _), _) -> phiValue |> Value.setOperand i replacement)))
-
-            replacement) Value.UndefValue
+        !irModule
+        |> Module.entryBlock
+        |> Option.map (rename Value.UndefValue)
         |> ignore
 
         alloca |> Value.destroy)

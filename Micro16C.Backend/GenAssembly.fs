@@ -364,7 +364,7 @@ let genAssembly irModule: AssemblyLine list =
                         list
                 else
                     list
-            | CondBrOp (kind, value, falseBranch, trueBranch) ->
+            | CondBrOp (kind, value, trueBranch, falseBranch) ->
                 let list =
                     prependOperation
                         { Operation.Default with

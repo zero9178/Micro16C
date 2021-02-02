@@ -42,14 +42,14 @@ let postOrder (successorsFunc: 'Node -> seq<'Node>) (root: 'Node) =
 
 let reversePostOrder successorsFunc root = postOrder successorsFunc root |> Seq.rev
 
+let mutable g = 0
+
 let dataFlowAnalysis transform join predecessorsFun successorsFunc root =
 
     Seq.unfold (fun (workList, outs) ->
-        match workList |> Seq.tryHead with
-        | None -> None
-        | Some head ->
-
-            let workList = workList |> ImmutableSet.remove head
+        match workList with
+        | [] -> None
+        | head :: rest ->
 
             let inValue =
                 head
@@ -66,11 +66,13 @@ let dataFlowAnalysis transform join predecessorsFun successorsFunc root =
                  | _ -> (outs, false))
 
             if changes then
-                let workList =
-                    workList
-                    |> ImmutableSet.union (head |> successorsFunc |> ImmutableSet.ofSeq)
+                let rest =
+                    head
+                    |> successorsFunc
+                    |> List.ofSeq
+                    |> List.fold (fun rest succ -> if rest |> List.contains succ then rest else succ :: rest) rest
 
-                Some(outs, (workList, outs))
+                Some(outs, (rest, outs))
             else
-                Some(outs, (workList, outs))) (ImmutableSet.ofList [ root ], ImmutableMap.empty)
+                Some(outs, (rest, outs))) ([ root ], ImmutableMap.empty)
     |> Seq.last
