@@ -9,6 +9,7 @@
         <Compile Include="Util.fs"/>
         <Compile Include="Graphs.fs"/>
         <Compile Include="IR.fs"/>
+        <Compile Include="PassManager.fs"/>
         <Compile Include="Passes.fs"/>
     </ItemGroup>
 

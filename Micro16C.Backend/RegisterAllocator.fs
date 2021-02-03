@@ -1,9 +1,9 @@
 module Micro16C.Backend.RegisterAllocator
 
-open System
 open Micro16C.MiddleEnd
 open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
+open Micro16C.MiddleEnd.PassManager
 
 let registerToIndex register =
     match register with
@@ -39,7 +39,7 @@ let indexToRegister index =
     | 12 -> PC
     | _ -> failwith "Internal Compiler Error: Invalid Index"
 
-let allocateRegisters irModule =
+let private allocateRegisters irModule =
 
     !irModule
     |> Module.entryBlock
@@ -106,3 +106,9 @@ let allocateRegisters irModule =
                              Register = indexToRegister i |> Some }))
 
     irModule
+
+let allocateRegistersPass =
+    { Pass = allocateRegisters
+      DependsOn =
+          [ Passes.analyzeDominancePass
+            Passes.analyzeLivenessPass ] }

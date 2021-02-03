@@ -3,6 +3,7 @@ module Micro16C.MiddleEnd.Passes
 open System.Collections.Generic
 open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
+open Micro16C.MiddleEnd.PassManager
 
 let private singleInstructionSimplify builder value =
     match value with
@@ -320,7 +321,7 @@ let private singleInstructionSimplify builder value =
         true
     | _ -> false
 
-let instructionSimplify (irModule: Module ref) =
+let private instructionSimplify (irModule: Module ref) =
 
     let builder = Builder.fromModule irModule
 
@@ -332,7 +333,7 @@ let instructionSimplify (irModule: Module ref) =
 
     irModule
 
-let deadCodeElimination (irModule: Module ref) =
+let private deadCodeElimination (irModule: Module ref) =
 
     let eliminate value =
         if not (Value.hasSideEffects !value)
@@ -350,7 +351,7 @@ let deadCodeElimination (irModule: Module ref) =
 
     irModule
 
-let simplifyCFG (irModule: Module ref) =
+let private simplifyCFG (irModule: Module ref) =
 
     let simplifyBlock blockValue =
         if !blockValue |> Value.isBasicBlock |> not then
@@ -398,7 +399,7 @@ let simplifyCFG (irModule: Module ref) =
 
     irModule
 
-let removeUnreachableBlocks (irModule: Module ref) =
+let private removeUnreachableBlocks (irModule: Module ref) =
 
     let set =
         !irModule
@@ -411,134 +412,6 @@ let removeUnreachableBlocks (irModule: Module ref) =
     |> Seq.iter Value.destroy
 
     irModule
-
-let private singleInstructionCombine builder value =
-    match value with
-    | Ref { Content = BinaryInstruction { Kind = Add
-                                          Left = Ref { Content = Constant { Value = value1 } }
-                                          Right = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                      Left = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                        Users = [ _ ] } as first } }
-    | Ref { Content = BinaryInstruction { Kind = Add
-                                          Left = Ref { Content = Constant { Value = value1 } }
-                                          Right = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                      Right = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                        Users = [ _ ] } as first } }
-    | Ref { Content = BinaryInstruction { Kind = Add
-                                          Left = Ref { Content = Constant { Value = value1 } }
-                                          Right = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                      Left = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                        Users = [ _ ] } as first } }
-    | Ref { Content = BinaryInstruction { Kind = Add
-                                          Right = Ref { Content = Constant { Value = value1 } }
-                                          Left = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                     Right = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                       Users = [ _ ] } as first } }
-    | Ref { Content = BinaryInstruction { Kind = Add
-                                          Right = Ref { Content = Constant { Value = value1 } }
-                                          Left = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                     Left = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                       Users = [ _ ] } as first } } ->
-        first
-        |> Value.replaceOperand oldOp (Builder.createConstant (value1 + value2))
-
-        value |> Value.replaceWith first
-        true
-    | Ref { Content = BinaryInstruction { Kind = And
-                                          Left = Ref { Content = Constant { Value = value1 } }
-                                          Right = Ref { Content = BinaryInstruction { Kind = And
-                                                                                      Left = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                        Users = [ _ ] } as first } }
-    | Ref { Content = BinaryInstruction { Kind = And
-                                          Left = Ref { Content = Constant { Value = value1 } }
-                                          Right = Ref { Content = BinaryInstruction { Kind = And
-                                                                                      Right = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                        Users = [ _ ] } as first } }
-    | Ref { Content = BinaryInstruction { Kind = And
-                                          Right = Ref { Content = Constant { Value = value1 } }
-                                          Left = Ref { Content = BinaryInstruction { Kind = And
-                                                                                     Right = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                       Users = [ _ ] } as first } }
-    | Ref { Content = BinaryInstruction { Kind = And
-                                          Right = Ref { Content = Constant { Value = value1 } }
-                                          Left = Ref { Content = BinaryInstruction { Kind = And
-                                                                                     Left = Ref { Content = Constant { Value = value2 } } as oldOp }
-                                                       Users = [ _ ] } as first } } ->
-        first
-        |> Value.replaceOperand oldOp (Builder.createConstant (value1 ||| value2))
-
-        value |> Value.replaceWith first
-        true
-    | Ref { Content = CondBrInstruction { Kind = Zero
-                                          Value = Ref { Users = [ _ ]
-                                                        Content = BinaryInstruction { Right = Ref { Content = Constant { Value = 0x8000s } }
-                                                                                      Left = passThrough
-                                                                                      Kind = And } } as neg
-                                          TrueBranch = trueBranch
-                                          FalseBranch = falseBranch } }
-    | Ref { Content = CondBrInstruction { Kind = Zero
-                                          Value = Ref { Users = [ _ ]
-                                                        Content = BinaryInstruction { Left = Ref { Content = Constant { Value = 0x8000s } }
-                                                                                      Right = passThrough
-                                                                                      Kind = And } } as neg
-                                          TrueBranch = trueBranch
-                                          FalseBranch = falseBranch } } ->
-        let newCond, _ =
-            builder
-            |> Builder.createCondBr Negative passThrough falseBranch trueBranch
-
-        value |> Value.replaceWith newCond
-        neg |> Value.destroy
-        true
-    | Ref { Content = BinaryInstruction { Kind = Add
-                                          Right = op1
-                                          Left = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } }
-    | Ref { Content = BinaryInstruction { Kind = Add
-                                          Left = op1
-                                          Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when op1 = op2 ->
-        value
-        |> Value.replaceWith (Builder.createConstant 0xFFFFs)
-
-        true
-    | Ref { Content = BinaryInstruction { Kind = And
-                                          Right = op1
-                                          Left = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } }
-    | Ref { Content = BinaryInstruction { Kind = And
-                                          Left = op1
-                                          Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when op1 = op2 ->
-        value
-        |> Value.replaceWith (Builder.createConstant 0s)
-
-        true
-    | Ref { Content = BinaryInstruction { Kind = Add
-                                          Right = op1
-                                          Left = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                     Right = Ref { Content = UnaryInstruction { Kind = Not
-                                                                                                                                Value = op2 } }
-                                                                                     Left = Ref { Content = Constant { Value = 1s } } } } } }
-    | Ref { Content = BinaryInstruction { Kind = Add
-                                          Right = op1
-                                          Left = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                     Left = Ref { Content = UnaryInstruction { Kind = Not
-                                                                                                                               Value = op2 } }
-                                                                                     Right = Ref { Content = Constant { Value = 1s } } } } } }
-    | Ref { Content = BinaryInstruction { Kind = Add
-                                          Left = op1
-                                          Right = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                      Right = Ref { Content = UnaryInstruction { Kind = Not
-                                                                                                                                 Value = op2 } }
-                                                                                      Left = Ref { Content = Constant { Value = 1s } } } } } }
-    | Ref { Content = BinaryInstruction { Kind = Add
-                                          Left = op1
-                                          Right = Ref { Content = BinaryInstruction { Kind = Add
-                                                                                      Left = Ref { Content = UnaryInstruction { Kind = Not
-                                                                                                                                Value = op2 } }
-                                                                                      Right = Ref { Content = Constant { Value = 1s } } } } } } when op1 = op2 ->
-        value
-        |> Value.replaceWith (Builder.createConstant 0s)
-
-        true
-    | _ -> false
 
 let private localConstantFolding builder instructions =
     instructions
@@ -603,7 +476,7 @@ let private localConstantFolding builder instructions =
                 |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
         | _ -> ())
 
-let jumpThreading irModule =
+let private jumpThreading irModule =
 
     let builder = Builder.fromModule irModule
 
@@ -875,7 +748,135 @@ let jumpThreading irModule =
 
     irModule
 
-let instructionCombine (irModule: Module ref) =
+let private singleInstructionCombine builder value =
+    match value with
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = Ref { Content = Constant { Value = value1 } }
+                                          Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                      Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                        Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = Ref { Content = Constant { Value = value1 } }
+                                          Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                      Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                        Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = Ref { Content = Constant { Value = value1 } }
+                                          Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                      Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                        Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Right = Ref { Content = Constant { Value = value1 } }
+                                          Left = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                     Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                       Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Right = Ref { Content = Constant { Value = value1 } }
+                                          Left = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                     Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                       Users = [ _ ] } as first } } ->
+        first
+        |> Value.replaceOperand oldOp (Builder.createConstant (value1 + value2))
+
+        value |> Value.replaceWith first
+        true
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Left = Ref { Content = Constant { Value = value1 } }
+                                          Right = Ref { Content = BinaryInstruction { Kind = And
+                                                                                      Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                        Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Left = Ref { Content = Constant { Value = value1 } }
+                                          Right = Ref { Content = BinaryInstruction { Kind = And
+                                                                                      Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                        Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Right = Ref { Content = Constant { Value = value1 } }
+                                          Left = Ref { Content = BinaryInstruction { Kind = And
+                                                                                     Right = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                       Users = [ _ ] } as first } }
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Right = Ref { Content = Constant { Value = value1 } }
+                                          Left = Ref { Content = BinaryInstruction { Kind = And
+                                                                                     Left = Ref { Content = Constant { Value = value2 } } as oldOp }
+                                                       Users = [ _ ] } as first } } ->
+        first
+        |> Value.replaceOperand oldOp (Builder.createConstant (value1 ||| value2))
+
+        value |> Value.replaceWith first
+        true
+    | Ref { Content = CondBrInstruction { Kind = Zero
+                                          Value = Ref { Users = [ _ ]
+                                                        Content = BinaryInstruction { Right = Ref { Content = Constant { Value = 0x8000s } }
+                                                                                      Left = passThrough
+                                                                                      Kind = And } } as neg
+                                          TrueBranch = trueBranch
+                                          FalseBranch = falseBranch } }
+    | Ref { Content = CondBrInstruction { Kind = Zero
+                                          Value = Ref { Users = [ _ ]
+                                                        Content = BinaryInstruction { Left = Ref { Content = Constant { Value = 0x8000s } }
+                                                                                      Right = passThrough
+                                                                                      Kind = And } } as neg
+                                          TrueBranch = trueBranch
+                                          FalseBranch = falseBranch } } ->
+        let newCond, _ =
+            builder
+            |> Builder.createCondBr Negative passThrough falseBranch trueBranch
+
+        value |> Value.replaceWith newCond
+        neg |> Value.destroy
+        true
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Right = op1
+                                          Left = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = op1
+                                          Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when op1 = op2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0xFFFFs)
+
+        true
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Right = op1
+                                          Left = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } }
+    | Ref { Content = BinaryInstruction { Kind = And
+                                          Left = op1
+                                          Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when op1 = op2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Right = op1
+                                          Left = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                     Right = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                                                                Value = op2 } }
+                                                                                     Left = Ref { Content = Constant { Value = 1s } } } } } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Right = op1
+                                          Left = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                     Left = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                                                               Value = op2 } }
+                                                                                     Right = Ref { Content = Constant { Value = 1s } } } } } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = op1
+                                          Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                      Right = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                                                                 Value = op2 } }
+                                                                                      Left = Ref { Content = Constant { Value = 1s } } } } } }
+    | Ref { Content = BinaryInstruction { Kind = Add
+                                          Left = op1
+                                          Right = Ref { Content = BinaryInstruction { Kind = Add
+                                                                                      Left = Ref { Content = UnaryInstruction { Kind = Not
+                                                                                                                                Value = op2 } }
+                                                                                      Right = Ref { Content = Constant { Value = 1s } } } } } } when op1 = op2 ->
+        value
+        |> Value.replaceWith (Builder.createConstant 0s)
+
+        true
+    | _ -> false
+
+let private instructionCombine (irModule: Module ref) =
 
     let builder = Builder.fromModule irModule
 
@@ -887,7 +888,7 @@ let instructionCombine (irModule: Module ref) =
 
     irModule
 
-let analyzeAlloc (irModule: Module ref) =
+let private analyzeAlloc (irModule: Module ref) =
     let analyzeAlloc instr =
         match !instr with
         | { Content = AllocationInstruction ({ Aliased = None } as alloca)
@@ -913,7 +914,7 @@ let analyzeAlloc (irModule: Module ref) =
 
     irModule
 
-let analyzeDominance (irModule: Module ref) =
+let private analyzeDominance (irModule: Module ref) =
     let map = Dictionary(HashIdentity.Reference)
 
     // as seen in https://www.cs.rice.edu/~keith/Embed/dom.pdf
@@ -1013,7 +1014,7 @@ let analyzeDominance (irModule: Module ref) =
 
     irModule
 
-let analyzeDominanceFrontiers (irModule: Module ref) =
+let private analyzeDominanceFrontiers (irModule: Module ref) =
 
     let map = Dictionary(HashIdentity.Reference)
 
@@ -1068,7 +1069,7 @@ let analyzeDominanceFrontiers (irModule: Module ref) =
 
     irModule
 
-let mem2reg (irModule: Module ref) =
+let private mem2reg (irModule: Module ref) =
 
     !irModule
     |> Module.instructions
@@ -1175,7 +1176,7 @@ let mem2reg (irModule: Module ref) =
 
     irModule
 
-let analyzeLiveness irModule =
+let private analyzeLiveness irModule =
 
     !irModule
     |> Module.backwardAnalysis
@@ -1237,7 +1238,7 @@ let analyzeLiveness irModule =
 
     irModule
 
-let reorderBasicBlocks irModule =
+let private reorderBasicBlocks irModule =
 
     !irModule
     |> Module.revBasicBlocks
@@ -1279,7 +1280,7 @@ type private CPLatticeValues =
     | Constant of int16
     | Bottom
 
-let constantPropagation irModule =
+let private constantPropagation irModule =
 
     let mutable executableEdges = ImmutableMap.empty
 
@@ -1466,7 +1467,7 @@ let constantPropagation irModule =
 
     irModule
 
-let analyzeBitsRead irModule =
+let private analyzeBitsRead irModule =
 
     let addMask mask instr map =
         if !instr |> Value.producesValue |> not then
@@ -1484,115 +1485,183 @@ let analyzeBitsRead irModule =
         let value = value ||| (value >>> 8)
         value + 1us
 
-    let uselessBits =
-        !irModule
-        |> Module.backwardAnalysis
-            (fun unusedBits current ->
 
-                !current
-                |> Value.asBasicBlock
-                |> BasicBlock.revInstructions
-                |> List.fold (fun unusedBits instr ->
-                    let operands =
-                        !instr
-                        |> Value.operands
-                        |> List.filter ((!) >> Value.isBasicBlock >> not)
-                        |> Array.ofList
+    !irModule
+    |> Module.backwardAnalysis
+        (fun unusedBits current ->
 
-                    let instrUsedBits =
-                        match unusedBits |> ImmutableMap.tryFind instr with
-                        | None -> 0xFFFFus
-                        | Some instrUsedBits -> instrUsedBits
+            !current
+            |> Value.asBasicBlock
+            |> BasicBlock.revInstructions
+            |> List.fold (fun unusedBits instr ->
+                let operands =
+                    !instr
+                    |> Value.operands
+                    |> List.filter ((!) >> Value.isBasicBlock >> not)
+                    |> Array.ofList
 
-                    match instr with
-                    | BinOp Or _
-                    | BinOp Xor _ ->
-                        unusedBits
-                        |> addMask instrUsedBits operands.[0]
-                        |> addMask instrUsedBits operands.[1]
-                    | BinOp And (ConstOp c, _) ->
-                        unusedBits
-                        |> addMask (c |> uint16 &&& instrUsedBits) operands.[1]
-                    | BinOp And (_, ConstOp c) ->
-                        unusedBits
-                        |> addMask (c |> uint16 &&& instrUsedBits) operands.[0]
-                    | BinOp SRem (ConstOp c, _) ->
-                        let newMask =
-                            (abs (c) |> uint16 |> nextPowerOf2) - 1us
+                let instrUsedBits =
+                    match unusedBits |> ImmutableMap.tryFind instr with
+                    | None -> 0xFFFFus
+                    | Some instrUsedBits -> instrUsedBits
 
-                        let newMask = newMask ||| 0x8000us
+                match instr with
+                | BinOp Or _
+                | BinOp Xor _ ->
+                    unusedBits
+                    |> addMask instrUsedBits operands.[0]
+                    |> addMask instrUsedBits operands.[1]
+                | BinOp And (ConstOp c, _) ->
+                    unusedBits
+                    |> addMask (c |> uint16 &&& instrUsedBits) operands.[1]
+                | BinOp And (_, ConstOp c) ->
+                    unusedBits
+                    |> addMask (c |> uint16 &&& instrUsedBits) operands.[0]
+                | BinOp SRem (ConstOp c, _) ->
+                    let newMask =
+                        (abs (c) |> uint16 |> nextPowerOf2) - 1us
 
-                        unusedBits
-                        |> addMask (instrUsedBits &&& newMask) operands.[0]
-                    | BinOp URem (ConstOp c, _) ->
-                        let newMask = (c |> uint16 |> nextPowerOf2) - 1us
+                    let newMask = newMask ||| 0x8000us
 
-                        unusedBits
-                        |> addMask (instrUsedBits &&& newMask) operands.[0]
-                    | BinOp SRem (_, ConstOp c) ->
-                        let newMask =
-                            (abs (c) |> uint16 |> nextPowerOf2) - 1us
+                    unusedBits
+                    |> addMask (instrUsedBits &&& newMask) operands.[0]
+                | BinOp URem (ConstOp c, _) ->
+                    let newMask = (c |> uint16 |> nextPowerOf2) - 1us
 
-                        let newMask = newMask ||| 0x8000us
+                    unusedBits
+                    |> addMask (instrUsedBits &&& newMask) operands.[0]
+                | BinOp SRem (_, ConstOp c) ->
+                    let newMask =
+                        (abs (c) |> uint16 |> nextPowerOf2) - 1us
 
-                        unusedBits
-                        |> addMask (instrUsedBits &&& newMask) operands.[0]
-                    | BinOp URem (_, ConstOp c) ->
-                        let newMask = (c |> uint16 |> nextPowerOf2) - 1us
+                    let newMask = newMask ||| 0x8000us
 
-                        unusedBits
-                        |> addMask (instrUsedBits &&& newMask) operands.[0]
-                    | BinOp SRem (_, _) ->
-                        unusedBits
-                        |> addMask 0xFFFFus operands.[0]
-                        |> addMask 0xFFFFus operands.[1]
-                    | BinOp URem (_, _) ->
-                        unusedBits
-                        |> addMask 0xFFFFus operands.[0]
-                        |> addMask 0xFFFFus operands.[1]
-                    | BinOp LShr (_, ConstOp c) ->
-                        unusedBits
-                        |> addMask (instrUsedBits <<< (c |> int)) operands.[0]
-                    | BinOp AShr (_, ConstOp c) ->
-                        unusedBits
-                        |> addMask (instrUsedBits <<< (c |> int)) operands.[0]
-                    | BinOp Shl (_, ConstOp c) ->
-                        unusedBits
-                        |> addMask (instrUsedBits >>> (c |> int)) operands.[0]
-                    | UnaryOp Negate _ -> unusedBits |> addMask 0xFFFFus operands.[0]
-                    | UnaryOp Not _ -> unusedBits |> addMask instrUsedBits operands.[0]
-                    | CondBrOp (Negative, _, _, _) -> unusedBits |> addMask 0x8000us operands.[0]
-                    | CondBrOp (Zero, _, _, _) -> unusedBits |> addMask 0xFFFFus operands.[0]
-                    | PhiOp _ ->
-                        operands
-                        |> Array.fold (fun unusedBits operand -> addMask instrUsedBits operand unusedBits) unusedBits
-                    | LoadOp _ -> unusedBits |> addMask 0xFFFFus operands.[0]
-                    | BinOp SDiv (_, _)
-                    | BinOp UDiv (_, _)
-                    | BinOp Mul (_, _)
-                    | BinOp Add (_, _)
-                    | BinOp Sub (_, _)
-                    | StoreOp _ ->
-                        unusedBits
-                        |> addMask 0xFFFFus operands.[0]
-                        |> addMask 0xFFFFus operands.[1]
-                    | _ -> unusedBits) unusedBits)
-               (fun _ successors ->
-                   successors
-                   |> Seq.choose snd
-                   |> List.ofSeq
-                   |> Some
-                   |> Option.filter (List.isEmpty >> not)
-                   |> Option.map
-                       (List.reduce (fun map1 map2 ->
-                           Seq.append map1 map2
-                           |> Seq.groupBy (fun kv -> kv.Key)
-                           |> Seq.map (fun (key, values) ->
-                               (key,
-                                values
-                                |> Seq.map (fun kv -> kv.Value)
-                                |> Seq.reduce (|||)))
-                           |> ImmutableMap.ofSeq))
-                   |> Option.defaultValue ImmutableMap.empty)
+                    unusedBits
+                    |> addMask (instrUsedBits &&& newMask) operands.[0]
+                | BinOp URem (_, ConstOp c) ->
+                    let newMask = (c |> uint16 |> nextPowerOf2) - 1us
 
-    irModule
+                    unusedBits
+                    |> addMask (instrUsedBits &&& newMask) operands.[0]
+                | BinOp SRem (_, _) ->
+                    unusedBits
+                    |> addMask 0xFFFFus operands.[0]
+                    |> addMask 0xFFFFus operands.[1]
+                | BinOp URem (_, _) ->
+                    unusedBits
+                    |> addMask 0xFFFFus operands.[0]
+                    |> addMask 0xFFFFus operands.[1]
+                | BinOp LShr (_, ConstOp c) ->
+                    unusedBits
+                    |> addMask (instrUsedBits <<< (c |> int)) operands.[0]
+                | BinOp AShr (_, ConstOp c) ->
+                    unusedBits
+                    |> addMask (instrUsedBits <<< (c |> int)) operands.[0]
+                | BinOp Shl (_, ConstOp c) ->
+                    unusedBits
+                    |> addMask (instrUsedBits >>> (c |> int)) operands.[0]
+                | UnaryOp Negate _ -> unusedBits |> addMask 0xFFFFus operands.[0]
+                | UnaryOp Not _ -> unusedBits |> addMask instrUsedBits operands.[0]
+                | CondBrOp (Negative, _, _, _) -> unusedBits |> addMask 0x8000us operands.[0]
+                | CondBrOp (Zero, _, _, _) -> unusedBits |> addMask 0xFFFFus operands.[0]
+                | PhiOp _ ->
+                    operands
+                    |> Array.fold (fun unusedBits operand -> addMask instrUsedBits operand unusedBits) unusedBits
+                | LoadOp _ -> unusedBits |> addMask 0xFFFFus operands.[0]
+                | BinOp SDiv (_, _)
+                | BinOp UDiv (_, _)
+                | BinOp Mul (_, _)
+                | BinOp Add (_, _)
+                | BinOp Sub (_, _)
+                | StoreOp _ ->
+                    unusedBits
+                    |> addMask 0xFFFFus operands.[0]
+                    |> addMask 0xFFFFus operands.[1]
+                | _ -> unusedBits) unusedBits)
+           (fun _ successors ->
+               successors
+               |> Seq.choose snd
+               |> List.ofSeq
+               |> Some
+               |> Option.filter (List.isEmpty >> not)
+               |> Option.map
+                   (List.reduce (fun map1 map2 ->
+                       Seq.append map1 map2
+                       |> Seq.groupBy (fun kv -> kv.Key)
+                       |> Seq.map (fun (key, values) ->
+                           (key,
+                            values
+                            |> Seq.map (fun kv -> kv.Value)
+                            |> Seq.reduce (|||)))
+                       |> ImmutableMap.ofSeq))
+               |> Option.defaultValue ImmutableMap.empty)
+
+
+let analyzeLivenessPass =
+    { Pass = analyzeLiveness
+      DependsOn = [] }
+
+let analyzeAllocPass = { Pass = analyzeAlloc; DependsOn = [] }
+
+let analyzeDominancePass =
+    { Pass = analyzeDominance
+      DependsOn = [] }
+
+let analyzeDominanceFrontiersPass =
+    { Pass = analyzeDominanceFrontiers
+      DependsOn = [ analyzeDominancePass ] }
+
+let analyzeBitsReadPass =
+    { Pass = analyzeBitsRead
+      DependsOn = [] }
+
+let instructionSimplifyPass =
+    { Pass = instructionSimplify
+      DependsOn = []
+      Invalidates = [] }
+
+let removeUnreachableBlocksPass =
+    { Pass = removeUnreachableBlocks
+      DependsOn = []
+      Invalidates = [] }
+
+let instructionCombinePass =
+    { Pass = instructionCombine
+      DependsOn = []
+      Invalidates = [] }
+
+let jumpThreadingPass =
+    { Pass = jumpThreading
+      DependsOn = []
+      Invalidates =
+          [ analyzeDominancePass
+            analyzeDominanceFrontiersPass ] }
+
+let simplifyCFGPass =
+    { Pass = simplifyCFG
+      DependsOn = []
+      Invalidates =
+          [ analyzeDominancePass
+            analyzeDominanceFrontiersPass ] }
+
+let deadCodeEliminationPass =
+    { Pass = deadCodeElimination
+      DependsOn = []
+      Invalidates = [] }
+
+let mem2regPass =
+    { Pass = mem2reg
+      DependsOn =
+          [ analyzeDominanceFrontiersPass
+            analyzeAllocPass ]
+      Invalidates = [] }
+
+let constantPropagationPass =
+    { Pass = constantPropagation
+      DependsOn = []
+      Invalidates = [] }
+
+let reorderBasicBlocksPass =
+    { Pass = reorderBasicBlocks
+      DependsOn = []
+      Invalidates = [] }

@@ -4,32 +4,37 @@ module Tests
 open Micro16C.Backend
 open Micro16C.Backend.Assembly
 open Micro16C.MiddleEnd
+open Micro16C.MiddleEnd.PassManager
 open Micro16C.MiddleEnd.Tests.PassesTests
 open Micro16C.Simulator
 open Xunit
 open FsUnit.Xunit
 
 let private runIRWithState state irModule =
-    irModule
-    |> Legalize.legalizeConstants
-    |> Legalize.breakPhiCriticalEdges
-    |> Passes.analyzeDominance
-    |> Passes.analyzeLiveness
-    |> RegisterAllocator.allocateRegisters
-    |> GenAssembly.genAssembly
-    |> GenAssembly.genMachineCode
+    PassManager.Default
+    |> PassManager.registerAnalysis Passes.analyzeDominancePass
+    |> PassManager.registerAnalysis Passes.analyzeLivenessPass
+    |> PassManager.registerAnalysis RegisterAllocator.allocateRegistersPass
+    |> PassManager.queueTransform Legalize.legalizeConstantsPass
+    |> PassManager.queueTransform Legalize.breakPhiCriticalEdgesPass
+    |> PassManager.queueTransform GenAssembly.genAssemblyPass
+    |> PassManager.queueTransform GenAssembly.genMachineCodePass
+    |> PassManager.run irModule
+    |> fst :?> seq<int>
     |> Simulator.simulateWithState state
     |> Seq.last
 
 let private runIR irModule =
-    irModule
-    |> Legalize.legalizeConstants
-    |> Legalize.breakPhiCriticalEdges
-    |> Passes.analyzeDominance
-    |> Passes.analyzeLiveness
-    |> RegisterAllocator.allocateRegisters
-    |> GenAssembly.genAssembly
-    |> GenAssembly.genMachineCode
+    PassManager.Default
+    |> PassManager.registerAnalysis Passes.analyzeDominancePass
+    |> PassManager.registerAnalysis Passes.analyzeLivenessPass
+    |> PassManager.registerAnalysis RegisterAllocator.allocateRegistersPass
+    |> PassManager.queueTransform Legalize.legalizeConstantsPass
+    |> PassManager.queueTransform Legalize.breakPhiCriticalEdgesPass
+    |> PassManager.queueTransform GenAssembly.genAssemblyPass
+    |> PassManager.queueTransform GenAssembly.genMachineCodePass
+    |> PassManager.run irModule
+    |> fst :?> seq<int>
     |> Simulator.simulate
     |> Seq.last
 
@@ -41,7 +46,7 @@ let ``Legalize Constants`` () =
     %1 = add 1 %0
     """
     |> IRReader.fromString
-    |> Legalize.legalizeConstants
+    |> testPass Legalize.legalizeConstantsPass
     |> should
         be
            (structurallyEquivalentTo """
@@ -56,7 +61,7 @@ let ``Legalize Constants`` () =
     %1 = add 5 %0
     """
     |> IRReader.fromString
-    |> Legalize.legalizeConstants
+    |> testPass Legalize.legalizeConstantsPass
     |> should
         be
            (structurallyEquivalentTo """
@@ -74,7 +79,7 @@ let ``Legalize Constants`` () =
     %1 = add -5 %0
     """
     |> IRReader.fromString
-    |> Legalize.legalizeConstants
+    |> testPass Legalize.legalizeConstantsPass
     |> should
         be
            (structurallyEquivalentTo """
@@ -92,7 +97,7 @@ let ``Legalize Constants`` () =
     %1 = add -32768 %0
     """
     |> IRReader.fromString
-    |> Legalize.legalizeConstants
+    |> testPass Legalize.legalizeConstantsPass
     |> should
         be
            (structurallyEquivalentTo """
@@ -109,7 +114,7 @@ let ``Legalize Constants`` () =
     %1 = add 16383 %0
     """
     |> IRReader.fromString
-    |> Legalize.legalizeConstants
+    |> testPass Legalize.legalizeConstantsPass
     |> should
         be
            (structurallyEquivalentTo """
@@ -126,7 +131,7 @@ let ``Legalize Constants`` () =
     %1 = add 15 %0
     """
     |> IRReader.fromString
-    |> Legalize.legalizeConstants
+    |> testPass Legalize.legalizeConstantsPass
     |> should
         be
            (structurallyEquivalentTo """
@@ -146,7 +151,7 @@ let ``Legalize Constants`` () =
     %1 = add 3 %0
     """
     |> IRReader.fromString
-    |> Legalize.legalizeConstants
+    |> testPass Legalize.legalizeConstantsPass
     |> should
         be
            (structurallyEquivalentTo """
@@ -163,7 +168,7 @@ let ``Legalize Constants`` () =
     %1 = add -4 %0
     """
     |> IRReader.fromString
-    |> Legalize.legalizeConstants
+    |> testPass Legalize.legalizeConstantsPass
     |> should
         be
            (structurallyEquivalentTo """
@@ -183,7 +188,7 @@ let ``Legalize instructions: Shifting`` () =
     store %1 -> R1
     """
     |> IRReader.fromString
-    |> Legalize.legalizeInstructions
+    |> testPass Legalize.legalizeInstructionsPass
     |> should
         be
            (structurallyEquivalentTo """
@@ -204,7 +209,7 @@ let ``Legalize instructions: Shifting`` () =
     store %1 -> R1
     """
     |> IRReader.fromString
-    |> Legalize.legalizeInstructions
+    |> testPass Legalize.legalizeInstructionsPass
     |> should
         be
            (structurallyEquivalentTo """
@@ -226,7 +231,7 @@ let ``Legalize instructions: Shifting`` () =
     store %2 -> R2
     """
     |> IRReader.fromString
-    |> Legalize.legalizeInstructions
+    |> testPass Legalize.legalizeInstructionsPass
     |> runIRWithState
         { Simulator.State.Default with
               Registers =
@@ -253,7 +258,7 @@ let ``Legalize instructions: Negate`` () =
     store %1 -> R0
     """
     |> IRReader.fromString
-    |> Legalize.legalizeInstructions
+    |> testPass Legalize.legalizeInstructionsPass
     |> runIRWithState
         { Simulator.State.Default with
               Registers =
@@ -278,7 +283,7 @@ let ``Legalize instructions: Negate`` () =
     store %1 -> R0
     """
     |> IRReader.fromString
-    |> Legalize.legalizeInstructions
+    |> testPass Legalize.legalizeInstructionsPass
     |> runIRWithState
         { Simulator.State.Default with
               Registers =
@@ -306,7 +311,7 @@ let ``Legalize instructions: Multiply`` () =
     store %2 -> R8
     """
     |> IRReader.fromString
-    |> Legalize.legalizeInstructions
+    |> testPass Legalize.legalizeInstructionsPass
     |> runIRWithState
         { Simulator.State.Default with
               Registers =
@@ -332,7 +337,7 @@ let ``Legalize instructions: Multiply`` () =
     store %2 -> R8
     """
     |> IRReader.fromString
-    |> Legalize.legalizeInstructions
+    |> testPass Legalize.legalizeInstructionsPass
     |> runIRWithState
         { Simulator.State.Default with
               Registers =
@@ -358,7 +363,7 @@ let ``Legalize instructions: Multiply`` () =
     store %2 -> R8
     """
     |> IRReader.fromString
-    |> Legalize.legalizeInstructions
+    |> testPass Legalize.legalizeInstructionsPass
     |> runIRWithState
         { Simulator.State.Default with
               Registers =
@@ -384,7 +389,7 @@ let ``Legalize instructions: Multiply`` () =
     store %2 -> R8
     """
     |> IRReader.fromString
-    |> Legalize.legalizeInstructions
+    |> testPass Legalize.legalizeInstructionsPass
     |> runIRWithState
         { Simulator.State.Default with
               Registers =
@@ -401,6 +406,9 @@ let ``Legalize instructions: Multiply`` () =
                      -5s |] }
     |> (fun state -> state.Registers.[8])
     |> should equal -15s
+
+let private runOnModule passManager (irModule: IR.Module ref) =
+    passManager |> PassManager.run irModule |> fst :?> AssemblyLine list
 
 [<Fact>]
 let ``Assembly folding`` () =
@@ -412,10 +420,12 @@ let ``Assembly folding`` () =
         %2 = shl %1 1
         """
         |> IRReader.fromString
-        |> Passes.analyzeLiveness
-        |> Passes.analyzeDominance
-        |> RegisterAllocator.allocateRegisters
-        |> GenAssembly.genAssembly
+        |> (PassManager.Default
+            |> PassManager.registerAnalysis Passes.analyzeLivenessPass
+            |> PassManager.registerAnalysis Passes.analyzeDominancePass
+            |> PassManager.registerAnalysis RegisterAllocator.allocateRegistersPass
+            |> PassManager.queueTransform GenAssembly.genAssemblyPass
+            |> runOnModule)
 
 
     assembly |> should haveLength 2
@@ -445,10 +455,12 @@ let ``Assembly folding`` () =
         store 1 -> R2
         """
         |> IRReader.fromString
-        |> Passes.analyzeLiveness
-        |> Passes.analyzeDominance
-        |> RegisterAllocator.allocateRegisters
-        |> GenAssembly.genAssembly
+        |> (PassManager.Default
+            |> PassManager.registerAnalysis Passes.analyzeLivenessPass
+            |> PassManager.registerAnalysis Passes.analyzeDominancePass
+            |> PassManager.registerAnalysis RegisterAllocator.allocateRegistersPass
+            |> PassManager.queueTransform GenAssembly.genAssemblyPass
+            |> runOnModule)
 
 
     assembly
@@ -478,10 +490,12 @@ let ``Assembly folding`` () =
         store %1 -> 1
         """
         |> IRReader.fromString
-        |> Passes.analyzeLiveness
-        |> Passes.analyzeDominance
-        |> RegisterAllocator.allocateRegisters
-        |> GenAssembly.genAssembly
+        |> (PassManager.Default
+            |> PassManager.registerAnalysis Passes.analyzeLivenessPass
+            |> PassManager.registerAnalysis Passes.analyzeDominancePass
+            |> PassManager.registerAnalysis RegisterAllocator.allocateRegistersPass
+            |> PassManager.queueTransform GenAssembly.genAssemblyPass
+            |> runOnModule)
 
     assembly
     |> List.exists (function

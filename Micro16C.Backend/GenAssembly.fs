@@ -4,6 +4,7 @@ open System
 open Micro16C.Backend.Assembly
 open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
+open Micro16C.MiddleEnd.PassManager
 
 let private operandToBus operand =
     match operand with
@@ -233,7 +234,7 @@ let private genPhiMoves block list =
         |> Option.defaultValue list)
     |> Option.defaultValue list
 
-let genAssembly irModule: AssemblyLine list =
+let private genAssembly irModule: AssemblyLine list =
 
     let mutable counter = 0
 
@@ -431,7 +432,7 @@ let genAssembly irModule: AssemblyLine list =
             | _ -> failwith "Internal Compiler Error: Can't compile IR instruction to assembly") list) []
     |> List.rev
 
-let removeUnusedLabels assemblyList =
+let private removeUnusedLabels assemblyList =
     let usedLabels =
         assemblyList
         |> Seq.fold (fun set assembly ->
@@ -486,3 +487,23 @@ let genMachineCode assemblyList =
             let address = symbolTable |> Map.find s
             instr ||| (address |> int))
     |> Seq.rev
+
+let genAssemblyPass =
+    { Pass = genAssembly
+      DependsOn = [ RegisterAllocator.allocateRegistersPass ]
+      Invalidates = [] }
+
+let removeUnusedLabelsPass =
+    { Pass = removeUnusedLabels
+      DependsOn = []
+      Invalidates = [] }
+
+let removeRedundantLabelsPass =
+    { Pass = removeRedundantLabels
+      DependsOn = []
+      Invalidates = [] }
+
+let genMachineCodePass =
+    { Pass = genMachineCode
+      DependsOn = []
+      Invalidates = [] }

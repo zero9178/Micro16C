@@ -1,9 +1,11 @@
 module Micro16C.Backend.Legalize
 
+open Micro16C.MiddleEnd
 open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
+open Micro16C.MiddleEnd.PassManager
 
-let legalizeConstants irModule =
+let private legalizeConstants irModule =
 
     let builder = Builder.fromModule irModule
 
@@ -178,7 +180,7 @@ let legalizeConstants irModule =
 
     irModule
 
-let breakPhiCriticalEdges irModule =
+let private breakPhiCriticalEdges irModule =
 
     !irModule
     |> Module.basicBlocks
@@ -229,7 +231,7 @@ let breakPhiCriticalEdges irModule =
 
     irModule
 
-let legalizeInstructions irModule =
+let private legalizeInstructions irModule =
 
     let builder = Builder.fromModule irModule
 
@@ -641,3 +643,20 @@ let legalizeInstructions irModule =
         | _ -> ())
 
     irModule
+
+let legalizeConstantsPass =
+    { Pass = legalizeConstants
+      DependsOn = []
+      Invalidates = [] }
+
+let breakPhiCriticalEdgesPass =
+    { Pass = breakPhiCriticalEdges
+      DependsOn = []
+      Invalidates = [] }
+
+let legalizeInstructionsPass =
+    { Pass = legalizeInstructions
+      DependsOn = []
+      Invalidates =
+          [ Passes.analyzeDominancePass
+            Passes.analyzeDominanceFrontiersPass ] }
