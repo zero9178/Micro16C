@@ -19,7 +19,7 @@ let ``For loop`` () =
         """
         |> Micro16C.compile
         |> Result.map
-            (GenAssembly.genMachineCode
+            (GenAssembly.genMachineCode ()
              >> Simulator.simulate
              >> Seq.last)
 
@@ -49,7 +49,7 @@ let ``Break and continue`` () =
         """
         |> Micro16C.compile
         |> Result.map
-            (GenAssembly.genMachineCode
+            (GenAssembly.genMachineCode ()
              >> Simulator.simulate
              >> Seq.last)
 
@@ -72,7 +72,7 @@ let ``Break and continue`` () =
         """
         |> Micro16C.compile
         |> Result.map
-            (GenAssembly.genMachineCode
+            (GenAssembly.genMachineCode ()
              >> Simulator.simulate
              >> Seq.last)
 

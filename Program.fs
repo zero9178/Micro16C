@@ -9,7 +9,7 @@ open Micro16C.MiddleEnd.PassManager
 
 let private debugModulePasses title =
     { Pass =
-          (fun irModule ->
+          (fun _ irModule ->
 #if DEBUG
               printf "%s\n%s\n" title ((!irModule) |> IR.Module.asText)
 #endif

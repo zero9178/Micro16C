@@ -321,7 +321,7 @@ let private singleInstructionSimplify builder value =
         true
     | _ -> false
 
-let private instructionSimplify (irModule: Module ref) =
+let private instructionSimplify _ (irModule: Module ref) =
 
     let builder = Builder.fromModule irModule
 
@@ -333,7 +333,7 @@ let private instructionSimplify (irModule: Module ref) =
 
     irModule
 
-let private deadCodeElimination (irModule: Module ref) =
+let private deadCodeElimination _ (irModule: Module ref) =
 
     let eliminate value =
         if not (Value.hasSideEffects !value)
@@ -351,7 +351,7 @@ let private deadCodeElimination (irModule: Module ref) =
 
     irModule
 
-let private simplifyCFG (irModule: Module ref) =
+let private simplifyCFG _ (irModule: Module ref) =
 
     let simplifyBlock blockValue =
         if !blockValue |> Value.isBasicBlock |> not then
@@ -399,7 +399,7 @@ let private simplifyCFG (irModule: Module ref) =
 
     irModule
 
-let private removeUnreachableBlocks (irModule: Module ref) =
+let private removeUnreachableBlocks _ (irModule: Module ref) =
 
     let set =
         !irModule
@@ -476,7 +476,7 @@ let private localConstantFolding builder instructions =
                 |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
         | _ -> ())
 
-let private jumpThreading irModule =
+let private jumpThreading _ irModule =
 
     let builder = Builder.fromModule irModule
 
@@ -876,7 +876,7 @@ let private singleInstructionCombine builder value =
         true
     | _ -> false
 
-let private instructionCombine (irModule: Module ref) =
+let private instructionCombine _ (irModule: Module ref) =
 
     let builder = Builder.fromModule irModule
 
@@ -888,33 +888,32 @@ let private instructionCombine (irModule: Module ref) =
 
     irModule
 
-let analyzeAlloc (irModule: Module ref) =
-    let analyzeAlloc instr =
-        match !instr with
-        | { Content = AllocationInstruction ({ Aliased = None } as alloca)
-            Users = users } ->
-            let addressTaken =
-                users
-                |> List.exists (function
-                    | LoadOp _ -> false
-                    | StoreOp (value, _) when value <> instr -> false
-                    | _ -> true)
-
-            instr
-            := { !instr with
-                     Content =
-                         AllocationInstruction
-                             { alloca with
-                                   Aliased = Some addressTaken } }
-        | _ -> ()
+let analyzeAlloc _ (irModule: Module ref) =
 
     !irModule
     |> Module.instructions
-    |> List.iter analyzeAlloc
+    |> List.fold (fun result instr ->
+        match !instr with
+        | { Content = AllocationInstruction
+            Users = users } ->
+            if users
+               |> List.exists (function
+                   | LoadOp _ -> false
+                   | StoreOp (value, _) when value <> instr -> false
+                   | _ -> true) then
+                result |> ImmutableSet.add instr
+            else
+                result
+        | _ -> result) ImmutableSet.empty
 
-    irModule
+let analyzeAllocPass = { Pass = analyzeAlloc; DependsOn = [] }
 
-let analyzeDominance (irModule: Module ref) =
+type DominanceInfo =
+    { ImmediateDominator: Value ref
+      ImmediatelyDominates: Value ref list
+      DominanceFrontier: Value ref list }
+
+let analyzeDominance _ (irModule: Module ref) =
     let map = Dictionary(HashIdentity.Reference)
 
     // as seen in https://www.cs.rice.edu/~keith/Embed/dom.pdf
@@ -981,40 +980,44 @@ let analyzeDominance (irModule: Module ref) =
     |> Seq.cache
     |> processBlocks
 
-    !irModule
-    |> Module.revBasicBlocks
-    |> List.iter (fun x ->
-        let block = Value.asBasicBlock !x
+    let result =
+        !irModule
+        |> Module.revBasicBlocks
+        |> List.fold (fun result x ->
+            let block = Value.asBasicBlock !x
 
-        x
-        := { !x with
-                 Content = BasicBlockValue { block with ImmediatelyDominates = [] } })
+            let iDom = map.[x]
 
-    !irModule
-    |> Module.revBasicBlocks
-    |> List.iter (fun x ->
-        let block = Value.asBasicBlock !x
+            match iDom with
+            | None -> result
+            | Some iDom ->
+                result
+                |> ImmutableMap.add
+                    x
+                       { ImmediateDominator = iDom
+                         ImmediatelyDominates = []
+                         DominanceFrontier = [] }) ImmutableMap.empty
 
-        let iDom = map.[x]
+    result
+    |> Seq.fold (fun result kv ->
+        let x, { ImmediateDominator = iDom } = kv.Deconstruct()
+        let domInfo = result |> ImmutableMap.find iDom
 
-        iDom
-        |> Option.iter (fun ref ->
-            let block = Value.asBasicBlock !ref
+        result
+        |> ImmutableMap.add
+            iDom
+               { domInfo with
+                     ImmediatelyDominates = x :: (domInfo.ImmediatelyDominates) }) result
 
-            ref
-            := { !ref with
-                     Content =
-                         BasicBlockValue
-                             { block with
-                                   ImmediatelyDominates = x :: block.ImmediatelyDominates } })
+let analyzeDominancePass =
+    { Pass = analyzeDominance
+      DependsOn = [] }
 
-        x
-        := { !x with
-                 Content = BasicBlockValue { block with ImmediateDominator = iDom } })
+let private analyzeDominanceFrontiers passManager (irModule: Module ref) =
 
-    irModule
-
-let private analyzeDominanceFrontiers (irModule: Module ref) =
+    let domInfos =
+        passManager
+        |> PassManager.analysisData analyzeDominancePass
 
     let map = Dictionary(HashIdentity.Reference)
 
@@ -1031,51 +1034,47 @@ let private analyzeDominanceFrontiers (irModule: Module ref) =
         | [ _ ] -> None
         | preds -> Some(x, preds))
     |> List.iter (fun (b, preds) ->
-        let iDom =
-            !b
-            |> Value.asBasicBlock
-            |> BasicBlock.immediateDominator
+        let iDom = domInfos.[b].ImmediateDominator
 
         preds
         |> List.iter (fun p ->
-
             Seq.unfold (fun runner ->
-                if Some runner = iDom then
+                if runner = iDom then
                     None
                 else
                     map.[runner] <- map.[runner] |> ImmutableSet.add b
-
-                    match !runner
-                          |> Value.asBasicBlock
-                          |> BasicBlock.immediateDominator with
-                    | None ->
-                        failwith
-                            "Internal Compiler Error: No immediate dominator calculated before analysing dominance frontiers"
-                    | Some s -> Some((), s)) p
+                    Some((), domInfos.[runner].ImmediateDominator)) p
             |> Seq.tryLast
             |> ignore))
 
-    !irModule
-    |> Module.revBasicBlocks
-    |> List.iter (fun x ->
-        let block = Value.asBasicBlock !x
+    domInfos
+    |> Seq.map (fun kv ->
+        let x, info = kv.Deconstruct()
 
-        x
-        := { !x with
-                 Content =
-                     BasicBlockValue
-                         { block with
-                               DominanceFrontier = Some(map.[x] |> List.ofSeq) } })
+        (x,
+         { info with
+               DominanceFrontier = map.[x] |> List.ofSeq }))
+    |> ImmutableMap.ofSeq
 
-    irModule
+let analyzeDominanceFrontiersPass =
+    { Pass = analyzeDominanceFrontiers
+      DependsOn = [ analyzeDominancePass ] }
 
-let private mem2reg (irModule: Module ref) =
+let private mem2reg passManager (irModule: Module ref) =
+
+    let aliased =
+        passManager
+        |> PassManager.analysisData analyzeAllocPass
+
+    let domInfo =
+        passManager
+        |> PassManager.analysisData analyzeDominanceFrontiersPass
 
     !irModule
     |> Module.instructions
     |> List.choose (fun x ->
         match x with
-        | AllocaOp (Some false) -> Some(x, (!x).Users |> ImmutableSet.ofList)
+        | AllocaOp when aliased |> ImmutableSet.contains x |> not -> Some(x, (!x).Users |> ImmutableSet.ofList)
         | _ -> None)
     |> List.iter (fun (alloca, loadStores) ->
         let s =
@@ -1087,11 +1086,7 @@ let private mem2reg (irModule: Module ref) =
             |> ImmutableSet.ofSeq
 
         let dominanceFrontiers =
-            Seq.map
-                ((!)
-                 >> Value.asBasicBlock
-                 >> BasicBlock.dominanceFrontier)
-            >> Seq.choose id
+            Seq.map (fun x -> domInfo.[x].DominanceFrontier)
             >> Seq.map ImmutableSet.ofList
             >> ImmutableSet.unionMany
 
@@ -1176,7 +1171,20 @@ let private mem2reg (irModule: Module ref) =
 
     irModule
 
-let analyzeLiveness irModule =
+type LivenessInfo =
+    { LiveIn: ImmutableSet<Value ref>
+      LiveOut: ImmutableSet<Value ref> }
+
+[<RequireQualifiedAccess>]
+module LivenessInfo =
+
+    let liveOut info = info.LiveOut
+
+    let liveIn info = info.LiveIn
+
+let analyzeLiveness _ irModule =
+
+    let mutable result = ImmutableMap.empty
 
     !irModule
     |> Module.backwardAnalysis
@@ -1205,13 +1213,9 @@ let analyzeLiveness irModule =
                     set
                     |> ImmutableSet.union (ImmutableSet.ofList upwardsExposed)) liveOut
 
-            blockValue
-            := { !blockValue with
-                     Content =
-                         BasicBlockValue
-                             { block with
-                                   LiveIn = liveIn
-                                   LiveOut = liveOut } }
+            result <-
+                result
+                |> ImmutableMap.add blockValue { LiveIn = liveIn; LiveOut = liveOut }
 
             liveIn)
            (fun b succ ->
@@ -1236,9 +1240,9 @@ let analyzeLiveness irModule =
                |> ImmutableSet.unionMany)
     |> ignore
 
-    irModule
+    result
 
-let private reorderBasicBlocks irModule =
+let private reorderBasicBlocks _ irModule =
 
     !irModule
     |> Module.revBasicBlocks
@@ -1280,7 +1284,7 @@ type private CPLatticeValues =
     | Constant of int16
     | Bottom
 
-let private constantPropagation irModule =
+let private constantPropagation _ irModule =
 
     let mutable executableEdges = ImmutableMap.empty
 
@@ -1467,7 +1471,7 @@ let private constantPropagation irModule =
 
     irModule
 
-let private analyzeBitsRead irModule =
+let private analyzeBitsRead _ irModule =
 
     let addMask mask instr map =
         if !instr |> Value.producesValue |> not then
@@ -1596,23 +1600,12 @@ let private analyzeBitsRead irModule =
                        |> ImmutableMap.ofSeq))
                |> Option.defaultValue ImmutableMap.empty)
 
+let analyzeBitsReadPass =
+    { Pass = analyzeBitsRead
+      DependsOn = [] }
 
 let analyzeLivenessPass =
     { Pass = analyzeLiveness
-      DependsOn = [] }
-
-let analyzeAllocPass = { Pass = analyzeAlloc; DependsOn = [] }
-
-let analyzeDominancePass =
-    { Pass = analyzeDominance
-      DependsOn = [] }
-
-let analyzeDominanceFrontiersPass =
-    { Pass = analyzeDominanceFrontiers
-      DependsOn = [ analyzeDominancePass ] }
-
-let analyzeBitsReadPass =
-    { Pass = analyzeBitsRead
       DependsOn = [] }
 
 let instructionSimplifyPass =

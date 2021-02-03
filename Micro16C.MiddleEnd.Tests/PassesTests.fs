@@ -663,19 +663,23 @@ let ``BasicBlock reordering`` () =
 
 [<Fact>]
 let ``Analyze Allocs`` () =
-    """%entry:
-    %0 = alloca
-    %1 = load %0
-    store %1 -> R2
-    %2 = alloca
-    store %2 -> R1
-    """
-    |> IRReader.fromString
-    |> Passes.analyzeAlloc
-    |> (!)
+
+    let irModule =
+        """%entry:
+                        %0 = alloca
+                        %1 = load %0
+                        store %1 -> R2
+                        %2 = alloca
+                        store %2 -> R1
+                        """
+        |> IRReader.fromString
+
+    let aliased = irModule |> Passes.analyzeAlloc ()
+
+    !irModule
     |> Module.instructions
     |> Seq.choose (function
-        | Ref { Content = AllocationInstruction { Aliased = aliased } } -> aliased
+        | AllocaOp as instr -> aliased |> ImmutableSet.contains instr |> Some
         | _ -> None)
     |> List.ofSeq
     |> should equal [ false; true ]
@@ -763,7 +767,7 @@ let ``Liveness analysis`` () =
                ("n3", ([ "n11"; "n13" ], [ "n2"; "n5" ]))
                ("ForContinue", ([ "n16" ], [])) ])
 
-    let map =
+    let irModule =
         """
     %cond.copy:
             %n0 = load 0
@@ -808,19 +812,18 @@ let ``Liveness analysis`` () =
             store %n16 -> R1
         """
         |> IRReader.fromString
-        |> Passes.analyzeLiveness
-        |> (!)
-        |> Module.revBasicBlocks
-        |> Seq.map (fun x ->
+
+    let map =
+        irModule
+        |> Passes.analyzeLiveness ()
+        |> Seq.map (fun kv ->
+            let x, info = kv.Deconstruct()
+
             (!x |> Value.name,
-             (!x
-              |> Value.asBasicBlock
-              |> BasicBlock.liveIn
+             (info.LiveIn
               |> Seq.map ((!) >> Value.name)
               |> List.ofSeq,
-              !x
-              |> Value.asBasicBlock
-              |> BasicBlock.liveOut
+              info.LiveOut
               |> Seq.map ((!) >> Value.name)
               |> List.ofSeq)))
         |> Map

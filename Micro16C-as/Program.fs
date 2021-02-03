@@ -17,7 +17,7 @@ let main argv =
             argv.[0]
             |> File.ReadAllText
             |> ParseAssembly.parseAssembly
-            |> GenAssembly.genMachineCode
+            |> GenAssembly.genMachineCode ()
             |> Seq.cache
 
         machineCode |> Seq.iter (printfn "0x%08x")

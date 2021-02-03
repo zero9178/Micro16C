@@ -5,7 +5,7 @@ open Micro16C.MiddleEnd.IR
 open Micro16C.MiddleEnd.Util
 open Micro16C.MiddleEnd.PassManager
 
-let private legalizeConstants irModule =
+let private legalizeConstants _ irModule =
 
     let builder = Builder.fromModule irModule
 
@@ -180,7 +180,7 @@ let private legalizeConstants irModule =
 
     irModule
 
-let private breakPhiCriticalEdges irModule =
+let private breakPhiCriticalEdges _ irModule =
 
     !irModule
     |> Module.basicBlocks
@@ -205,15 +205,6 @@ let private breakPhiCriticalEdges irModule =
                     builder
                     |> Builder.createBasicBlockAt (After pred) ""
 
-                let basicBlock = !block |> Value.asBasicBlock
-
-                block
-                := { !block with
-                         Content =
-                             BasicBlockValue
-                                 { basicBlock with
-                                       ImmediateDominator = Some pred } }
-
                 !pred
                 |> Value.asBasicBlock
                 |> BasicBlock.terminator
@@ -231,7 +222,7 @@ let private breakPhiCriticalEdges irModule =
 
     irModule
 
-let private legalizeInstructions irModule =
+let private legalizeInstructions _ irModule =
 
     let builder = Builder.fromModule irModule
 
@@ -652,7 +643,9 @@ let legalizeConstantsPass =
 let breakPhiCriticalEdgesPass =
     { Pass = breakPhiCriticalEdges
       DependsOn = []
-      Invalidates = [] }
+      Invalidates =
+          [ Passes.analyzeDominancePass
+            Passes.analyzeDominanceFrontiersPass ] }
 
 let legalizeInstructionsPass =
     { Pass = legalizeInstructions

@@ -45,8 +45,7 @@ type Value =
     { Users: Value ref list
       Name: string
       Content: ValueContent
-      ParentBlock: Value ref option
-      Register: Register option }
+      ParentBlock: Value ref option }
 
     override this.ToString() = this.Name
 
@@ -54,15 +53,14 @@ type Value =
         { Users = []
           Name = ""
           Content = Undef
-          ParentBlock = None
-          Register = None }
+          ParentBlock = None }
 
     static member UndefValue = ref Value.Default
 
 and ValueContent =
     | Constant of Constant
     | Register of Register
-    | AllocationInstruction of AllocationInstruction
+    | AllocationInstruction
     | BinaryInstruction of BinaryInstruction
     | UnaryInstruction of UnaryInstruction
     | LoadInstruction of LoadInstruction
@@ -74,8 +72,6 @@ and ValueContent =
     | Undef
 
 and Constant = { Value: int16 }
-
-and AllocationInstruction = { Aliased: bool option }
 
 and BinaryKind =
     | And
@@ -127,12 +123,7 @@ and PhiInstruction =
 
 and BasicBlock =
     { Instructions: Value ref list
-      ImmediateDominator: Value ref option
-      ImmediatelyDominates: Value ref list
-      DominanceFrontier: Value ref list option
-      ParentModule: Module ref
-      LiveIn: ImmutableSet<Value ref>
-      LiveOut: ImmutableSet<Value ref> }
+      ParentModule: Module ref }
 
 and Module =
     internal
@@ -283,20 +274,11 @@ module internal BasicBlockInternal =
 
     let createDefault parent =
         { Instructions = []
-          ImmediateDominator = None
-          ImmediatelyDominates = []
-          DominanceFrontier = None
-          ParentModule = parent
-          LiveIn = ImmutableSet.empty
-          LiveOut = ImmutableSet.empty }
+          ParentModule = parent }
 
     let revInstructions basicBlock = basicBlock.Instructions
 
     let instructions = revInstructions >> List.rev
-
-    let immediateDominator basicBlock = basicBlock.ImmediateDominator
-
-    let dominanceFrontier basicBlock = basicBlock.DominanceFrontier
 
     let phis =
         instructions
@@ -310,28 +292,6 @@ module internal BasicBlockInternal =
             | Ref { Content = PhiInstruction _ } -> true
             | _ -> false)
 
-    let strictDominators =
-        Seq.unfold (fun blockValue ->
-            !blockValue
-            |> (function
-            | { Content = BasicBlockValue block } -> block
-            | _ -> failwith "")
-            |> immediateDominator
-            |> Option.filter ((<>) blockValue)
-            |> Option.map (fun x -> (x, x)))
-
-    let dominators block =
-        strictDominators block
-        |> Seq.append (Seq.singleton block)
-
-    let dominates other basicBlock =
-        other |> dominators |> Seq.contains basicBlock
-
-    let strictlyDominates other basicBlock =
-        other
-        |> strictDominators
-        |> Seq.contains basicBlock
-
 [<RequireQualifiedAccess>]
 module Value =
 
@@ -340,8 +300,6 @@ module Value =
     let parentBlock value = value.ParentBlock
 
     let users value = value.Users
-
-    let register (value: Value) = value.Register
 
     let tracksUsers value =
         match value.Content with
@@ -682,27 +640,6 @@ module Value =
                     |> List.iter (addToPhis parentBlockValue)
         | _ -> destroy value
 
-    let dominates other value =
-        if !value
-           |> parentBlock
-           |> Option.get
-           |> BasicBlockInternal.dominates other
-           |> not then
-            false
-        else if (!value |> parentBlock) <> (!other |> parentBlock) then
-            true
-        else
-            !value
-            |> parentBlock
-            |> Option.get
-            |> (!)
-            |> asBasicBlock
-            |> BasicBlockInternal.revInstructions
-            |> List.find (fun bb -> bb = value || bb = other) = value
-
-    let strictlyDominates other value =
-        if other = value then false else dominates other value
-
     let rename newName value = value := { !value with Name = newName }
 
 [<RequireQualifiedAccess>]
@@ -714,10 +651,6 @@ module BasicBlock =
 
     let instructions = BasicBlockInternal.instructions
 
-    let immediateDominator = BasicBlockInternal.immediateDominator
-
-    let dominanceFrontier = BasicBlockInternal.dominanceFrontier
-
     let index block =
         let bb = !block |> Value.asBasicBlock
 
@@ -725,12 +658,6 @@ module BasicBlock =
         - ((!bb.ParentModule).BasicBlocks
            |> List.findIndex ((=) block))
         - 1
-
-    let liveIn block = block.LiveIn
-
-    let liveOut block = block.LiveOut
-
-    let immediatelyDominates block = block.ImmediatelyDominates
 
     let tryTerminator =
         revInstructions
@@ -752,14 +679,6 @@ module BasicBlock =
         Value.users
         >> List.filter ((!) >> Value.isTerminating)
         >> List.choose ((!) >> Value.parentBlock)
-
-    let dominators = BasicBlockInternal.dominators
-
-    let dominates = BasicBlockInternal.dominates
-
-    let strictDominators = BasicBlockInternal.strictDominators
-
-    let strictlyDominates = BasicBlockInternal.strictlyDominates
 
     let hasSingleSuccessor =
         successors >> Seq.tryExactlyOne >> Option.isSome
@@ -1051,7 +970,7 @@ module Builder =
             ref
                 { Value.Default with
                       Name = name
-                      Content = AllocationInstruction { Aliased = None } }
+                      Content = AllocationInstruction }
 
         builder |> addValue value
 
@@ -1377,5 +1296,5 @@ let (|StoreOp|_|) instr =
 
 let (|AllocaOp|_|) instr =
     match !instr with
-    | { Content = AllocationInstruction { Aliased = value } } -> value |> Some
+    | { Content = AllocationInstruction } -> Some()
     | _ -> None

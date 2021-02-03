@@ -2,19 +2,21 @@ module Micro16C.Backend.GenAssembly
 
 open System
 open Micro16C.Backend.Assembly
+open Micro16C.MiddleEnd
 open Micro16C.MiddleEnd.IR
+open Micro16C.MiddleEnd.Passes
 open Micro16C.MiddleEnd.Util
 open Micro16C.MiddleEnd.PassManager
 
-let private operandToBus operand =
+let private operandToBus registers operand =
     match operand with
     | ConstOp 0s -> Bus.Zero |> Some
     | ConstOp 1s -> Bus.One |> Some
     | ConstOp -1s -> Bus.NegOne |> Some
     | RegisterOp reg -> Register.toBus reg |> Some
     | _ ->
-        !operand
-        |> Value.register
+        registers
+        |> ImmutableMap.tryFind operand
         |> Option.map Register.toBus
 
 let private prependOperation operation list =
@@ -111,7 +113,7 @@ let private prependMove fromReg toReg list =
                   Shifter = Some Shifter.Noop }
             list
 
-let private genPhiMoves block list =
+let private genPhiMoves liveInfo registers block list =
 
     // Following assumptions need to be true here:
     // Any block whose successor(s) contain a phi ends with an unconditional branch.
@@ -134,18 +136,16 @@ let private genPhiMoves block list =
                       |> fst with
                 | UndefOp -> list
                 | source ->
-                    (source |> operandToBus |> Option.get, phi |> operandToBus |> Option.get)
+                    (source |> operandToBus registers |> Option.get, phi |> operandToBus registers |> Option.get)
                     :: list) []
 
         let assigned = Array.create 13 false
 
-        !block
-        |> Value.asBasicBlock
-        |> BasicBlock.liveOut
+        liveInfo
+        |> ImmutableMap.find block
+        |> LivenessInfo.liveOut
         |> Seq.map
-            ((!)
-             >> Value.register
-             >> Option.get
+            (fun x -> registers |> ImmutableMap.find x
              >> RegisterAllocator.registerToIndex)
         |> Seq.iter (fun i -> Array.set assigned i true)
 
@@ -234,7 +234,15 @@ let private genPhiMoves block list =
         |> Option.defaultValue list)
     |> Option.defaultValue list
 
-let private genAssembly irModule: AssemblyLine list =
+let private genAssembly passManager irModule: AssemblyLine list =
+
+    let registers =
+        passManager
+        |> PassManager.analysisData RegisterAllocator.allocateRegistersPass
+
+    let liveInfo =
+        passManager
+        |> PassManager.analysisData analyzeLivenessPass
 
     let mutable counter = 0
 
@@ -289,6 +297,8 @@ let private genAssembly irModule: AssemblyLine list =
     let basicBlocks =
         !irModule |> Module.basicBlocks |> Array.ofList
 
+    let operandToBus = operandToBus registers
+
     basicBlocks
     |> Array.indexed
     |> Array.fold (fun list (bbIndex, bbValue) ->
@@ -302,7 +312,7 @@ let private genAssembly irModule: AssemblyLine list =
 
             let list =
                 if Value.isTerminating !instr
-                then genPhiMoves (!instr |> Value.parentBlock |> Option.get) list
+                then genPhiMoves liveInfo registers (!instr |> Value.parentBlock |> Option.get) list
                 else list
 
             match instr with
@@ -432,7 +442,7 @@ let private genAssembly irModule: AssemblyLine list =
             | _ -> failwith "Internal Compiler Error: Can't compile IR instruction to assembly") list) []
     |> List.rev
 
-let private removeUnusedLabels assemblyList =
+let private removeUnusedLabels _ assemblyList =
     let usedLabels =
         assemblyList
         |> Seq.fold (fun set assembly ->
@@ -445,7 +455,7 @@ let private removeUnusedLabels assemblyList =
         | Label s -> usedLabels |> Set.contains s
         | _ -> true)
 
-let removeRedundantLabels assemblyList =
+let removeRedundantLabels _ assemblyList =
     let replacements =
         assemblyList
         |> Seq.windowed 2
@@ -467,7 +477,7 @@ let removeRedundantLabels assemblyList =
         | Label s when replacements |> Map.containsKey s -> None
         | _ -> assembly |> Some)
 
-let genMachineCode assemblyList =
+let genMachineCode _ assemblyList =
     let machineCode, symbolTable =
         assemblyList
         |> Seq.fold (fun (result, symbolTable) assembly ->
@@ -490,7 +500,9 @@ let genMachineCode assemblyList =
 
 let genAssemblyPass =
     { Pass = genAssembly
-      DependsOn = [ RegisterAllocator.allocateRegistersPass ]
+      DependsOn =
+          [ RegisterAllocator.allocateRegistersPass
+            analyzeLivenessPass ]
       Invalidates = [] }
 
 let removeUnusedLabelsPass =

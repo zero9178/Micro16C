@@ -39,7 +39,7 @@ MBR <- ~R3; wr
 wr
     """
         |> ParseAssembly.parseAssembly
-        |> GenAssembly.genMachineCode
+        |> GenAssembly.genMachineCode ()
         |> Simulator.simulate
         |> Seq.last
 
@@ -81,7 +81,7 @@ R1 <- R3; goto .euclid
 R2 <- R1
     """
         |> ParseAssembly.parseAssembly
-        |> GenAssembly.genMachineCode
+        |> GenAssembly.genMachineCode ()
         |> Simulator.simulate
         |> Seq.last
 
@@ -118,7 +118,7 @@ goto .loop
 :end
     """
         |> ParseAssembly.parseAssembly
-        |> GenAssembly.genMachineCode
+        |> GenAssembly.genMachineCode ()
         |> Simulator.simulate
         |> Seq.last
 

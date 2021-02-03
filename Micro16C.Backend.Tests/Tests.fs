@@ -670,8 +670,8 @@ let ``Remove redundant labels`` () =
         R0 <- 1
         """
     |> ParseAssembly.parseAssembly
-    |> GenAssembly.removeRedundantLabels
-    |> GenAssembly.genMachineCode
+    |> GenAssembly.removeRedundantLabels ()
+    |> GenAssembly.genMachineCode ()
     |> List.ofSeq
     |> should
         matchList
@@ -681,5 +681,5 @@ let ``Remove redundant labels`` () =
         R0 <- 1
         """
             |> ParseAssembly.parseAssembly
-            |> GenAssembly.genMachineCode
+            |> GenAssembly.genMachineCode ()
             |> List.ofSeq)

@@ -39,34 +39,37 @@ let indexToRegister index =
     | 12 -> PC
     | _ -> failwith "Internal Compiler Error: Invalid Index"
 
-let private allocateRegisters irModule =
+let private allocateRegisters passManager irModule =
+
+    let domInfo =
+        passManager
+        |> PassManager.analysisData Passes.analyzeDominancePass
+
+    let lifeInfo =
+        passManager
+        |> PassManager.analysisData Passes.analyzeLivenessPass
 
     !irModule
     |> Module.entryBlock
-    |> Option.map
-        (Graphs.preOrder
-            ((!)
-             >> Value.asBasicBlock
-             >> BasicBlock.immediatelyDominates
-             >> Seq.ofList))
+    |> Option.map (Graphs.preOrder (fun x -> domInfo.[x].ImmediatelyDominates |> Seq.ofList))
     |> Option.defaultValue Seq.empty
-    |> Seq.iter (fun bb ->
+    |> Seq.fold (fun result bb ->
         let block = !bb |> Value.asBasicBlock
         let assigned = Array.create 13 false
 
-        block.LiveIn
+        lifeInfo.[bb].LiveIn
         |> Seq.iter
-            ((!)
-             >> Value.register
+            (fun x -> result |> ImmutableMap.tryFind x
              >> Option.map registerToIndex
              >> Option.iter (fun i -> Array.set assigned i true))
 
         block
         |> BasicBlock.instructions
-        |> Seq.iter (fun value ->
+        |> Seq.fold (fun result value ->
 
             let isLastUse operand =
-                if block.LiveOut |> ImmutableSet.contains operand then
+                if lifeInfo.[bb].LiveOut
+                   |> ImmutableSet.contains operand then
                     false
                 else
                     block
@@ -89,9 +92,8 @@ let private allocateRegisters irModule =
                 |> Seq.iter (fun value ->
                     Array.set
                         assigned
-                        (!value
-                         |> Value.register
-                         |> Option.get
+                        (result
+                         |> ImmutableMap.find value
                          |> registerToIndex)
                         false)
 
@@ -101,11 +103,10 @@ let private allocateRegisters irModule =
                 | Some i ->
                     Array.set assigned i true
 
-                    value
-                    := { !value with
-                             Register = indexToRegister i |> Some }))
-
-    irModule
+                    result
+                    |> ImmutableMap.add value (indexToRegister i)
+            else
+                result) result) ImmutableMap.empty
 
 let allocateRegistersPass =
     { Pass = allocateRegisters
