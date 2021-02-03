@@ -888,7 +888,7 @@ let private instructionCombine (irModule: Module ref) =
 
     irModule
 
-let private analyzeAlloc (irModule: Module ref) =
+let analyzeAlloc (irModule: Module ref) =
     let analyzeAlloc instr =
         match !instr with
         | { Content = AllocationInstruction ({ Aliased = None } as alloca)
@@ -914,7 +914,7 @@ let private analyzeAlloc (irModule: Module ref) =
 
     irModule
 
-let private analyzeDominance (irModule: Module ref) =
+let analyzeDominance (irModule: Module ref) =
     let map = Dictionary(HashIdentity.Reference)
 
     // as seen in https://www.cs.rice.edu/~keith/Embed/dom.pdf
@@ -1176,7 +1176,7 @@ let private mem2reg (irModule: Module ref) =
 
     irModule
 
-let private analyzeLiveness irModule =
+let analyzeLiveness irModule =
 
     !irModule
     |> Module.backwardAnalysis

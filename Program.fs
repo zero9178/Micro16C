@@ -23,7 +23,7 @@ let private debugModulePasses title =
 let compile text =
 
     let passManager =
-        PassManager.Default
+        PassManager.Default()
         |> PassManager.registerAnalysis Passes.analyzeAllocPass
         |> PassManager.registerAnalysis Passes.analyzeDominancePass
         |> PassManager.registerAnalysis Passes.analyzeDominanceFrontiersPass
@@ -66,7 +66,7 @@ let compile text =
     |> Result.bind Parse.parse
     |> Result.bind Sema.analyse
     |> Result.map Codegen.codegen
-    |> Result.map (fun x -> passManager |> PassManager.run x |> fst :?> seq<Assembly.AssemblyLine>)
+    |> Result.map (fun x -> passManager |> PassManager.run x)
 
 [<EntryPoint>]
 let main argv =

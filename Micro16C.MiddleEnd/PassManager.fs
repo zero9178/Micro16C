@@ -25,27 +25,30 @@ and [<NoEquality; NoComparison>] Transformation<'In, 'Out> =
         member this.DependsOn = this.DependsOn
         member this.Invalidates = this.Invalidates
 
-and [<NoEquality; NoComparison>] PassManager =
+and [<NoEquality; NoComparison>] PassManager<'In, 'Out> =
     private
         { TransformPasses: (ITransformation * (ITransformation -> obj -> obj)) list
           AnalysisPasses: ImmutableMap<IAnalysis, IAnalysis -> obj -> obj>
           AnalysisData: ImmutableMap<IAnalysis, obj> }
 
-        static member Default =
-            { TransformPasses = []
-              AnalysisPasses = ImmutableMap.empty
-              AnalysisData = ImmutableMap.empty }
-
 module PassManager =
 
-    let queueTransform (pass: Transformation<'In, 'Out>) passManager =
-        { passManager with
-              TransformPasses =
-                  (pass :> ITransformation,
-                   (fun pass input ->
-                       ((pass :?> Transformation<'In, 'Out>)
-                           .Pass(input :?> 'In)) :> obj))
-                  :: passManager.TransformPasses }
+    let Default (): PassManager<'In, 'Out> =
+        { TransformPasses = []
+          AnalysisPasses = ImmutableMap.empty
+          AnalysisData = ImmutableMap.empty }
+
+    let queueTransform (pass: Transformation<'In, 'Out>)
+                       (passManager: PassManager<'Start, 'In>)
+                       : PassManager<'Start, 'Out> =
+        { TransformPasses =
+              (pass :> ITransformation,
+               (fun pass input ->
+                   ((pass :?> Transformation<'In, 'Out>)
+                       .Pass(input :?> 'In)) :> obj))
+              :: passManager.TransformPasses
+          AnalysisPasses = passManager.AnalysisPasses
+          AnalysisData = passManager.AnalysisData }
 
     let registerAnalysis (pass: Analysis<'In, 'Out>) passManager =
         { passManager with
@@ -62,7 +65,7 @@ module PassManager =
     let analysisData analysis passManager =
         tryAnalysisData analysis passManager |> Option.get
 
-    let run irModule passManager =
+    let run (input: 'In) (passManager: PassManager<'In, 'Out>): 'Out =
 
         let rec ensureAnalysis analysis irModule passManager =
             if passManager.AnalysisData
@@ -77,7 +80,6 @@ module PassManager =
                       AnalysisData =
                           passManager.AnalysisData
                           |> ImmutableMap.add analysis (passManager.AnalysisPasses.[analysis] analysis irModule) }
-
         passManager.TransformPasses
         |> List.rev
         |> List.fold (fun (data, passManager) (pass, apply) ->
@@ -95,4 +97,5 @@ module PassManager =
                               passManager.AnalysisData
                               |> ImmutableMap.remove analysis }) passManager
 
-            (data, passManager)) (irModule :> obj, passManager)
+            (data, passManager)) (input :> obj, passManager)
+        |> fst :?> 'Out

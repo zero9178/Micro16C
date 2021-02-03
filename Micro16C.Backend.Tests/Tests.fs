@@ -11,7 +11,7 @@ open Xunit
 open FsUnit.Xunit
 
 let private runIRWithState state irModule =
-    PassManager.Default
+    PassManager.Default()
     |> PassManager.registerAnalysis Passes.analyzeDominancePass
     |> PassManager.registerAnalysis Passes.analyzeLivenessPass
     |> PassManager.registerAnalysis RegisterAllocator.allocateRegistersPass
@@ -20,12 +20,11 @@ let private runIRWithState state irModule =
     |> PassManager.queueTransform GenAssembly.genAssemblyPass
     |> PassManager.queueTransform GenAssembly.genMachineCodePass
     |> PassManager.run irModule
-    |> fst :?> seq<int>
     |> Simulator.simulateWithState state
     |> Seq.last
 
 let private runIR irModule =
-    PassManager.Default
+    PassManager.Default()
     |> PassManager.registerAnalysis Passes.analyzeDominancePass
     |> PassManager.registerAnalysis Passes.analyzeLivenessPass
     |> PassManager.registerAnalysis RegisterAllocator.allocateRegistersPass
@@ -34,7 +33,6 @@ let private runIR irModule =
     |> PassManager.queueTransform GenAssembly.genAssemblyPass
     |> PassManager.queueTransform GenAssembly.genMachineCodePass
     |> PassManager.run irModule
-    |> fst :?> seq<int>
     |> Simulator.simulate
     |> Seq.last
 
@@ -407,8 +405,7 @@ let ``Legalize instructions: Multiply`` () =
     |> (fun state -> state.Registers.[8])
     |> should equal -15s
 
-let private runOnModule passManager (irModule: IR.Module ref) =
-    passManager |> PassManager.run irModule |> fst :?> AssemblyLine list
+let private runOnModule passManager (irModule: IR.Module ref) = passManager |> PassManager.run irModule
 
 [<Fact>]
 let ``Assembly folding`` () =
@@ -420,7 +417,7 @@ let ``Assembly folding`` () =
         %2 = shl %1 1
         """
         |> IRReader.fromString
-        |> (PassManager.Default
+        |> (PassManager.Default()
             |> PassManager.registerAnalysis Passes.analyzeLivenessPass
             |> PassManager.registerAnalysis Passes.analyzeDominancePass
             |> PassManager.registerAnalysis RegisterAllocator.allocateRegistersPass
@@ -455,7 +452,7 @@ let ``Assembly folding`` () =
         store 1 -> R2
         """
         |> IRReader.fromString
-        |> (PassManager.Default
+        |> (PassManager.Default()
             |> PassManager.registerAnalysis Passes.analyzeLivenessPass
             |> PassManager.registerAnalysis Passes.analyzeDominancePass
             |> PassManager.registerAnalysis RegisterAllocator.allocateRegistersPass
@@ -490,7 +487,7 @@ let ``Assembly folding`` () =
         store %1 -> 1
         """
         |> IRReader.fromString
-        |> (PassManager.Default
+        |> (PassManager.Default()
             |> PassManager.registerAnalysis Passes.analyzeLivenessPass
             |> PassManager.registerAnalysis Passes.analyzeDominancePass
             |> PassManager.registerAnalysis RegisterAllocator.allocateRegistersPass

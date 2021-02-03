@@ -1,6 +1,7 @@
 module Micro16C.MiddleEnd.Tests.PassesTests
 
 open System
+open System.Collections.Generic
 open FsUnit
 open Micro16C.MiddleEnd
 open Micro16C.MiddleEnd.IR
@@ -151,13 +152,11 @@ let structurallyEquivalentTo source =
              with _ -> false))
 
 let testPass pass irModule =
-    PassManager.Default
+    PassManager.Default()
     |> PassManager.queueTransform pass
     |> PassManager.run irModule
-    |> fst :?> Module ref
 
-let private runOnModule passManager (irModule: Module ref) =
-    passManager |> PassManager.run irModule |> fst :?> Module ref
+let private runOnModule passManager (irModule: Module ref) = passManager |> PassManager.run irModule
 
 [<Fact>]
 let ``Instruction Simplify: And patterns`` () =
@@ -662,24 +661,24 @@ let ``BasicBlock reordering`` () =
 
     """)
 
-//[<Fact>]
-//let ``Analyze Allocs`` () =
-//    """%entry:
-//    %0 = alloca
-//    %1 = load %0
-//    store %1 -> R2
-//    %2 = alloca
-//    store %2 -> R1
-//    """
-//    |> IRReader.fromString
-//    |> Passes.analyzeAlloc
-//    |> (!)
-//    |> Module.instructions
-//    |> Seq.choose (function
-//        | Ref { Content = AllocationInstruction { Aliased = aliased } } -> aliased
-//        | _ -> None)
-//    |> List.ofSeq
-//    |> should equal [ false; true ]
+[<Fact>]
+let ``Analyze Allocs`` () =
+    """%entry:
+    %0 = alloca
+    %1 = load %0
+    store %1 -> R2
+    %2 = alloca
+    store %2 -> R1
+    """
+    |> IRReader.fromString
+    |> Passes.analyzeAlloc
+    |> (!)
+    |> Module.instructions
+    |> Seq.choose (function
+        | Ref { Content = AllocationInstruction { Aliased = aliased } } -> aliased
+        | _ -> None)
+    |> List.ofSeq
+    |> should equal [ false; true ]
 
 [<Fact>]
 let ``mem2reg pass`` () =
@@ -699,7 +698,7 @@ let ``mem2reg pass`` () =
     store %3 -> R4
     """
     |> IRReader.fromString
-    |> (PassManager.Default
+    |> (PassManager.Default()
         |> PassManager.registerAnalysis Passes.analyzeAllocPass
         |> PassManager.registerAnalysis Passes.analyzeDominancePass
         |> PassManager.registerAnalysis Passes.analyzeDominanceFrontiersPass
@@ -751,85 +750,85 @@ let ``Remove unreachable blocks`` () =
     store %0 -> R2
     """)
 
-//[<Fact>]
-//let ``Liveness analysis`` () =
-//
-//    let result =
-//        Map
-//            ([ ("cond.copy", ([], [ "n0"; "n1" ]))
-//               ("isLess", ([ "n4"; "n6" ], [ "n7"; "n8"; "n9" ]))
-//               ("isZero", ([ "n11"; "n13" ], [ "n10"; "n12"; "n14" ]))
-//               ("boolCont", ([ "n15"; "n16"; "n17" ], [ "n15"; "n16" ]))
-//               ("ForBody", ([ "n15"; "n16" ], [ "n13"; "n11" ]))
-//               ("n3", ([ "n11"; "n13" ], [ "n2"; "n5" ]))
-//               ("ForContinue", ([ "n16" ], [])) ])
-//
-//    let map =
-//        """
-//    %cond.copy:
-//            %n0 = load 0
-//            %n1 = load 0
-//            goto %isLess
-//
-//    %isLess:
-//            %n4 = phi (%n0,%cond.copy) (%n2,%n3)
-//            %n6 = phi (%n1,%cond.copy) (%n5,%n3)
-//            %n7 = load %n4
-//            %n8 = load %n6
-//            %n9 = load 1
-//            goto %boolCont
-//
-//    %isZero:
-//            %n10 = load %n11
-//            %n12 = load %n13
-//            %n14 = load 0
-//            goto %boolCont
-//
-//    %boolCont:
-//            %n15 = phi (%n10,%isZero) (%n7,%isLess)
-//            %n16 = phi (%n12,%isZero) (%n8,%isLess)
-//            %n17 = phi (%n14,%isZero) (%n9,%isLess)
-//            br %n17 = 0 %ForContinue %ForBody
-//
-//    %ForBody:
-//            %n13 = add %n15 %n16
-//            %n11 = add 1 %n15
-//            %18 = add 1 1
-//            %19 = shl %18 1
-//            %20 = not %19
-//            %21 = add %n11 %20
-//            br %21 < 0 %n3 %isZero
-//
-//    %n3:
-//            %n2 = load %n11
-//            %n5 = load %n13
-//            goto %isLess
-//
-//    %ForContinue:
-//            store %n16 -> R1
-//        """
-//        |> IRReader.fromString
-//        |> Passes.analyzeLiveness
-//        |> (!)
-//        |> Module.revBasicBlocks
-//        |> Seq.map (fun x ->
-//            (!x |> Value.name,
-//             (!x
-//              |> Value.asBasicBlock
-//              |> BasicBlock.liveIn
-//              |> Seq.map ((!) >> Value.name)
-//              |> List.ofSeq,
-//              !x
-//              |> Value.asBasicBlock
-//              |> BasicBlock.liveOut
-//              |> Seq.map ((!) >> Value.name)
-//              |> List.ofSeq)))
-//        |> Map
-//
-//    map
-//    |> Map.count
-//    |> should equal (result |> Map.count)
-//
-//    Seq.iter2 (fun (a: KeyValuePair<_, string list * string list>) (b: KeyValuePair<_, string list * string list>) ->
-//        a.Value |> fst |> should matchList (fst b.Value)
-//        a.Value |> snd |> should matchList (snd b.Value)) map result
+[<Fact>]
+let ``Liveness analysis`` () =
+
+    let result =
+        Map
+            ([ ("cond.copy", ([], [ "n0"; "n1" ]))
+               ("isLess", ([ "n4"; "n6" ], [ "n7"; "n8"; "n9" ]))
+               ("isZero", ([ "n11"; "n13" ], [ "n10"; "n12"; "n14" ]))
+               ("boolCont", ([ "n15"; "n16"; "n17" ], [ "n15"; "n16" ]))
+               ("ForBody", ([ "n15"; "n16" ], [ "n13"; "n11" ]))
+               ("n3", ([ "n11"; "n13" ], [ "n2"; "n5" ]))
+               ("ForContinue", ([ "n16" ], [])) ])
+
+    let map =
+        """
+    %cond.copy:
+            %n0 = load 0
+            %n1 = load 0
+            goto %isLess
+
+    %isLess:
+            %n4 = phi (%n0,%cond.copy) (%n2,%n3)
+            %n6 = phi (%n1,%cond.copy) (%n5,%n3)
+            %n7 = load %n4
+            %n8 = load %n6
+            %n9 = load 1
+            goto %boolCont
+
+    %isZero:
+            %n10 = load %n11
+            %n12 = load %n13
+            %n14 = load 0
+            goto %boolCont
+
+    %boolCont:
+            %n15 = phi (%n10,%isZero) (%n7,%isLess)
+            %n16 = phi (%n12,%isZero) (%n8,%isLess)
+            %n17 = phi (%n14,%isZero) (%n9,%isLess)
+            br %n17 = 0 %ForContinue %ForBody
+
+    %ForBody:
+            %n13 = add %n15 %n16
+            %n11 = add 1 %n15
+            %18 = add 1 1
+            %19 = shl %18 1
+            %20 = not %19
+            %21 = add %n11 %20
+            br %21 < 0 %n3 %isZero
+
+    %n3:
+            %n2 = load %n11
+            %n5 = load %n13
+            goto %isLess
+
+    %ForContinue:
+            store %n16 -> R1
+        """
+        |> IRReader.fromString
+        |> Passes.analyzeLiveness
+        |> (!)
+        |> Module.revBasicBlocks
+        |> Seq.map (fun x ->
+            (!x |> Value.name,
+             (!x
+              |> Value.asBasicBlock
+              |> BasicBlock.liveIn
+              |> Seq.map ((!) >> Value.name)
+              |> List.ofSeq,
+              !x
+              |> Value.asBasicBlock
+              |> BasicBlock.liveOut
+              |> Seq.map ((!) >> Value.name)
+              |> List.ofSeq)))
+        |> Map
+
+    map
+    |> Map.count
+    |> should equal (result |> Map.count)
+
+    Seq.iter2 (fun (a: KeyValuePair<_, string list * string list>) (b: KeyValuePair<_, string list * string list>) ->
+        a.Value |> fst |> should matchList (fst b.Value)
+        a.Value |> snd |> should matchList (snd b.Value)) map result
