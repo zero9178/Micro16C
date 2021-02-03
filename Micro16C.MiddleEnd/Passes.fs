@@ -1274,7 +1274,7 @@ let reorderBasicBlocks irModule =
 
     irModule
 
-type private LatticeValues =
+type private CPLatticeValues =
     | Top
     | Constant of int16
     | Bottom
@@ -1400,10 +1400,10 @@ let constantPropagation irModule =
                      |> Option.map
                          (List.reduce (fun map1 map2 ->
                              Seq.append map1 map2
-                             |> Seq.groupBy (fun (kv: KeyValuePair<Value ref, LatticeValues>) -> kv.Key)
-                             |> Seq.map (fun (key, value) ->
+                             |> Seq.groupBy (fun (kv: KeyValuePair<Value ref, CPLatticeValues>) -> kv.Key)
+                             |> Seq.map (fun (key, values) ->
                                  (key,
-                                  value
+                                  values
                                   |> Seq.map (fun kv -> kv.Value)
                                   |> Seq.reduce (fun op1 op2 ->
                                       match op1, op2 with
@@ -1463,5 +1463,136 @@ let constantPropagation irModule =
     |> Module.revBasicBlocks
     |> Seq.filter (fun x -> reachable |> ImmutableSet.contains x |> not)
     |> Seq.iter Value.destroy
+
+    irModule
+
+let analyzeBitsRead irModule =
+
+    let addMask mask instr map =
+        if !instr |> Value.producesValue |> not then
+            map
+        else
+            match map |> ImmutableMap.tryFind instr with
+            | None -> map |> ImmutableMap.add instr mask
+            | Some pre -> map |> ImmutableMap.add instr (mask ||| pre)
+
+    let nextPowerOf2 value =
+        let value = (value |> uint16) - 1us
+        let value = value ||| (value >>> 1)
+        let value = value ||| (value >>> 2)
+        let value = value ||| (value >>> 4)
+        let value = value ||| (value >>> 8)
+        value + 1us
+
+    let uselessBits =
+        !irModule
+        |> Module.backwardAnalysis
+            (fun unusedBits current ->
+
+                !current
+                |> Value.asBasicBlock
+                |> BasicBlock.revInstructions
+                |> List.fold (fun unusedBits instr ->
+                    let operands =
+                        !instr
+                        |> Value.operands
+                        |> List.filter ((!) >> Value.isBasicBlock >> not)
+                        |> Array.ofList
+
+                    let instrUsedBits =
+                        match unusedBits |> ImmutableMap.tryFind instr with
+                        | None -> 0xFFFFus
+                        | Some instrUsedBits -> instrUsedBits
+
+                    match instr with
+                    | BinOp Or _
+                    | BinOp Xor _ ->
+                        unusedBits
+                        |> addMask instrUsedBits operands.[0]
+                        |> addMask instrUsedBits operands.[1]
+                    | BinOp And (ConstOp c, _) ->
+                        unusedBits
+                        |> addMask (c |> uint16 &&& instrUsedBits) operands.[1]
+                    | BinOp And (_, ConstOp c) ->
+                        unusedBits
+                        |> addMask (c |> uint16 &&& instrUsedBits) operands.[0]
+                    | BinOp SRem (ConstOp c, _) ->
+                        let newMask =
+                            (abs (c) |> uint16 |> nextPowerOf2) - 1us
+
+                        let newMask = newMask ||| 0x8000us
+
+                        unusedBits
+                        |> addMask (instrUsedBits &&& newMask) operands.[0]
+                    | BinOp URem (ConstOp c, _) ->
+                        let newMask = (c |> uint16 |> nextPowerOf2) - 1us
+
+                        unusedBits
+                        |> addMask (instrUsedBits &&& newMask) operands.[0]
+                    | BinOp SRem (_, ConstOp c) ->
+                        let newMask =
+                            (abs (c) |> uint16 |> nextPowerOf2) - 1us
+
+                        let newMask = newMask ||| 0x8000us
+
+                        unusedBits
+                        |> addMask (instrUsedBits &&& newMask) operands.[0]
+                    | BinOp URem (_, ConstOp c) ->
+                        let newMask = (c |> uint16 |> nextPowerOf2) - 1us
+
+                        unusedBits
+                        |> addMask (instrUsedBits &&& newMask) operands.[0]
+                    | BinOp SRem (_, _) ->
+                        unusedBits
+                        |> addMask 0xFFFFus operands.[0]
+                        |> addMask 0xFFFFus operands.[1]
+                    | BinOp URem (_, _) ->
+                        unusedBits
+                        |> addMask 0xFFFFus operands.[0]
+                        |> addMask 0xFFFFus operands.[1]
+                    | BinOp LShr (_, ConstOp c) ->
+                        unusedBits
+                        |> addMask (instrUsedBits <<< (c |> int)) operands.[0]
+                    | BinOp AShr (_, ConstOp c) ->
+                        unusedBits
+                        |> addMask (instrUsedBits <<< (c |> int)) operands.[0]
+                    | BinOp Shl (_, ConstOp c) ->
+                        unusedBits
+                        |> addMask (instrUsedBits >>> (c |> int)) operands.[0]
+                    | UnaryOp Negate _ -> unusedBits |> addMask 0xFFFFus operands.[0]
+                    | UnaryOp Not _ -> unusedBits |> addMask instrUsedBits operands.[0]
+                    | CondBrOp (Negative, _, _, _) -> unusedBits |> addMask 0x8000us operands.[0]
+                    | CondBrOp (Zero, _, _, _) -> unusedBits |> addMask 0xFFFFus operands.[0]
+                    | PhiOp _ ->
+                        operands
+                        |> Array.fold (fun unusedBits operand -> addMask instrUsedBits operand unusedBits) unusedBits
+                    | LoadOp _ -> unusedBits |> addMask 0xFFFFus operands.[0]
+                    | BinOp SDiv (_, _)
+                    | BinOp UDiv (_, _)
+                    | BinOp Mul (_, _)
+                    | BinOp Add (_, _)
+                    | BinOp Sub (_, _)
+                    | StoreOp _ ->
+                        unusedBits
+                        |> addMask 0xFFFFus operands.[0]
+                        |> addMask 0xFFFFus operands.[1]
+                    | _ -> unusedBits) unusedBits)
+               (fun _ successors ->
+                   successors
+                   |> Seq.choose snd
+                   |> List.ofSeq
+                   |> Some
+                   |> Option.filter (List.isEmpty >> not)
+                   |> Option.map
+                       (List.reduce (fun map1 map2 ->
+                           Seq.append map1 map2
+                           |> Seq.groupBy (fun kv -> kv.Key)
+                           |> Seq.map (fun (key, values) ->
+                               (key,
+                                values
+                                |> Seq.map (fun kv -> kv.Value)
+                                |> Seq.reduce (|||)))
+                           |> ImmutableMap.ofSeq))
+                   |> Option.defaultValue ImmutableMap.empty)
 
     irModule
