@@ -5,7 +5,7 @@ open System.Collections.Generic
 open System.Collections
 open System.Collections.Immutable
 
-type ImmutableMap<'Key, 'Value when 'Key: not struct>(map: ImmutableDictionary<'Key, 'Value>) =
+type ImmutableMap<'Key, 'Value when 'Key: not struct and 'Key: equality>(map: ImmutableDictionary<'Key, 'Value>) =
 
     member this.Dictionary =
         map.WithComparers(HashIdentity.Reference)
@@ -99,7 +99,7 @@ module ImmutableMap =
 
     let ofSeq (seq: seq<('Key * 'Value)>) = ImmutableMap(seq)
 
-    let empty<'Key, 'Value when 'Key: not struct> = ImmutableMap<'Key, 'Value>(Seq.empty)
+    let empty<'Key, 'Value when 'Key: not struct and 'Key: equality> = ImmutableMap<'Key, 'Value>(Seq.empty)
 
     let tryFind value (map: ImmutableMap<_, _>) = map.TryFind value
 

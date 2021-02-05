@@ -39,20 +39,24 @@ let compile text =
         |> PassManager.queueTransform Passes.instructionSimplifyPass
         |> PassManager.queueTransform Passes.instructionCombinePass
         |> PassManager.queueTransform Passes.simplifyCFGPass
+        |> PassManager.queueTransform Passes.deadBitEliminationPass
         |> PassManager.queueTransform Passes.jumpThreadingPass
         |> PassManager.queueTransform Passes.constantPropagationPass
         |> PassManager.queueTransform Passes.deadCodeEliminationPass
+        |> PassManager.queueTransform Passes.instructionSimplifyPass
         |> PassManager.queueTransform Passes.simplifyCFGPass
         |> PassManager.queueTransform Legalize.legalizeInstructionsPass
         |> PassManager.queueTransform Passes.constantPropagationPass
         |> PassManager.queueTransform Passes.deadCodeEliminationPass
         |> PassManager.queueTransform Passes.instructionSimplifyPass
         |> PassManager.queueTransform Passes.simplifyCFGPass
+        |> PassManager.queueTransform Passes.deadBitEliminationPass
         |> PassManager.queueTransform Passes.jumpThreadingPass
         |> PassManager.queueTransform Passes.constantPropagationPass
         |> PassManager.queueTransform Passes.deadCodeEliminationPass
         |> PassManager.queueTransform Passes.instructionSimplifyPass
         |> PassManager.queueTransform Passes.simplifyCFGPass
+        |> PassManager.queueTransform Passes.deadBitEliminationPass
         |> PassManager.queueTransform (debugModulePasses "After optimizations:")
         |> PassManager.queueTransform Legalize.legalizeConstantsPass
         |> PassManager.queueTransform Legalize.breakPhiCriticalEdgesPass

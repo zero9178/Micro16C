@@ -1405,7 +1405,7 @@ let private constantPropagation _ irModule =
                      |> Option.map
                          (List.reduce (fun map1 map2 ->
                              Seq.append map1 map2
-                             |> Seq.groupBy (fun (kv: KeyValuePair<Value ref, CPLatticeValues>) -> kv.Key)
+                             |> Seq.groupBy (fun kv -> kv.Key)
                              |> Seq.map (fun (key, values) ->
                                  (key,
                                   values
@@ -1482,7 +1482,7 @@ let private analyzeBitsRead _ irModule =
             | Some pre -> map |> ImmutableMap.add instr (mask ||| pre)
 
     let nextPowerOf2 value =
-        let value = (value |> uint16) - 1us
+        let value = value - 1us
         let value = value ||| (value >>> 1)
         let value = value ||| (value >>> 2)
         let value = value ||| (value >>> 4)
@@ -1510,17 +1510,18 @@ let private analyzeBitsRead _ irModule =
                     | Some instrUsedBits -> instrUsedBits
 
                 match instr with
-                | BinOp Or _
-                | BinOp Xor _ ->
-                    unusedBits
-                    |> addMask instrUsedBits operands.[0]
-                    |> addMask instrUsedBits operands.[1]
                 | BinOp And (ConstOp c, _) ->
                     unusedBits
                     |> addMask (c |> uint16 &&& instrUsedBits) operands.[1]
                 | BinOp And (_, ConstOp c) ->
                     unusedBits
                     |> addMask (c |> uint16 &&& instrUsedBits) operands.[0]
+                | BinOp Or _
+                | BinOp And _
+                | BinOp Xor _ ->
+                    unusedBits
+                    |> addMask instrUsedBits operands.[0]
+                    |> addMask instrUsedBits operands.[1]
                 | BinOp SRem (ConstOp c, _) ->
                     let newMask =
                         (abs (c) |> uint16 |> nextPowerOf2) - 1us
@@ -1572,11 +1573,18 @@ let private analyzeBitsRead _ irModule =
                     operands
                     |> Array.fold (fun unusedBits operand -> addMask instrUsedBits operand unusedBits) unusedBits
                 | LoadOp _ -> unusedBits |> addMask 0xFFFFus operands.[0]
-                | BinOp SDiv (_, _)
-                | BinOp UDiv (_, _)
                 | BinOp Mul (_, _)
                 | BinOp Add (_, _)
-                | BinOp Sub (_, _)
+                | BinOp Sub (_, _) ->
+
+                    let newMask =
+                        (instrUsedBits + 1us |> nextPowerOf2) - 1us
+
+                    unusedBits
+                    |> addMask newMask operands.[0]
+                    |> addMask newMask operands.[1]
+                | BinOp SDiv (_, _)
+                | BinOp UDiv (_, _)
                 | StoreOp _ ->
                     unusedBits
                     |> addMask 0xFFFFus operands.[0]
@@ -1599,14 +1607,281 @@ let private analyzeBitsRead _ irModule =
                             |> Seq.reduce (|||)))
                        |> ImmutableMap.ofSeq))
                |> Option.defaultValue ImmutableMap.empty)
+    |> ImmutableMap.find (!irModule |> Module.entryBlock |> Option.get)
 
 let analyzeBitsReadPass =
     { Pass = analyzeBitsRead
       DependsOn = [] }
 
+let private deadBitElimination passManager irModule =
+
+    let mutable executableEdges = ImmutableMap.empty
+
+    let addEdge fromEdge toEdge map =
+        match map |> ImmutableMap.tryFind fromEdge with
+        | None ->
+            map
+            |> ImmutableMap.add fromEdge (ImmutableSet.ofList [ toEdge ])
+        | Some set ->
+            map
+            |> ImmutableMap.add fromEdge (set |> ImmutableSet.add toEdge)
+
+    let constantToValue c =
+        Seq.unfold (fun current -> Some((current &&& 1us) <> 0us, current >>> 1)) (c |> uint16)
+        |> Seq.take 16
+        |> Seq.map Some
+        |> List.ofSeq
+
+    let adder initialCarry op1 op2 =
+        List.fold2 (fun (result, carry) op1 op2 ->
+            match carry, op1, op2 with
+            | None, Some false, Some false
+            | Some false, None, Some false
+            | Some false, Some false, None -> (None :: result, Some false)
+            | None, Some true, _
+            | None, _, Some true
+            | _, None, Some true
+            | Some true, None, _
+            | Some true, _, None
+            | _, Some true, None
+            | None, None, _
+            | None, _, None
+            | _, None, None -> (None :: result, None)
+            | Some b1, Some b2, Some b3 ->
+                (Some((b1 <> b2) <> b3) :: result, ((b1 && b2) || (b1 && b3) || (b2 && b3)) |> Some))
+            (List.empty, initialCarry) op1 op2
+        |> fst
+        |> List.rev
+
+    let addition = adder (Some false)
+
+    let negate = List.map (Option.map not)
+
+    let subtraction op1 op2 = adder (Some true) op1 (negate op2)
+
+    let rewrites =
+        !irModule
+        |> Module.entryBlock
+        |> Option.map
+            (Graphs.dataFlowAnalysis
+                (fun replacements current ->
+
+                    !current
+                    |> Value.asBasicBlock
+                    |> BasicBlock.nonPhiInstructions
+                    |> Seq.fold (fun replacements instr ->
+                        let operands =
+                            !instr
+                            |> Value.operands
+                            |> List.map (function
+                                | ConstOp c -> constantToValue c
+                                | instr when !instr |> Value.producesValue -> replacements |> ImmutableMap.find instr
+                                | _ -> List.init 16 (fun _ -> None))
+                            |> Array.ofSeq
+
+                        let result =
+                            match instr with
+                            | BinOp And _ ->
+                                List.map2 (fun op1 op2 ->
+                                    match op1, op2 with
+                                    | Some false, _
+                                    | _, Some false -> Some false
+                                    | None, _
+                                    | _, None -> None
+                                    | Some op1, Some op2 -> Some(op1 && op2)) operands.[0] operands.[1]
+                                |> Some
+                            | BinOp Or _ ->
+                                List.map2 (fun op1 op2 ->
+                                    match op1, op2 with
+                                    | Some true, _
+                                    | _, Some true -> Some true
+                                    | None, _
+                                    | _, None -> None
+                                    | Some op1, Some op2 -> Some(op1 || op2)) operands.[0] operands.[1]
+                                |> Some
+                            | BinOp Xor _ ->
+                                List.map2 (fun op1 op2 ->
+                                    match op1, op2 with
+                                    | None, _
+                                    | _, None -> None
+                                    | Some op1, Some op2 -> Some(op1 <> op2)) operands.[0] operands.[1]
+                                |> Some
+                            | BinOp Add _ -> addition operands.[0] operands.[1] |> Some
+                            | BinOp Sub _ -> subtraction operands.[0] operands.[1] |> Some
+                            | BinOp Mul _ -> List.init 16 (fun _ -> None) |> Some
+                            | BinOp SDiv _ -> List.init 16 (fun _ -> None) |> Some
+                            | BinOp SRem _ -> List.init 16 (fun _ -> None) |> Some
+                            | BinOp Shl (_, ConstOp c) ->
+                                operands.[0]
+                                |> List.rev
+                                |> List.skip (c |> int)
+                                |> List.rev
+                                |> List.append (List.init (c |> int) (fun _ -> Some false))
+                                |> Some
+                            | BinOp Shl _ -> List.init 16 (fun _ -> None) |> Some
+                            | BinOp LShr (_, ConstOp c) ->
+                                List.init (c |> int) (fun _ -> Some false)
+                                |> List.append (operands.[0] |> List.skip (c |> int))
+                                |> Some
+                            | BinOp AShr (_, ConstOp c) ->
+                                List.init (c |> int) (fun _ -> operands.[0].[15])
+                                |> List.append (operands.[0] |> List.skip (c |> int))
+                                |> Some
+                            | BinOp AShr _ -> List.init 16 (fun _ -> None) |> Some
+                            | BinOp UDiv _ -> List.init 16 (fun _ -> None) |> Some
+                            | BinOp URem _ -> List.init 16 (fun _ -> None) |> Some
+                            | BinOp LShr _ -> List.init 16 (fun _ -> None) |> Some
+                            | UnaryOp Negate _ ->
+                                operands.[0]
+                                |> negate
+                                |> addition (1s |> constantToValue)
+                                |> Some
+                            | UnaryOp Not _ -> operands.[0] |> negate |> Some
+                            | CondBrOp (Zero, _, trueBranch, falseBranch) ->
+                                if operands.[0] |> List.forall ((=) (Some false)) then
+                                    executableEdges <- executableEdges |> addEdge current trueBranch
+                                else if operands.[0] |> List.exists ((=) (Some true)) then
+                                    executableEdges <- executableEdges |> addEdge current falseBranch
+                                else
+                                    executableEdges <- executableEdges |> addEdge current trueBranch
+                                    executableEdges <- executableEdges |> addEdge current falseBranch
+
+                                None
+                            | CondBrOp (Negative, _, trueBranch, falseBranch) ->
+                                match operands.[0].[15] with
+                                | Some true -> executableEdges <- executableEdges |> addEdge current trueBranch
+                                | Some false -> executableEdges <- executableEdges |> addEdge current falseBranch
+                                | None ->
+                                    executableEdges <- executableEdges |> addEdge current trueBranch
+                                    executableEdges <- executableEdges |> addEdge current falseBranch
+
+                                None
+                            | GotoOp destination ->
+                                executableEdges <- executableEdges |> addEdge current destination
+                                None
+                            | instr when !instr |> Value.producesValue |> not -> None
+                            | _ -> List.init 16 (fun _ -> None) |> Some
+
+                        match result with
+                        | None -> replacements
+                        | Some result -> replacements |> ImmutableMap.add instr result) replacements)
+                 (fun current predecessors ->
+                     predecessors
+                     |> Seq.choose (fun (a, b) ->
+                         match b with
+                         | None -> None
+                         | Some b -> Some(a, b))
+                     |> Seq.map (fun (predecessor, replacement) ->
+                         !current
+                         |> Value.asBasicBlock
+                         |> BasicBlock.phis
+                         |> List.fold (fun replacement phi ->
+                             let phiOp =
+                                 !phi
+                                 |> Value.operands
+                                 |> List.pairwise
+                                 |> List.find (snd >> (=) predecessor)
+                                 |> fst
+
+                             let phiRepl =
+                                 match phiOp with
+                                 | ConstOp c -> constantToValue c |> Some
+                                 | instr when !instr |> Value.producesValue -> replacement |> ImmutableMap.tryFind phiOp
+                                 | UndefOp -> constantToValue 0s |> Some
+                                 | _ -> None
+
+                             match phiRepl with
+                             | Some phiRepl -> replacement |> ImmutableMap.add phi phiRepl
+                             | None -> replacement
+
+                             ) replacement)
+                     |> List.ofSeq
+                     |> Some
+                     |> Option.filter (List.isEmpty >> not)
+                     |> Option.map
+                         (List.reduce (fun map1 map2 ->
+                             Seq.append map1 map2
+                             |> Seq.groupBy (fun kv -> kv.Key)
+                             |> Seq.map (fun (key, values) ->
+                                 (key,
+                                  values
+                                  |> Seq.map (fun kv -> kv.Value)
+                                  |> Seq.reduce (List.map2 (fun c1 c2 -> if c1 = c2 then c1 else None))))
+                             |> ImmutableMap.ofSeq))
+                     |> Option.defaultValue ImmutableMap.empty)
+                 ((!) >> BasicBlock.predecessors >> Seq.ofList)
+                 (fun x ->
+                     executableEdges
+                     |> ImmutableMap.tryFind x
+                     |> Option.defaultValue ImmutableSet.empty))
+        |> Option.defaultValue ImmutableMap.empty
+
+    let bitsRead =
+        passManager
+        |> PassManager.analysisData analyzeBitsReadPass
+
+    !irModule
+    |> Module.exitBlock
+    |> Option.bind (fun x -> rewrites |> ImmutableMap.tryFind x)
+    |> Option.defaultValue ImmutableMap.empty
+    |> Seq.choose (fun kv ->
+        let value, constants = kv.Deconstruct()
+
+        let mask = bitsRead.[value]
+
+        constants
+        |> Seq.indexed
+        |> Seq.fold (fun current (index, bit) ->
+            match current, bit with
+            | None, _ -> None
+            | Some current, None -> if (mask &&& (1us <<< index)) = 0us then Some current else None
+            | Some current, Some true -> (current <<< 1) ||| 1s |> Some
+            | Some current, Some false -> (current <<< 1) |> Some) (Some 0s)
+        |> Option.map (fun x -> (value, x)))
+    |> Seq.iter (fun (value, repl) ->
+        value
+        |> Value.replaceWith (Builder.createConstant repl))
+
+    let builder = Builder.fromModule irModule
+
+    !irModule
+    |> Module.revBasicBlocks
+    |> Seq.choose (fun bb ->
+        match executableEdges |> ImmutableMap.tryFind bb with
+        | Some successors when successors |> ImmutableSet.count = 1
+                               && !bb |> BasicBlock.successors |> List.length > 1 -> Some(bb, successors |> Seq.head)
+        | _ -> None)
+    |> Seq.iter (fun (bb, succ) ->
+        !bb
+        |> Value.asBasicBlock
+        |> BasicBlock.terminator
+        |> Value.replaceWith (builder |> Builder.createGoto succ |> fst))
+
+    let reachable =
+        executableEdges
+        |> Seq.map (fun kv -> kv.Value)
+        |> ImmutableSet.unionMany
+        |> ImmutableSet.union
+            (!irModule
+             |> Module.entryBlock
+             |> Option.toList
+             |> ImmutableSet.ofList)
+
+    !irModule
+    |> Module.revBasicBlocks
+    |> Seq.filter (fun x -> reachable |> ImmutableSet.contains x |> not)
+    |> Seq.iter Value.destroy
+
+    irModule
+
 let analyzeLivenessPass =
     { Pass = analyzeLiveness
       DependsOn = [] }
+
+let deadBitEliminationPass =
+    { Pass = deadBitElimination
+      DependsOn = [ analyzeBitsReadPass ]
+      Invalidates = [] }
 
 let instructionSimplifyPass =
     { Pass = instructionSimplify
@@ -1628,7 +1903,9 @@ let jumpThreadingPass =
       DependsOn = []
       Invalidates =
           [ analyzeDominancePass
-            analyzeDominanceFrontiersPass ] }
+            analyzeDominanceFrontiersPass
+            analyzeLivenessPass
+            analyzeBitsReadPass ] }
 
 let simplifyCFGPass =
     { Pass = simplifyCFG
@@ -1647,7 +1924,9 @@ let mem2regPass =
       DependsOn =
           [ analyzeDominanceFrontiersPass
             analyzeAllocPass ]
-      Invalidates = [] }
+      Invalidates =
+          [ analyzeLivenessPass
+            analyzeBitsReadPass ] }
 
 let constantPropagationPass =
     { Pass = constantPropagation

@@ -638,7 +638,9 @@ let private legalizeInstructions _ irModule =
 let legalizeConstantsPass =
     { Pass = legalizeConstants
       DependsOn = []
-      Invalidates = [] }
+      Invalidates =
+          [ Passes.analyzeLivenessPass
+            Passes.analyzeBitsReadPass ] }
 
 let breakPhiCriticalEdgesPass =
     { Pass = breakPhiCriticalEdges
@@ -652,4 +654,6 @@ let legalizeInstructionsPass =
       DependsOn = []
       Invalidates =
           [ Passes.analyzeDominancePass
-            Passes.analyzeDominanceFrontiersPass ] }
+            Passes.analyzeDominanceFrontiersPass
+            Passes.analyzeLivenessPass
+            Passes.analyzeBitsReadPass ] }
