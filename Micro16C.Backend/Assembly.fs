@@ -136,23 +136,23 @@ type Operation =
     override this.ToString() =
         let op =
             match (this.ALU, this.AMux, this.ABus, this.BBus) with
-            | (None, _, _, _) -> ""
-            | (Some ALU.ABus, Some AMux.MBR, _, _) -> "MBR"
-            | (Some ALU.ABus, Some AMux.ABus, Some a, _) -> Bus.toString a
-            | (Some ALU.Add, Some AMux.MBR, _, Some b) -> "MBR + " + Bus.toString b
-            | (Some ALU.Add, Some AMux.ABus, Some a, Some b) -> Bus.toString a + " + " + Bus.toString b
-            | (Some ALU.And, Some AMux.MBR, _, Some b) -> "MBR & " + Bus.toString b
-            | (Some ALU.And, Some AMux.ABus, Some a, Some b) -> Bus.toString a + " & " + Bus.toString b
-            | (Some ALU.Neg, Some AMux.MBR, _, _) -> "~MBR"
-            | (Some ALU.Neg, Some AMux.ABus, Some a, _) -> "~" + Bus.toString a
+            | None, _, _, _ -> ""
+            | Some ALU.ABus, Some AMux.MBR, _, _ -> "MBR"
+            | Some ALU.ABus, Some AMux.ABus, Some a, _ -> Bus.toString a
+            | Some ALU.Add, Some AMux.MBR, _, Some b -> "MBR + " + Bus.toString b
+            | Some ALU.Add, Some AMux.ABus, Some a, Some b -> Bus.toString a + " + " + Bus.toString b
+            | Some ALU.And, Some AMux.MBR, _, Some b -> "MBR & " + Bus.toString b
+            | Some ALU.And, Some AMux.ABus, Some a, Some b -> Bus.toString a + " & " + Bus.toString b
+            | Some ALU.Neg, Some AMux.MBR, _, _ -> "~MBR"
+            | Some ALU.Neg, Some AMux.ABus, Some a, _ -> "~" + Bus.toString a
             | _ -> failwith "Internal Compiler Error: Illegally formed assembly instruction"
 
         let op =
             match this.Shifter with
             | None
             | Some Shifter.Noop -> op
-            | Some Shifter.Left -> sprintf "lsh(%s)" op
-            | Some Shifter.Right -> sprintf "rsh(%s)" op
+            | Some Shifter.Left -> $"lsh(%s{op})"
+            | Some Shifter.Right -> $"rsh(%s{op})"
             | _ -> failwith "Internal Compiler Error: Illegally formed assembly instruction"
 
         let op =
@@ -162,44 +162,44 @@ type Operation =
 
         let op =
             match (op, this.MBRWrite, this.SBus) with
-            | (op, Some false, _)
-            | (op, None, _) -> op
-            | (op, Some true, None) -> sprintf "MBR <- %s" op
-            | (op, Some true, Some _) -> sprintf "%s; MBR <- %s" op op
+            | op, Some false, _
+            | op, None, _ -> op
+            | op, Some true, None -> $"MBR <- %s{op}"
+            | op, Some true, Some _ -> $"%s{op}; MBR <- %s{op}"
 
         let op =
             match (op, this.SBus, this.Condition, this.Address) with
-            | (op, _, None, _)
-            | (op, _, Some Cond.NoJump, _) -> op
-            | ("", None, Some Cond.Neg, Some s) -> sprintf "if N goto .%s" s
-            | (op, None, Some Cond.Neg, Some s) -> sprintf "(%s); if N goto .%s" op s
-            | ("", None, Some Cond.Zero, Some s) -> sprintf "if Z goto .%s" s
-            | (op, None, Some Cond.Zero, Some s) -> sprintf "(%s); if Z goto .%s" op s
-            | ("", None, Some Cond.None, Some s) -> sprintf "goto .%s" s
-            | (op, None, Some Cond.None, Some s) -> sprintf "(%s); goto .%s" op s
-            | ("", Some _, Some Cond.Neg, Some s) -> sprintf "if N goto .%s" s
-            | (op, Some _, Some Cond.Neg, Some s) -> sprintf "%s; if N goto .%s" op s
-            | ("", Some _, Some Cond.Zero, Some s) -> sprintf "if Z goto .%s" s
-            | (op, Some _, Some Cond.Zero, Some s) -> sprintf "%s; if Z goto .%s" op s
-            | ("", Some _, Some Cond.None, Some s) -> sprintf "goto .%s" s
-            | (op, Some _, Some Cond.None, Some s) -> sprintf "%s; goto .%s" op s
+            | op, _, None, _
+            | op, _, Some Cond.NoJump, _ -> op
+            | "", None, Some Cond.Neg, Some s -> $"if N goto .%s{s}"
+            | op, None, Some Cond.Neg, Some s -> $"(%s{op}); if N goto .%s{s}"
+            | "", None, Some Cond.Zero, Some s -> $"if Z goto .%s{s}"
+            | op, None, Some Cond.Zero, Some s -> $"(%s{op}); if Z goto .%s{s}"
+            | "", None, Some Cond.None, Some s -> $"goto .%s{s}"
+            | op, None, Some Cond.None, Some s -> $"(%s{op}); goto .%s{s}"
+            | "", Some _, Some Cond.Neg, Some s -> $"if N goto .%s{s}"
+            | op, Some _, Some Cond.Neg, Some s -> $"%s{op}; if N goto .%s{s}"
+            | "", Some _, Some Cond.Zero, Some s -> $"if Z goto .%s{s}"
+            | op, Some _, Some Cond.Zero, Some s -> $"%s{op}; if Z goto .%s{s}"
+            | "", Some _, Some Cond.None, Some s -> $"goto .%s{s}"
+            | op, Some _, Some Cond.None, Some s -> $"%s{op}; goto .%s{s}"
             | _ -> failwith "Internal Compiler Error: Illegally formed assembly instruction"
 
         let op =
             match (op, this.MARWrite, this.BBus) with
-            | (op, Some false, _)
-            | (op, None, _) -> op
-            | ("", Some true, Some b) -> sprintf "MAR <- %s" (Bus.toString b)
-            | (op, Some true, Some b) -> sprintf "%s; MAR <- %s" op (Bus.toString b)
+            | op, Some false, _
+            | op, None, _ -> op
+            | "", Some true, Some b -> $"MAR <- %s{Bus.toString b}"
+            | op, Some true, Some b -> $"%s{op}; MAR <- %s{Bus.toString b}"
             | _ -> failwith "Internal Compiler Error: Illegally formed assembly instruction"
 
         let op =
             match (op, this.MemoryAccess) with
-            | (op, None) -> op
-            | ("", Some MemoryAccess.Read) -> "rd"
-            | ("", Some MemoryAccess.Write) -> "wr"
-            | (op, Some MemoryAccess.Read) -> sprintf "%s; rd" op
-            | (op, Some MemoryAccess.Write) -> sprintf "%s; wr" op
+            | op, None -> op
+            | "", Some MemoryAccess.Read -> "rd"
+            | "", Some MemoryAccess.Write -> "wr"
+            | op, Some MemoryAccess.Read -> $"%s{op}; rd"
+            | op, Some MemoryAccess.Write -> $"%s{op}; wr"
             | _ -> failwith "Internal Compiler Error: Illegally formed assembly instruction"
 
         op
@@ -325,13 +325,19 @@ module Operation =
 
         let current =
             current
-            ||| ((if op.MBRWrite |> Option.defaultValue false then 1 else 0)
+            ||| ((if op.MBRWrite |> Option.defaultValue false then
+                      1
+                  else
+                      0)
                  <<< 24)
 
 
         let current =
             current
-            ||| ((if op.MARWrite |> Option.defaultValue false then 1 else 0)
+            ||| ((if op.MARWrite |> Option.defaultValue false then
+                      1
+                  else
+                      0)
                  <<< 23)
 
 
@@ -345,13 +351,20 @@ module Operation =
 
         let current =
             current
-            ||| ((if op.MemoryAccess |> Option.isSome then 1 else 0)
+            ||| ((if op.MemoryAccess |> Option.isSome then
+                      1
+                  else
+                      0)
                  <<< 21)
 
 
         let current =
             current
-            ||| ((if op.SBus |> Option.isSome then 1 else 0) <<< 20)
+            ||| ((if op.SBus |> Option.isSome then
+                      1
+                  else
+                      0)
+                 <<< 20)
 
 
         let current =
@@ -431,10 +444,12 @@ type AssemblyLine =
 
 let asText assemblyLine =
     assemblyLine
-    |> Seq.fold (fun c x ->
-        match x with
-        | Label s -> c + sprintf ":%s\n" s
-        | Operation s -> c + sprintf "%s\n" (s.ToString())) ""
+    |> Seq.fold
+        (fun c x ->
+            match x with
+            | Label s -> c + $":%s{s}\n"
+            | Operation s -> c + $"%s{s.ToString()}\n")
+        ""
 
 let printAssembly assemblyLine =
     assemblyLine |> asText |> printfn "%s"

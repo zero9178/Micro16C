@@ -129,19 +129,20 @@ and Module =
     internal
         { BasicBlocks: Value ref list }
 
-        static member Default = { BasicBlocks = [] }
+    static member Default = { BasicBlocks = [] }
 
-        override this.ToString() =
-            let mutable counter = 0
+    override this.ToString() =
+        let mutable counter = 0
 
-            let mutable seenValues =
-                Dictionary<Value, string>(HashIdentity.Reference)
+        let mutable seenValues =
+            Dictionary<Value, string>(HashIdentity.Reference)
 
-            let seenNames = ref Set.empty
+        let seenNames = ref Set.empty
 
-            this.BasicBlocks
-            |> Seq.rev
-            |> Seq.fold (fun text blockValue ->
+        this.BasicBlocks
+        |> Seq.rev
+        |> Seq.fold
+            (fun text blockValue ->
 
                 let getName (value: Value ref) =
                     match !value with
@@ -150,8 +151,8 @@ and Module =
                     | { Content = Undef } -> "undef"
                     | { Name = name } ->
                         match seenValues.TryGetValue !value with
-                        | (true, name) -> name
-                        | (false, _) ->
+                        | true, name -> name
+                        | false, _ ->
                             match name with
                             | "" ->
                                 counter <- counter + 1
@@ -197,78 +198,78 @@ and Module =
                     | BasicBlockValue block -> block
                     | _ -> failwith "Internal Compiler Error"
 
-                let text =
-                    text + sprintf "%s:\n" (getName blockValue)
+                let text = text + $"%s{getName blockValue}:\n"
 
                 (block.Instructions
                  |> List.rev
-                 |> List.fold (fun text instruction ->
-                     match !instruction with
-                     | { Content = AllocationInstruction _ } ->
-                         text
-                         + sprintf "\t%s = alloca\n" (getName instruction)
-                     | { Content = GotoInstruction goto } ->
-                         text
-                         + sprintf "\tgoto %s\n" (getName goto.BasicBlock)
-                     | { Content = BinaryInstruction binary } ->
-                         let opName =
-                             match binary.Kind with
-                             | Add -> "add"
-                             | And -> "and"
-                             | Or -> "or"
-                             | Xor -> "xor"
-                             | Sub -> "sub"
-                             | Mul -> "mul"
-                             | SDiv -> "sdiv"
-                             | UDiv -> "udiv"
-                             | SRem -> "srem"
-                             | URem -> "urem"
-                             | Shl -> "shl"
-                             | AShr -> "ashr"
-                             | LShr -> "lshr"
+                 |> List.fold
+                     (fun text instruction ->
+                         match !instruction with
+                         | { Content = AllocationInstruction _ } -> text + $"\t%s{getName instruction} = alloca\n"
+                         | { Content = GotoInstruction goto } -> text + $"\tgoto %s{getName goto.BasicBlock}\n"
+                         | { Content = BinaryInstruction binary } ->
+                             let opName =
+                                 match binary.Kind with
+                                 | Add -> "add"
+                                 | And -> "and"
+                                 | Or -> "or"
+                                 | Xor -> "xor"
+                                 | Sub -> "sub"
+                                 | Mul -> "mul"
+                                 | SDiv -> "sdiv"
+                                 | UDiv -> "udiv"
+                                 | SRem -> "srem"
+                                 | URem -> "urem"
+                                 | Shl -> "shl"
+                                 | AShr -> "ashr"
+                                 | LShr -> "lshr"
 
-                         text
-                         + sprintf "\t%s = %s %s %s\n" (getName instruction) opName (getName binary.Left)
-                               (getName binary.Right)
-                     | { Content = UnaryInstruction unary } ->
-                         let opName =
-                             match unary.Kind with
-                             | Not -> "not"
-                             | Negate -> "neg"
+                             text
+                             + $"\t%s{getName instruction} = %s{opName} %s{getName binary.Left} %s{getName binary.Right}\n"
+                         | { Content = UnaryInstruction unary } ->
+                             let opName =
+                                 match unary.Kind with
+                                 | Not -> "not"
+                                 | Negate -> "neg"
 
-                         text
-                         + sprintf "\t%s = %s %s\n" (getName instruction) opName (getName unary.Value)
-                     | { Content = LoadInstruction load } ->
-                         text
-                         + sprintf "\t%s = load %s\n" (getName instruction) (getName load.Source)
-                     | { Content = CondBrInstruction cr } ->
+                             text
+                             + $"\t%s{getName instruction} = %s{opName} %s{getName unary.Value}\n"
+                         | { Content = LoadInstruction load } ->
+                             text
+                             + $"\t%s{getName instruction} = load %s{getName load.Source}\n"
+                         | { Content = CondBrInstruction cr } ->
 
-                         let opName =
-                             match cr.Kind with
-                             | Negative -> "< 0"
-                             | Zero -> "= 0"
+                             let opName =
+                                 match cr.Kind with
+                                 | Negative -> "< 0"
+                                 | Zero -> "= 0"
 
-                         text
-                         + sprintf "\tbr %s %s %s %s\n" (getName cr.Value) opName (getName cr.TrueBranch)
-                               (getName cr.FalseBranch)
-                     | { Content = StoreInstruction store } ->
-                         text
-                         + sprintf "\tstore %s -> %s\n" (getName store.Value) (getName store.Destination)
-                     | { Content = PhiInstruction phi } ->
-                         let list =
-                             phi.Incoming
-                             |> List.map (fun (x, y) -> sprintf "(%s,%s)" (getName x) (getName y))
-                             |> List.reduce (fun x y -> x + " " + y)
+                             text
+                             + $"\tbr %s{getName cr.Value} %s{opName} %s{getName cr.TrueBranch} %s{getName cr.FalseBranch}\n"
+                         | { Content = StoreInstruction store } ->
+                             text
+                             + $"\tstore %s{getName store.Value} -> %s{getName store.Destination}\n"
+                         | { Content = PhiInstruction phi } ->
+                             let list =
+                                 phi.Incoming
+                                 |> List.map (fun (x, y) -> $"(%s{getName x},%s{getName y})")
+                                 |> List.reduce (fun x y -> x + " " + y)
 
-                         text
-                         + sprintf "\t%s = phi %s\n" (getName instruction) list
-                     | _ -> failwith "Internal Compiler Error") text)
-                + "\n") ""
+                             text
+                             + $"\t%s{getName instruction} = phi %s{list}\n"
+                         | _ -> failwith "Internal Compiler Error")
+                     text)
+                + "\n")
+            ""
 
 let rec private filterOnce predicate list =
     match list with
     | [] -> []
-    | head :: list -> if not (predicate head) then list else head :: (filterOnce predicate list)
+    | head :: list ->
+        if not (predicate head) then
+            list
+        else
+            head :: (filterOnce predicate list)
 
 module internal BasicBlockInternal =
 
@@ -282,13 +283,15 @@ module internal BasicBlockInternal =
 
     let phis =
         instructions
-        >> List.takeWhile (function
+        >> List.takeWhile
+            (function
             | Ref { Content = PhiInstruction _ } -> true
             | _ -> false)
 
     let nonPhiInstructions =
         instructions
-        >> List.skipWhile (function
+        >> List.skipWhile
+            (function
             | Ref { Content = PhiInstruction _ } -> true
             | _ -> false)
 
@@ -359,25 +362,26 @@ module Value =
         !successor
         |> asBasicBlock
         |> BasicBlockInternal.phis
-        |> List.iter (fun phiValue ->
-            match phiValue with
-            | Ref { Content = PhiInstruction ({ Incoming = list } as phi) } ->
-                if list |> List.exists (snd >> (=) basicBlock) |> not then
-                    let value =
-                        phi.ValuesMemory
-                        |> ImmutableMap.tryFind basicBlock
-                        |> Option.defaultValue Value.UndefValue
+        |> List.iter
+            (fun phiValue ->
+                match phiValue with
+                | Ref { Content = PhiInstruction ({ Incoming = list } as phi) } ->
+                    if list |> List.exists (snd >> (=) basicBlock) |> not then
+                        let value =
+                            phi.ValuesMemory
+                            |> ImmutableMap.tryFind basicBlock
+                            |> Option.defaultValue Value.UndefValue
 
-                    value |> addUser phiValue
-                    basicBlock |> addUser phiValue
+                        value |> addUser phiValue
+                        basicBlock |> addUser phiValue
 
-                    phiValue
-                    := { !phiValue with
-                             Content =
-                                 PhiInstruction
-                                     { phi with
-                                           Incoming = (value, basicBlock) :: list } }
-            | _ -> failwith "Internal Compiler Error")
+                        phiValue
+                        := { !phiValue with
+                                 Content =
+                                     PhiInstruction
+                                         { phi with
+                                               Incoming = (value, basicBlock) :: list } }
+                | _ -> failwith "Internal Compiler Error")
 
     and internal addUser dependent operand =
         if !operand |> tracksUsers then
@@ -386,36 +390,42 @@ module Value =
                      Users = dependent :: (!operand).Users }
 
             match !dependent |> parentBlock with
-            | Some pred when !dependent |> isTerminating
-                             && !operand |> isBasicBlock -> addToPhis pred operand
+            | Some pred when
+                !dependent |> isTerminating
+                && !operand |> isBasicBlock
+                ->
+                addToPhis pred operand
             | _ -> ()
 
     let rec private removeFromPhis basicBlock successor =
         !successor
         |> asBasicBlock
         |> BasicBlockInternal.phis
-        |> List.iter (fun phiValue ->
-            match phiValue with
-            | Ref { Content = PhiInstruction ({ Incoming = list } as phi) } ->
-                let trueList, falseList =
-                    list |> List.partition (snd >> (<>) (basicBlock))
+        |> List.iter
+            (fun phiValue ->
+                match phiValue with
+                | Ref { Content = PhiInstruction ({ Incoming = list } as phi) } ->
+                    let trueList, falseList =
+                        list |> List.partition (snd >> (<>) basicBlock)
 
-                phiValue
-                := { !phiValue with
-                         Content =
-                             PhiInstruction
-                                 { phi with
-                                       Incoming = trueList
-                                       ValuesMemory =
-                                           falseList
-                                           |> List.fold (fun map (value, bb) -> map |> ImmutableMap.add bb value)
-                                                  phi.ValuesMemory } }
+                    phiValue
+                    := { !phiValue with
+                             Content =
+                                 PhiInstruction
+                                     { phi with
+                                           Incoming = trueList
+                                           ValuesMemory =
+                                               falseList
+                                               |> List.fold
+                                                   (fun map (value, bb) -> map |> ImmutableMap.add bb value)
+                                                   phi.ValuesMemory } }
 
-                falseList
-                |> List.iter (fun (x, y) ->
-                    x |> removeUser phiValue
-                    y |> removeUser phiValue)
-            | _ -> failwith "Internal Compiler Error")
+                    falseList
+                    |> List.iter
+                        (fun (x, y) ->
+                            x |> removeUser phiValue
+                            y |> removeUser phiValue)
+                | _ -> failwith "Internal Compiler Error")
 
     and private removeUser dependent operand =
         operand
@@ -423,8 +433,11 @@ module Value =
                  Users = (!operand).Users |> filterOnce ((<>) dependent) }
 
         match !dependent |> parentBlock with
-        | Some pred when !dependent |> isTerminating
-                         && !operand |> isBasicBlock -> removeFromPhis pred operand
+        | Some pred when
+            !dependent |> isTerminating
+            && !operand |> isBasicBlock
+            ->
+            removeFromPhis pred operand
         | _ -> ()
 
     let private changeUser oldDependant operand dependent =
@@ -462,78 +475,78 @@ module Value =
 
     let setOperand index operand value =
         match (index, (!value).Content) with
-        | (_, Constant _)
-        | (_, Register _)
-        | (_, AllocationInstruction _) -> failwith "Internal Compiler Error: Invalid Operand Index"
-        | (i, UnaryInstruction _)
-        | (i, GotoInstruction _)
-        | (i, LoadInstruction _) when i >= 1 -> failwith "Internal Compiler Error: Invalid Operand Index"
-        | (i, BinaryInstruction _)
-        | (i, StoreInstruction _) when i >= 2 -> failwith "Internal Compiler Error: Invalid Operand Index"
-        | (i, CondBrInstruction _) when i >= 3 -> failwith "Internal Compiler Error: Invalid Operand Index"
-        | (i, PhiInstruction instr) when i >= 2 * List.length instr.Incoming ->
+        | _, Constant _
+        | _, Register _
+        | _, AllocationInstruction _ -> failwith "Internal Compiler Error: Invalid Operand Index"
+        | i, UnaryInstruction _
+        | i, GotoInstruction _
+        | i, LoadInstruction _ when i >= 1 -> failwith "Internal Compiler Error: Invalid Operand Index"
+        | i, BinaryInstruction _
+        | i, StoreInstruction _ when i >= 2 -> failwith "Internal Compiler Error: Invalid Operand Index"
+        | i, CondBrInstruction _ when i >= 3 -> failwith "Internal Compiler Error: Invalid Operand Index"
+        | i, PhiInstruction instr when i >= 2 * List.length instr.Incoming ->
             failwith "Internal Compiler Error: Invalid Operand Index"
-        | (0, CondBrInstruction instr) ->
+        | 0, CondBrInstruction instr ->
             changeUser instr.Value operand value
 
             value
             := { !value with
                      Content = CondBrInstruction { instr with Value = operand } }
-        | (1, CondBrInstruction instr) ->
+        | 1, CondBrInstruction instr ->
             changeUser instr.TrueBranch operand value
 
             value
             := { !value with
                      Content = CondBrInstruction { instr with TrueBranch = operand } }
-        | (2, CondBrInstruction instr) ->
+        | 2, CondBrInstruction instr ->
             changeUser instr.FalseBranch operand value
 
             value
             := { !value with
                      Content = CondBrInstruction { instr with FalseBranch = operand } }
-        | (0, UnaryInstruction instr) ->
+        | 0, UnaryInstruction instr ->
             changeUser instr.Value operand value
 
             value
             := { !value with
                      Content = UnaryInstruction { instr with Value = operand } }
-        | (0, GotoInstruction instr) ->
+        | 0, GotoInstruction instr ->
             changeUser instr.BasicBlock operand value
 
             value
             := { !value with
                      Content = GotoInstruction { instr with BasicBlock = operand } }
-        | (0, LoadInstruction instr) ->
+        | 0, LoadInstruction instr ->
             changeUser instr.Source operand value
 
             value
             := { !value with
                      Content = LoadInstruction { instr with Source = operand } }
-        | (0, BinaryInstruction instr) ->
+        | 0, BinaryInstruction instr ->
             changeUser instr.Left operand value
 
             value
             := { !value with
                      Content = BinaryInstruction { instr with Left = operand } }
-        | (1, BinaryInstruction instr) ->
+        | 1, BinaryInstruction instr ->
             changeUser instr.Right operand value
 
             value
             := { !value with
                      Content = BinaryInstruction { instr with Right = operand } }
-        | (0, StoreInstruction instr) ->
+        | 0, StoreInstruction instr ->
             changeUser instr.Destination operand value
 
             value
             := { !value with
                      Content = StoreInstruction { instr with Destination = operand } }
-        | (1, StoreInstruction instr) ->
+        | 1, StoreInstruction instr ->
             changeUser instr.Value operand value
 
             value
             := { !value with
                      Content = StoreInstruction { instr with Value = operand } }
-        | (i, PhiInstruction instr) ->
+        | i, PhiInstruction instr ->
 
             value
             := { !value with
@@ -543,15 +556,16 @@ module Value =
                                    Incoming =
                                        instr.Incoming
                                        |> List.indexed
-                                       |> List.map (fun pair ->
-                                           match pair with
-                                           | (j, (old, block)) when i / 2 = j && i % 2 = 0 ->
-                                               changeUser old operand value
-                                               (operand, block)
-                                           | (j, (incoming, old)) when i / 2 = j && i % 2 = 1 ->
-                                               changeUser old operand value
-                                               (incoming, operand)
-                                           | (_, x) -> x) } }
+                                       |> List.map
+                                           (fun pair ->
+                                               match pair with
+                                               | j, (old, block) when i / 2 = j && i % 2 = 0 ->
+                                                   changeUser old operand value
+                                                   (operand, block)
+                                               | j, (incoming, old) when i / 2 = j && i % 2 = 1 ->
+                                                   changeUser old operand value
+                                                   (incoming, operand)
+                                               | _, x -> x) } }
 
         | _ -> failwith "Internal Compiler Error"
 
@@ -669,10 +683,11 @@ module BasicBlock =
     let successors =
         Value.asBasicBlock
         >> tryTerminator
-        >> Option.map
-            ((!)
-             >> Value.operands
-             >> List.filter ((!) >> Value.isBasicBlock))
+        >> Option.map (
+            (!)
+            >> Value.operands
+            >> List.filter ((!) >> Value.isBasicBlock)
+        )
         >> Option.defaultValue []
 
     let predecessors =
@@ -711,17 +726,19 @@ module Module =
         := { !irModule with
                  BasicBlocks =
                      (!irModule).BasicBlocks
-                     |> List.map (fun bb ->
-                         if bb = block1 then block2
-                         else if bb = block2 then block1
-                         else bb) }
+                     |> List.map
+                         (fun bb ->
+                             if bb = block1 then block2
+                             else if bb = block2 then block1
+                             else bb) }
 
     let revInstructions =
         revBasicBlocks
-        >> List.map
-            ((!)
-             >> Value.asBasicBlock
-             >> BasicBlock.revInstructions)
+        >> List.map (
+            (!)
+            >> Value.asBasicBlock
+            >> BasicBlock.revInstructions
+        )
         >> List.concat
 
     let instructions = revInstructions >> List.rev
@@ -745,22 +762,24 @@ module Module =
 
     let forwardAnalysis transform join =
         entryBlock
-        >> Option.map
-            (Graphs.dataFlowAnalysis
+        >> Option.map (
+            Graphs.dataFlowAnalysis
                 transform
-                 join
-                 ((!) >> BasicBlock.predecessors >> Seq.ofList)
-                 ((!) >> BasicBlock.successors >> Seq.ofList))
+                join
+                ((!) >> BasicBlock.predecessors >> Seq.ofList)
+                ((!) >> BasicBlock.successors >> Seq.ofList)
+        )
         >> Option.defaultValue ImmutableMap.empty
 
     let backwardAnalysis transform join =
         exitBlock
-        >> Option.map
-            (Graphs.dataFlowAnalysis
+        >> Option.map (
+            Graphs.dataFlowAnalysis
                 transform
-                 join
-                 ((!) >> BasicBlock.successors >> Seq.ofList)
-                 ((!) >> BasicBlock.predecessors >> Seq.ofList))
+                join
+                ((!) >> BasicBlock.successors >> Seq.ofList)
+                ((!) >> BasicBlock.predecessors >> Seq.ofList)
+        )
         >> Option.defaultValue ImmutableMap.empty
 
 type InsertPoint =
@@ -874,9 +893,10 @@ module Builder =
 
         let builder =
             match basicBlock
-                  |> Option.map (fun block ->
-                      builder.NotYetInserted
-                      |> ImmutableMap.tryFind block) with
+                  |> Option.map
+                      (fun block ->
+                          builder.NotYetInserted
+                          |> ImmutableMap.tryFind block) with
             | None
             | Some None -> builder
             | Some (Some insertPoint) ->
@@ -892,22 +912,26 @@ module Builder =
                     := { !builder.Module with
                              BasicBlocks = (!builder.Module).BasicBlocks @ [ basicBlock ] }
                 | After ref ->
-                    match (!builder.Module).BasicBlocks
-                          |> List.tryFindIndex ((=) ref) with
+                    match
+                        (!builder.Module).BasicBlocks
+                        |> List.tryFindIndex ((=) ref)
+                        with
                     | None -> failwith "Internal Compiler Error: Failed to find Basic Block in block list"
                     | Some i ->
-                        let (first, second) =
+                        let first, second =
                             (!builder.Module).BasicBlocks |> List.splitAt i
 
                         builder.Module
                         := { !builder.Module with
                                  BasicBlocks = first @ [ basicBlock ] @ second }
                 | Before ref ->
-                    match (!builder.Module).BasicBlocks
-                          |> List.tryFindIndex ((=) ref) with
+                    match
+                        (!builder.Module).BasicBlocks
+                        |> List.tryFindIndex ((=) ref)
+                        with
                     | None -> failwith "Internal Compiler Error: Failed to find Basic Block in block list"
                     | Some i ->
-                        let (first, second) =
+                        let first, second =
                             (!builder.Module).BasicBlocks
                             |> List.splitAt (i + 1)
 
@@ -1089,9 +1113,10 @@ module Builder =
         |> List.iter (fun x -> assert x)
 
         incoming
-        |> List.iter (fun (x, y) ->
-            x |> Value.addUser value
-            y |> Value.addUser value)
+        |> List.iter
+            (fun (x, y) ->
+                x |> Value.addUser value
+                y |> Value.addUser value)
 
         builder |> addValue value
 
@@ -1134,53 +1159,59 @@ module Builder =
     let copyInstructionsStructure replacements instructions builder =
         let structure =
             instructions
-            |> List.fold (fun structure instr ->
-                match replacements |> ImmutableMap.tryFind instr with
-                | Some repl -> structure |> ImmutableMap.add instr repl
-                | None ->
-                    let result =
-                        builder
-                        |> copy
-                            instr
-                               (!instr
-                                |> Value.operands
-                                |> List.map (fun op ->
-                                    match structure |> ImmutableMap.tryFind op with
-                                    | Some op -> op
-                                    | None -> op))
-                        |> fst
+            |> List.fold
+                (fun structure instr ->
+                    match replacements |> ImmutableMap.tryFind instr with
+                    | Some repl -> structure |> ImmutableMap.add instr repl
+                    | None ->
+                        let result =
+                            builder
+                            |> copy
+                                instr
+                                (!instr
+                                 |> Value.operands
+                                 |> List.map
+                                     (fun op ->
+                                         match structure |> ImmutableMap.tryFind op with
+                                         | Some op -> op
+                                         | None -> op))
+                            |> fst
 
-                    match (!result, !instr) with
-                    | { ParentBlock = Some parentBlock }, { ParentBlock = Some oldParent } when !result
-                                                                                                |> Value.isTerminating ->
-                        !result
-                        |> Value.operands
-                        |> List.filter ((!) >> Value.isBasicBlock)
-                        |> List.iter (fun succ ->
-                            !succ
-                            |> Value.asBasicBlock
-                            |> BasicBlock.phis
-                            |> List.iter (fun phi ->
-                                let oldValue =
-                                    !phi
-                                    |> Value.operands
-                                    |> List.pairwise
-                                    |> List.find (snd >> (=) oldParent)
-                                    |> fst
+                        match (!result, !instr) with
+                        | { ParentBlock = Some parentBlock }, { ParentBlock = Some oldParent } when
+                            !result |> Value.isTerminating
+                            ->
+                            !result
+                            |> Value.operands
+                            |> List.filter ((!) >> Value.isBasicBlock)
+                            |> List.iter
+                                (fun succ ->
+                                    !succ
+                                    |> Value.asBasicBlock
+                                    |> BasicBlock.phis
+                                    |> List.iter
+                                        (fun phi ->
+                                            let oldValue =
+                                                !phi
+                                                |> Value.operands
+                                                |> List.pairwise
+                                                |> List.find (snd >> (=) oldParent)
+                                                |> fst
 
-                                let index =
-                                    (!phi
-                                     |> Value.operands
-                                     |> List.findIndex ((=) parentBlock))
-                                    - 1
+                                            let index =
+                                                (!phi
+                                                 |> Value.operands
+                                                 |> List.findIndex ((=) parentBlock))
+                                                - 1
 
-                                match structure |> ImmutableMap.tryFind oldValue with
-                                | None -> phi |> Value.setOperand index oldValue
-                                | Some repl -> phi |> Value.setOperand index repl))
-                    | _ -> ()
+                                            match structure |> ImmutableMap.tryFind oldValue with
+                                            | None -> phi |> Value.setOperand index oldValue
+                                            | Some repl -> phi |> Value.setOperand index repl))
+                        | _ -> ()
 
 
-                    structure |> ImmutableMap.add instr result) ImmutableMap.empty
+                        structure |> ImmutableMap.add instr result)
+                ImmutableMap.empty
 
         structure
 

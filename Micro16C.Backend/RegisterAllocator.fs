@@ -53,60 +53,68 @@ let private allocateRegisters passManager irModule =
     |> Module.entryBlock
     |> Option.map (Graphs.preOrder (fun x -> domInfo.[x].ImmediatelyDominates |> Seq.ofList))
     |> Option.defaultValue Seq.empty
-    |> Seq.fold (fun result bb ->
-        let block = !bb |> Value.asBasicBlock
-        let assigned = Array.create 13 false
+    |> Seq.fold
+        (fun result bb ->
+            let block = !bb |> Value.asBasicBlock
+            let assigned = Array.create 13 false
 
-        lifeInfo.[bb].LiveIn
-        |> Seq.iter
-            (fun x -> result |> ImmutableMap.tryFind x
-             >> Option.map registerToIndex
-             >> Option.iter (fun i -> Array.set assigned i true))
+            lifeInfo.[bb].LiveIn
+            |> Seq.iter (
+                fun x -> result |> ImmutableMap.tryFind x
+                >> Option.map registerToIndex
+                >> Option.iter (fun i -> Array.set assigned i true)
+            )
 
-        block
-        |> BasicBlock.instructions
-        |> Seq.fold (fun result value ->
+            block
+            |> BasicBlock.instructions
+            |> Seq.fold
+                (fun result value ->
 
-            let isLastUse operand =
-                if lifeInfo.[bb].LiveOut
-                   |> ImmutableSet.contains operand then
-                    false
-                else
-                    block
-                    |> BasicBlock.revInstructions
-                    |> Seq.map
-                        (associateWith
-                            ((!)
-                             >> Value.operands
-                             >> Seq.filter ((!) >> Value.isInstruction)))
-                    |> Seq.find (snd >> Seq.contains operand)
-                    |> fst = value
+                    let isLastUse operand =
+                        if lifeInfo.[bb].LiveOut
+                           |> ImmutableSet.contains operand then
+                            false
+                        else
+                            block
+                            |> BasicBlock.revInstructions
+                            |> Seq.map (
+                                associateWith (
+                                    (!)
+                                    >> Value.operands
+                                    >> Seq.filter ((!) >> Value.isInstruction)
+                                )
+                            )
+                            |> Seq.find (snd >> Seq.contains operand)
+                            |> fst = value
 
-            match value with
-            | PhiOp _ -> ()
-            | _ ->
-                !value
-                |> Value.operands
-                |> Seq.filter ((!) >> Value.isInstruction)
-                |> Seq.filter isLastUse
-                |> Seq.iter (fun value ->
-                    Array.set
-                        assigned
-                        (result
-                         |> ImmutableMap.find value
-                         |> registerToIndex)
-                        false)
+                    match value with
+                    | PhiOp _ -> ()
+                    | _ ->
+                        !value
+                        |> Value.operands
+                        |> Seq.filter ((!) >> Value.isInstruction)
+                        |> Seq.filter isLastUse
+                        |> Seq.iter
+                            (fun value ->
+                                Array.set
+                                    assigned
+                                    (result
+                                     |> ImmutableMap.find value
+                                     |> registerToIndex)
+                                    false)
 
-            if !value |> Value.producesValue then
-                match Array.tryFindIndex (id >> not) assigned with
-                | None -> failwith "Register Pressure too high, spilling is not yet implemented"
-                | Some i ->
-                    Array.set assigned i true
+                    if !value |> Value.producesValue then
+                        match Array.tryFindIndex (id >> not) assigned with
+                        | None -> failwith "Register Pressure too high, spilling is not yet implemented"
+                        | Some i ->
+                            Array.set assigned i true
 
-                    result
-                    |> ImmutableMap.add value (indexToRegister i)
-            else
-                result) result) ImmutableMap.empty
+                            result
+                            |> ImmutableMap.add value (indexToRegister i)
+                    else
+                        result)
+                result)
+        ImmutableMap.empty
 
 let allocateRegistersPass =
     { Pass = allocateRegisters

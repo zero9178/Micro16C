@@ -288,7 +288,7 @@ let inline private parseBinaryOperator subExprParse allowedType error tokens =
 
     (lhs, optionalRhs, tokens)
 
-let private expect tokenType error (tokens: Token list) message: Result<Token, string> * Token list =
+let private expect tokenType error (tokens: Token list) message : Result<Token, string> * Token list =
     match List.tryHead tokens with
     | Some { Type = t } when t = tokenType -> (List.head tokens |> Ok, List.tail tokens)
     | Some t -> (message |> error (ErrorTypeToken t) |> Error, tokens)
@@ -346,7 +346,7 @@ and parseConditionalExpression error (tokens: Token list) =
         let expression, tokens = parseExpression error tokens
 
         match expect Colon error tokens "Expected ':' to match '?'" with
-        | (Ok _, tokens) ->
+        | Ok _, tokens ->
             let conditionalExpression, tokens = parseConditionalExpression error tokens
 
             let optionalTernary =
@@ -354,8 +354,7 @@ and parseConditionalExpression error (tokens: Token list) =
                 |> Result.map Some
 
             (comb2 createConditionalExpression logicalOrExpression optionalTernary, tokens)
-        | (error1, tokens) ->
-            (comb3 (fun _ -> createConditionalExpression) error1 logicalOrExpression (Ok None), tokens)
+        | error1, tokens -> (comb3 (fun _ -> createConditionalExpression) error1 logicalOrExpression (Ok None), tokens)
     | _ -> (comb2 createConditionalExpression logicalOrExpression (Ok None), tokens)
 
 and parseLogicalOrExpression error (tokens: Token list) =
@@ -478,7 +477,8 @@ and parseUnaryExpression error (tokens: Token list) =
     | { Type = SizeOfKeyword } :: { Type = OpenParentheses } :: { Type = IntKeyword } :: tokens ->
         let pointerCount =
             tokens
-            |> List.takeWhile (function
+            |> List.takeWhile
+                (function
                 | { Type = Asterisk } -> true
                 | _ -> false)
             |> List.length
@@ -573,7 +573,8 @@ let parseDeclaration error (tokens: Token list) =
 
         let pointerCount =
             tokens
-            |> List.takeWhile (function
+            |> List.takeWhile
+                (function
                 | { Type = Asterisk } -> true
                 | _ -> false)
             |> List.length
@@ -735,25 +736,30 @@ let rec parseStatement error (tokens: Token list) =
         let statement, tokens = parseStatement error tokens
 
         match (error1, error2) with
-        | (Error s1, Error s2) -> (s1 + s2 |> Error, tokens)
-        | (Error s, Ok _) -> (Error s, tokens)
-        | (Ok _, Error s) -> (Error s, tokens)
+        | Error s1, Error s2 -> (s1 + s2 |> Error, tokens)
+        | Error s, Ok _ -> (Error s, tokens)
+        | Ok _, Error s -> (Error s, tokens)
         | _ ->
-            (comb4 (fun first second third statement ->
-                match first with
-                | MaybeExpression maybeExpr -> ForStatement(maybeExpr, second, third, statement)
-                | Declaration decl -> ForStatementDecl(decl, second, third, statement)) first second third statement,
+            (comb4
+                (fun first second third statement ->
+                    match first with
+                    | MaybeExpression maybeExpr -> ForStatement(maybeExpr, second, third, statement)
+                    | Declaration decl -> ForStatementDecl(decl, second, third, statement))
+                first
+                second
+                third
+                statement,
              tokens)
 
     | { Type = BreakKeyword } as token :: tokens ->
         match expect SemiColon error tokens "Expected ';' after 'break'" with
-        | (Error s, tokens) -> (Error s, tokens)
-        | (Ok _, tokens) -> (BreakStatement token |> Ok, tokens)
+        | Error s, tokens -> (Error s, tokens)
+        | Ok _, tokens -> (BreakStatement token |> Ok, tokens)
 
     | { Type = ContinueKeyword } as token :: tokens ->
         match expect SemiColon error tokens "Expected ';' after 'continue'" with
-        | (Error s, tokens) -> (Error s, tokens)
-        | (Ok _, tokens) -> (ContinueStatement token |> Ok, tokens)
+        | Error s, tokens -> (Error s, tokens)
+        | Ok _, tokens -> (ContinueStatement token |> Ok, tokens)
 
     | { Type = GotoKeyword } :: tokens ->
         let s, tokens =

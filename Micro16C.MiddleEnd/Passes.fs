@@ -136,10 +136,11 @@ let private singleInstructionSimplify builder value =
     // X + X -> lsh(X)
     | BinOp Add (lhs, rhs) when lhs = rhs ->
         value
-        |> Value.replaceWith
-            (builder
-             |> Builder.createBinary lhs Shl (Builder.createConstant 1s)
-             |> fst)
+        |> Value.replaceWith (
+            builder
+            |> Builder.createBinary lhs Shl (Builder.createConstant 1s)
+            |> fst
+        )
 
         true
     // X + (Y - X) -> Y
@@ -311,10 +312,12 @@ let private singleInstructionSimplify builder value =
         |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
 
         true
-    | PhiOp list when list
-                      |> List.map fst
-                      |> List.distinct
-                      |> List.length = 1 ->
+    | PhiOp list when
+        list
+        |> List.map fst
+        |> List.distinct
+        |> List.length = 1
+        ->
         value
         |> Value.replaceWith (list |> List.head |> fst)
 
@@ -336,8 +339,10 @@ let private instructionSimplify _ (irModule: Module ref) =
 let private deadCodeElimination _ (irModule: Module ref) =
 
     let eliminate value =
-        if not (Value.hasSideEffects !value)
-           && 0 = Value.useCount !value then
+        if
+            not (Value.hasSideEffects !value)
+            && 0 = Value.useCount !value
+        then
             value |> Value.destroy
             true
         else
@@ -362,19 +367,24 @@ let private simplifyCFG _ (irModule: Module ref) =
             // this optimization may be invalid if the basic block is used in a Phi. For now I'll be conservative and
             // not remove such basic blocks. As a future TODO I could check for semantic changes
             match block |> BasicBlock.revInstructions with
-            | [ GotoOp destination ] when !blockValue
-                                          |> Value.users
-                                          |> List.exists (function
-                                              | PhiOp _ -> true
-                                              | _ -> false)
-                                          |> not ->
+            | [ GotoOp destination ] when
+                !blockValue
+                |> Value.users
+                |> List.exists
+                    (function
+                    | PhiOp _ -> true
+                    | _ -> false)
+                |> not
+                ->
                 blockValue |> Value.replaceWith destination
                 true
-            | GotoOp destination as terminator :: _ when (!destination |> BasicBlock.hasSinglePredecessor)
-                                                         && (!destination
-                                                             |> Value.asBasicBlock
-                                                             |> BasicBlock.phis
-                                                             |> List.isEmpty) ->
+            | GotoOp destination as terminator :: _ when
+                (!destination |> BasicBlock.hasSinglePredecessor)
+                && (!destination
+                    |> Value.asBasicBlock
+                    |> BasicBlock.phis
+                    |> List.isEmpty)
+                ->
                 terminator |> Value.destroy
 
                 let builder =
@@ -415,66 +425,67 @@ let private removeUnreachableBlocks _ (irModule: Module ref) =
 
 let private localConstantFolding builder instructions =
     instructions
-    |> List.iter (fun value ->
-        match value with
-        | BinOp And (ConstOp lhs, ConstOp rhs) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (lhs &&& rhs))
-        | BinOp Or (ConstOp lhs, ConstOp rhs) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (lhs ||| rhs))
-        | BinOp Xor (ConstOp c1, ConstOp c2) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (c1 ^^^ c2))
-        | BinOp Add (ConstOp lhs, ConstOp rhs) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (lhs + rhs))
-        | BinOp Mul (ConstOp c1, ConstOp c2) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (c1 * c2))
-        | BinOp SDiv (ConstOp c1, ConstOp c2) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (c1 / c2))
-        | BinOp UDiv (ConstOp c1, ConstOp c2) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (int16 ((c1 |> uint16) / (c2 |> uint16))))
-        | BinOp URem (ConstOp c1, ConstOp c2) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (((c1 |> uint16) % (c2 |> uint16)) |> int16))
+    |> List.iter
+        (fun value ->
+            match value with
+            | BinOp And (ConstOp lhs, ConstOp rhs) ->
+                value
+                |> Value.replaceWith (Builder.createConstant (lhs &&& rhs))
+            | BinOp Or (ConstOp lhs, ConstOp rhs) ->
+                value
+                |> Value.replaceWith (Builder.createConstant (lhs ||| rhs))
+            | BinOp Xor (ConstOp c1, ConstOp c2) ->
+                value
+                |> Value.replaceWith (Builder.createConstant (c1 ^^^ c2))
+            | BinOp Add (ConstOp lhs, ConstOp rhs) ->
+                value
+                |> Value.replaceWith (Builder.createConstant (lhs + rhs))
+            | BinOp Mul (ConstOp c1, ConstOp c2) ->
+                value
+                |> Value.replaceWith (Builder.createConstant (c1 * c2))
+            | BinOp SDiv (ConstOp c1, ConstOp c2) ->
+                value
+                |> Value.replaceWith (Builder.createConstant (c1 / c2))
+            | BinOp UDiv (ConstOp c1, ConstOp c2) ->
+                value
+                |> Value.replaceWith (Builder.createConstant (int16 ((c1 |> uint16) / (c2 |> uint16))))
+            | BinOp URem (ConstOp c1, ConstOp c2) ->
+                value
+                |> Value.replaceWith (Builder.createConstant (((c1 |> uint16) % (c2 |> uint16)) |> int16))
 
-        | BinOp SRem (ConstOp c1, ConstOp c2) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (c1 % c2))
-        | UnaryOp Not (ConstOp c) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (~~~c))
-        | UnaryOp Negate (ConstOp c) ->
-            value
-            |> Value.replaceWith (Builder.createConstant -c)
-        | BinOp Shl (ConstOp lhs, ConstOp rhs) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (lhs <<< (rhs |> int32)))
-        | BinOp LShr (ConstOp lhs, ConstOp rhs) ->
-            value
-            |> Value.replaceWith (Builder.createConstant ((lhs |> uint16) >>> (rhs |> int32) |> int16))
-        | BinOp AShr (ConstOp lhs, ConstOp rhs) ->
-            value
-            |> Value.replaceWith (Builder.createConstant (lhs >>> (rhs |> int)))
-        | CondBrOp (Zero, ConstOp c, trueBranch, falseBranch) ->
-            if c = 0s then
+            | BinOp SRem (ConstOp c1, ConstOp c2) ->
                 value
-                |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
-            else
+                |> Value.replaceWith (Builder.createConstant (c1 % c2))
+            | UnaryOp Not (ConstOp c) ->
                 value
-                |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
-        | CondBrOp (Negative, ConstOp c, trueBranch, falseBranch) ->
-            if c < 0s then
+                |> Value.replaceWith (Builder.createConstant (~~~c))
+            | UnaryOp Negate (ConstOp c) ->
                 value
-                |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
-            else
+                |> Value.replaceWith (Builder.createConstant -c)
+            | BinOp Shl (ConstOp lhs, ConstOp rhs) ->
                 value
-                |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
-        | _ -> ())
+                |> Value.replaceWith (Builder.createConstant (lhs <<< (rhs |> int32)))
+            | BinOp LShr (ConstOp lhs, ConstOp rhs) ->
+                value
+                |> Value.replaceWith (Builder.createConstant ((lhs |> uint16) >>> (rhs |> int32) |> int16))
+            | BinOp AShr (ConstOp lhs, ConstOp rhs) ->
+                value
+                |> Value.replaceWith (Builder.createConstant (lhs >>> (rhs |> int)))
+            | CondBrOp (Zero, ConstOp c, trueBranch, falseBranch) ->
+                if c = 0s then
+                    value
+                    |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
+                else
+                    value
+                    |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
+            | CondBrOp (Negative, ConstOp c, trueBranch, falseBranch) ->
+                if c < 0s then
+                    value
+                    |> Value.replaceWith (builder |> Builder.createGoto trueBranch |> fst)
+                else
+                    value
+                    |> Value.replaceWith (builder |> Builder.createGoto falseBranch |> fst)
+            | _ -> ())
 
 let private jumpThreading _ irModule =
 
@@ -489,10 +500,11 @@ let private jumpThreading _ irModule =
             block
             |> BasicBlock.revInstructions
             |> List.filter ((!) >> Value.producesValue)
-            |> List.filter
-                ((!)
-                 >> Value.users
-                 >> List.exists ((!) >> Value.parentBlock >> (<>) (Some blockValue)))
+            |> List.filter (
+                (!)
+                >> Value.users
+                >> List.exists ((!) >> Value.parentBlock >> (<>) (Some blockValue))
+            )
 
         let createCopies pred =
             let newBlock, builder =
@@ -500,56 +512,64 @@ let private jumpThreading _ irModule =
                 |> Builder.createBasicBlockAt (After pred) ((!blockValue |> Value.name) + ".copy")
 
             phis
-            |> List.fold (fun result phi ->
-                Seq.unfold (function
-                    | PhiOp _ as phi ->
-                        let replacement =
-                            !phi
-                            |> Value.operands
-                            |> List.pairwise
-                            |> List.find (snd >> (=) pred)
-                            |> fst
+            |> List.fold
+                (fun result phi ->
+                    Seq.unfold
+                        (function
+                        | PhiOp _ as phi ->
+                            let replacement =
+                                !phi
+                                |> Value.operands
+                                |> List.pairwise
+                                |> List.find (snd >> (=) pred)
+                                |> fst
 
-                        if replacement = phi then
-                            Some(Value.UndefValue, Value.UndefValue)
-                        else
-                            Some(replacement, replacement)
-                    | _ -> None) phi
-                |> Seq.skipWhile ((!) >> Value.parentBlock >> (=) (Some blockValue))
-                |> Seq.tryHead
-                |> Option.map (fun x -> (phi, x))
-                |> Option.map2 (fun x y -> y :: x) result) (Some [])
+                            if replacement = phi then
+                                Some(Value.UndefValue, Value.UndefValue)
+                            else
+                                Some(replacement, replacement)
+                        | _ -> None)
+                        phi
+                    |> Seq.skipWhile ((!) >> Value.parentBlock >> (=) (Some blockValue))
+                    |> Seq.tryHead
+                    |> Option.map (fun x -> (phi, x))
+                    |> Option.map2 (fun x y -> y :: x) result)
+                (Some [])
             |> Option.map ImmutableMap.ofList
-            |> Option.map (fun replacements ->
-                builder
-                |> Builder.setInsertBlock (Some newBlock)
-                |> Builder.copyInstructionsStructure replacements (block |> BasicBlock.instructions))
+            |> Option.map
+                (fun replacements ->
+                    builder
+                    |> Builder.setInsertBlock (Some newBlock)
+                    |> Builder.copyInstructionsStructure replacements (block |> BasicBlock.instructions))
             |> Option.map (fun replacement -> (newBlock, replacement))
 
         let copies =
             !blockValue
             |> BasicBlock.predecessors
-            |> List.choose (fun pred ->
-                let newBlock = createCopies pred |> Option.map fst
+            |> List.choose
+                (fun pred ->
+                    let newBlock = createCopies pred |> Option.map fst
 
-                newBlock
-                |> Option.iter
-                    ((!)
-                     >> Value.asBasicBlock
-                     >> BasicBlock.instructions
-                     >> localConstantFolding builder)
+                    newBlock
+                    |> Option.iter (
+                        (!)
+                        >> Value.asBasicBlock
+                        >> BasicBlock.instructions
+                        >> localConstantFolding builder
+                    )
 
-                newBlock |> Option.map (fun x -> (x, pred)))
+                    newBlock |> Option.map (fun x -> (x, pred)))
 
         let instructionCount =
             lazy
                 ((copies
-                  |> List.sumBy
-                      (fst
-                       >> (!)
-                       >> Value.asBasicBlock
-                       >> BasicBlock.revInstructions
-                       >> List.length))
+                  |> List.sumBy (
+                      fst
+                      >> (!)
+                      >> Value.asBasicBlock
+                      >> BasicBlock.revInstructions
+                      >> List.length
+                  ))
                  - List.length copies
                  + ((1
                      + (!blockValue
@@ -567,15 +587,17 @@ let private jumpThreading _ irModule =
                  |> Option.map ((!) >> Value.isUnconditional >> not)
                  |> Option.defaultValue false
                  && copies
-                    |> List.exists
-                        (fst
-                         >> (!)
-                         >> Value.asBasicBlock
-                         >> BasicBlock.tryTerminator
-                         >> Option.filter (function
-                             | GotoOp _ -> false
-                             | _ -> true)
-                         >> Option.isNone))
+                    |> List.exists (
+                        fst
+                        >> (!)
+                        >> Value.asBasicBlock
+                        >> BasicBlock.tryTerminator
+                        >> Option.filter
+                            (function
+                            | GotoOp _ -> false
+                            | _ -> true)
+                        >> Option.isNone
+                    ))
 
         if copies |> List.length = (!blockValue
                                     |> BasicBlock.predecessors
@@ -597,11 +619,12 @@ let private jumpThreading _ irModule =
                 // If we have no escaping values then no phis need to be created in the successor and we can actually
                 // use the already optimized blocks we previously calculated instruction count with
                 copies
-                |> List.iter (fun (newBlock, pred) ->
-                    !pred
-                    |> Value.asBasicBlock
-                    |> BasicBlock.terminator
-                    |> Value.replaceOperand blockValue newBlock)
+                |> List.iter
+                    (fun (newBlock, pred) ->
+                        !pred
+                        |> Value.asBasicBlock
+                        |> BasicBlock.terminator
+                        |> Value.replaceOperand blockValue newBlock)
 
                 blockValue |> Value.destroy
                 true
@@ -618,34 +641,37 @@ let private jumpThreading _ irModule =
                 let copies =
                     !blockValue
                     |> BasicBlock.predecessors
-                    |> List.map (fun pred ->
-                        let newBlock, replacements = createCopies pred |> Option.get
+                    |> List.map
+                        (fun pred ->
+                            let newBlock, replacements = createCopies pred |> Option.get
 
-                        !pred
-                        |> Value.asBasicBlock
-                        |> BasicBlock.terminator
-                        |> Value.replaceOperand blockValue newBlock
+                            !pred
+                            |> Value.asBasicBlock
+                            |> BasicBlock.terminator
+                            |> Value.replaceOperand blockValue newBlock
 
-                        (newBlock, replacements))
+                            (newBlock, replacements))
 
                 escapingValues
-                |> List.iter (fun oldValue ->
-                    let incomingList =
-                        !mergeBlock
-                        |> BasicBlock.predecessors
-                        |> List.map (fun block ->
-                            match copies |> List.tryFind (fst >> (=) block) with
-                            | None -> (Value.UndefValue, block)
-                            | Some (_, replacements) -> (replacements |> ImmutableMap.find oldValue, block))
+                |> List.iter
+                    (fun oldValue ->
+                        let incomingList =
+                            !mergeBlock
+                            |> BasicBlock.predecessors
+                            |> List.map
+                                (fun block ->
+                                    match copies |> List.tryFind (fst >> (=) block) with
+                                    | None -> (Value.UndefValue, block)
+                                    | Some (_, replacements) -> (replacements |> ImmutableMap.find oldValue, block))
 
-                    let phi =
-                        builder
-                        |> Builder.setInsertBlock (Some mergeBlock)
-                        |> Builder.setInsertPoint Start
-                        |> Builder.createPhi incomingList
-                        |> fst
+                        let phi =
+                            builder
+                            |> Builder.setInsertBlock (Some mergeBlock)
+                            |> Builder.setInsertPoint Start
+                            |> Builder.createPhi incomingList
+                            |> fst
 
-                    oldValue |> Value.replaceWith phi)
+                        oldValue |> Value.replaceWith phi)
 
                 blockValue |> Value.destroy
                 true
@@ -663,15 +689,16 @@ let private jumpThreading _ irModule =
                 let copies =
                     !blockValue
                     |> BasicBlock.predecessors
-                    |> List.map (fun pred ->
-                        let newBlock, replacements = createCopies pred |> Option.get
+                    |> List.map
+                        (fun pred ->
+                            let newBlock, replacements = createCopies pred |> Option.get
 
-                        !pred
-                        |> Value.asBasicBlock
-                        |> BasicBlock.terminator
-                        |> Value.replaceOperand blockValue newBlock
+                            !pred
+                            |> Value.asBasicBlock
+                            |> BasicBlock.terminator
+                            |> Value.replaceOperand blockValue newBlock
 
-                        (newBlock, replacements))
+                            (newBlock, replacements))
 
                 let mergeBlock =
                     !blockValue
@@ -682,41 +709,44 @@ let private jumpThreading _ irModule =
                     |> List.exactlyOne
 
                 escapingValues
-                |> List.iter (fun oldValue ->
-                    let incomingList bb =
-                        !bb
-                        |> BasicBlock.predecessors
-                        |> List.map (fun block ->
-                            match copies |> List.tryFind (fst >> (=) block) with
-                            | None -> (Value.UndefValue, block)
-                            | Some (_, replacements) -> (replacements |> ImmutableMap.find oldValue, block))
+                |> List.iter
+                    (fun oldValue ->
+                        let incomingList bb =
+                            !bb
+                            |> BasicBlock.predecessors
+                            |> List.map
+                                (fun block ->
+                                    match copies |> List.tryFind (fst >> (=) block) with
+                                    | None -> (Value.UndefValue, block)
+                                    | Some (_, replacements) -> (replacements |> ImmutableMap.find oldValue, block))
 
-                    let mergeIncoming =
-                        !blockValue
-                        |> BasicBlock.successors
-                        |> List.map (fun bb ->
-                            let phi =
-                                builder
-                                |> Builder.setInsertBlock (Some bb)
-                                |> Builder.setInsertPoint Start
-                                |> Builder.createPhi (incomingList bb)
-                                |> fst
+                        let mergeIncoming =
+                            !blockValue
+                            |> BasicBlock.successors
+                            |> List.map
+                                (fun bb ->
+                                    let phi =
+                                        builder
+                                        |> Builder.setInsertBlock (Some bb)
+                                        |> Builder.setInsertPoint Start
+                                        |> Builder.createPhi (incomingList bb)
+                                        |> fst
 
-                            !oldValue
-                            |> Value.users
-                            |> List.filter ((!) >> Value.parentBlock >> (=) (Some bb))
-                            |> List.iter (Value.replaceOperand oldValue phi)
+                                    !oldValue
+                                    |> Value.users
+                                    |> List.filter ((!) >> Value.parentBlock >> (=) (Some bb))
+                                    |> List.iter (Value.replaceOperand oldValue phi)
 
-                            (phi, bb))
+                                    (phi, bb))
 
-                    let phi =
-                        builder
-                        |> Builder.setInsertBlock (Some mergeBlock)
-                        |> Builder.setInsertPoint Start
-                        |> Builder.createPhi mergeIncoming
-                        |> fst
+                        let phi =
+                            builder
+                            |> Builder.setInsertBlock (Some mergeBlock)
+                            |> Builder.setInsertPoint Start
+                            |> Builder.createPhi mergeIncoming
+                            |> fst
 
-                    oldValue |> Value.replaceWith phi)
+                        oldValue |> Value.replaceWith phi)
 
                 blockValue |> Value.destroy
                 true
@@ -732,15 +762,16 @@ let private jumpThreading _ irModule =
     // generate more code
     while !irModule
           |> Module.basicBlocks
-          |> Seq.filter (fun blockValue ->
-              !blockValue
-              |> BasicBlock.predecessors
-              |> List.length > 1
-              && !blockValue
-                 |> Value.asBasicBlock
-                 |> BasicBlock.phis
-                 |> List.isEmpty
-                 |> not)
+          |> Seq.filter
+              (fun blockValue ->
+                  !blockValue
+                  |> BasicBlock.predecessors
+                  |> List.length > 1
+                  && !blockValue
+                     |> Value.asBasicBlock
+                     |> BasicBlock.phis
+                     |> List.isEmpty
+                     |> not)
           |> Seq.map jumpThreadingBlock
           |> List.ofSeq
           |> List.exists id do
@@ -831,7 +862,9 @@ let private singleInstructionCombine builder value =
                                           Left = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } }
     | Ref { Content = BinaryInstruction { Kind = Add
                                           Left = op1
-                                          Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when op1 = op2 ->
+                                          Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when
+        op1 = op2
+        ->
         value
         |> Value.replaceWith (Builder.createConstant 0xFFFFs)
 
@@ -841,7 +874,9 @@ let private singleInstructionCombine builder value =
                                           Left = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } }
     | Ref { Content = BinaryInstruction { Kind = And
                                           Left = op1
-                                          Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when op1 = op2 ->
+                                          Right = Ref { Content = UnaryInstruction { Kind = Not; Value = op2 } } } } when
+        op1 = op2
+        ->
         value
         |> Value.replaceWith (Builder.createConstant 0s)
 
@@ -869,7 +904,9 @@ let private singleInstructionCombine builder value =
                                           Right = Ref { Content = BinaryInstruction { Kind = Add
                                                                                       Left = Ref { Content = UnaryInstruction { Kind = Not
                                                                                                                                 Value = op2 } }
-                                                                                      Right = Ref { Content = Constant { Value = 1s } } } } } } when op1 = op2 ->
+                                                                                      Right = Ref { Content = Constant { Value = 1s } } } } } } when
+        op1 = op2
+        ->
         value
         |> Value.replaceWith (Builder.createConstant 0s)
 
@@ -892,19 +929,22 @@ let analyzeAlloc _ (irModule: Module ref) =
 
     !irModule
     |> Module.instructions
-    |> List.fold (fun result instr ->
-        match !instr with
-        | { Content = AllocationInstruction
-            Users = users } ->
-            if users
-               |> List.exists (function
-                   | LoadOp _ -> false
-                   | StoreOp (value, _) when value <> instr -> false
-                   | _ -> true) then
-                result |> ImmutableSet.add instr
-            else
-                result
-        | _ -> result) ImmutableSet.empty
+    |> List.fold
+        (fun result instr ->
+            match !instr with
+            | { Content = AllocationInstruction
+                Users = users } ->
+                if users
+                   |> List.exists
+                       (function
+                       | LoadOp _ -> false
+                       | StoreOp (value, _) when value <> instr -> false
+                       | _ -> true) then
+                    result |> ImmutableSet.add instr
+                else
+                    result
+            | _ -> result)
+        ImmutableSet.empty
 
 let analyzeAllocPass = { Pass = analyzeAlloc; DependsOn = [] }
 
@@ -951,28 +991,29 @@ let analyzeDominance _ (irModule: Module ref) =
             finger1
 
         while blocks
-              |> Seq.fold (fun changed node ->
-                  let processedPredecessors =
-                      !node
-                      |> BasicBlock.predecessors
-                      |> List.choose (fun x -> map.[x] |> Option.map (fun value -> (x, value)))
+              |> Seq.fold
+                  (fun changed node ->
+                      let processedPredecessors =
+                          !node
+                          |> BasicBlock.predecessors
+                          |> List.choose (fun x -> map.[x] |> Option.map (fun value -> (x, value)))
 
-                  match processedPredecessors with
-                  | (newIDom, _) :: rest ->
-                      let newIDom =
-                          rest
-                          |> List.map fst
-                          |> List.fold intersect newIDom
+                      match processedPredecessors with
+                      | (newIDom, _) :: rest ->
+                          let newIDom =
+                              rest
+                              |> List.map fst
+                              |> List.fold intersect newIDom
 
-                      if map.[node] <> Some newIDom then
-                          map.[node] <- Some newIDom
-                          true
-                      else
-                          changed
-                  | [] ->
-                      failwith
-                          "Internal Compiler Error: Block with no predecessors found. Run simplifyCFG pass to eliminate")
-                     false do
+                          if map.[node] <> Some newIDom then
+                              map.[node] <- Some newIDom
+                              true
+                          else
+                              changed
+                      | [] ->
+                          failwith
+                              "Internal Compiler Error: Block with no predecessors found. Run simplifyCFG pass to eliminate")
+                  false do
             ()
 
     !irModule
@@ -983,31 +1024,34 @@ let analyzeDominance _ (irModule: Module ref) =
     let result =
         !irModule
         |> Module.revBasicBlocks
-        |> List.fold (fun result x ->
-            let block = Value.asBasicBlock !x
+        |> List.fold
+            (fun result x ->
 
-            let iDom = map.[x]
+                let iDom = map.[x]
 
-            match iDom with
-            | None -> result
-            | Some iDom ->
-                result
-                |> ImmutableMap.add
-                    x
-                       { ImmediateDominator = iDom
-                         ImmediatelyDominates = []
-                         DominanceFrontier = [] }) ImmutableMap.empty
+                match iDom with
+                | None -> result
+                | Some iDom ->
+                    result
+                    |> ImmutableMap.add
+                        x
+                        { ImmediateDominator = iDom
+                          ImmediatelyDominates = []
+                          DominanceFrontier = [] })
+            ImmutableMap.empty
 
     result
-    |> Seq.fold (fun result kv ->
-        let x, { ImmediateDominator = iDom } = kv.Deconstruct()
-        let domInfo = result |> ImmutableMap.find iDom
+    |> Seq.fold
+        (fun result kv ->
+            let x, { ImmediateDominator = iDom } = kv.Deconstruct()
+            let domInfo = result |> ImmutableMap.find iDom
 
+            result
+            |> ImmutableMap.add
+                iDom
+                { domInfo with
+                      ImmediatelyDominates = x :: domInfo.ImmediatelyDominates })
         result
-        |> ImmutableMap.add
-            iDom
-               { domInfo with
-                     ImmediatelyDominates = x :: (domInfo.ImmediatelyDominates) }) result
 
 let analyzeDominancePass =
     { Pass = analyzeDominance
@@ -1023,37 +1067,43 @@ let private analyzeDominanceFrontiers passManager (irModule: Module ref) =
 
     !irModule
     |> Module.revBasicBlocks
-    |> List.map (associateValue (ImmutableSet.empty))
+    |> List.map (associateValue ImmutableSet.empty)
     |> List.iter map.Add
 
     !irModule
     |> Module.revBasicBlocks
-    |> List.choose (fun x ->
-        match !x |> BasicBlock.predecessors with
-        | []
-        | [ _ ] -> None
-        | preds -> Some(x, preds))
-    |> List.iter (fun (b, preds) ->
-        let iDom = domInfos.[b].ImmediateDominator
+    |> List.choose
+        (fun x ->
+            match !x |> BasicBlock.predecessors with
+            | []
+            | [ _ ] -> None
+            | preds -> Some(x, preds))
+    |> List.iter
+        (fun (b, preds) ->
+            let iDom = domInfos.[b].ImmediateDominator
 
-        preds
-        |> List.iter (fun p ->
-            Seq.unfold (fun runner ->
-                if runner = iDom then
-                    None
-                else
-                    map.[runner] <- map.[runner] |> ImmutableSet.add b
-                    Some((), domInfos.[runner].ImmediateDominator)) p
-            |> Seq.tryLast
-            |> ignore))
+            preds
+            |> List.iter
+                (fun p ->
+                    Seq.unfold
+                        (fun runner ->
+                            if runner = iDom then
+                                None
+                            else
+                                map.[runner] <- map.[runner] |> ImmutableSet.add b
+                                Some((), domInfos.[runner].ImmediateDominator))
+                        p
+                    |> Seq.tryLast
+                    |> ignore))
 
     domInfos
-    |> Seq.map (fun kv ->
-        let x, info = kv.Deconstruct()
+    |> Seq.map
+        (fun kv ->
+            let x, info = kv.Deconstruct()
 
-        (x,
-         { info with
-               DominanceFrontier = map.[x] |> List.ofSeq }))
+            (x,
+             { info with
+                   DominanceFrontier = map.[x] |> List.ofSeq }))
     |> ImmutableMap.ofSeq
 
 let analyzeDominanceFrontiersPass =
@@ -1072,102 +1122,118 @@ let private mem2reg passManager (irModule: Module ref) =
 
     !irModule
     |> Module.instructions
-    |> List.choose (fun x ->
-        match x with
-        | AllocaOp when aliased |> ImmutableSet.contains x |> not -> Some(x, (!x).Users |> ImmutableSet.ofList)
-        | _ -> None)
-    |> List.iter (fun (alloca, loadStores) ->
-        let s =
-            loadStores
-            |> Seq.choose (function
-                | Ref { Content = StoreInstruction _
-                        ParentBlock = parentBlock } -> parentBlock
-                | _ -> None)
-            |> ImmutableSet.ofSeq
+    |> List.choose
+        (fun x ->
+            match x with
+            | AllocaOp when aliased |> ImmutableSet.contains x |> not -> Some(x, (!x).Users |> ImmutableSet.ofList)
+            | _ -> None)
+    |> List.iter
+        (fun (alloca, loadStores) ->
+            let s =
+                loadStores
+                |> Seq.choose
+                    (function
+                    | Ref { Content = StoreInstruction _
+                            ParentBlock = parentBlock } -> parentBlock
+                    | _ -> None)
+                |> ImmutableSet.ofSeq
 
-        let dominanceFrontiers =
-            Seq.map (fun x -> domInfo.[x].DominanceFrontier)
-            >> Seq.map ImmutableSet.ofList
-            >> ImmutableSet.unionMany
+            let dominanceFrontiers =
+                Seq.map (fun x -> domInfo.[x].DominanceFrontier)
+                >> Seq.map ImmutableSet.ofList
+                >> ImmutableSet.unionMany
 
-        let builder = Builder.fromModule irModule
+            let builder = Builder.fromModule irModule
 
-        let phis =
-            Seq.unfold (fun (x: ImmutableSet<Value ref>) ->
-                let next =
-                    s |> ImmutableSet.union x |> dominanceFrontiers
+            let phis =
+                Seq.unfold
+                    (fun (x: ImmutableSet<Value ref>) ->
+                        let next =
+                            s |> ImmutableSet.union x |> dominanceFrontiers
 
-                if next = x then None else Some(next, next)) s
-            |> Seq.tryLast
-            |> Option.map
-                (Seq.map (fun block ->
-                    builder
-                    |> Builder.setInsertBlock (Some block)
-                    |> Builder.setInsertPoint Start
-                    |> Builder.createPhi
-                        (!block
-                         |> BasicBlock.predecessors
-                         |> List.map (fun x -> (Value.UndefValue, x)))
-                    |> fst))
-            |> Option.map ImmutableSet.ofSeq
-            |> Option.defaultValue ImmutableSet.empty
+                        if next = x then
+                            None
+                        else
+                            Some(next, next))
+                    s
+                |> Seq.tryLast
+                |> Option.map (
+                    Seq.map
+                        (fun block ->
+                            builder
+                            |> Builder.setInsertBlock (Some block)
+                            |> Builder.setInsertPoint Start
+                            |> Builder.createPhi (
+                                !block
+                                |> BasicBlock.predecessors
+                                |> List.map (fun x -> (Value.UndefValue, x))
+                            )
+                            |> fst)
+                )
+                |> Option.map ImmutableSet.ofSeq
+                |> Option.defaultValue ImmutableSet.empty
 
-        let phiPredBlocks =
-            phis
-            |> Seq.choose (fun x ->
-                !x
-                |> Value.parentBlock
-                |> Option.map ((!) >> BasicBlock.predecessors)
-                |> Option.map (List.map (associateValue x)))
-            |> Seq.concat
-            |> Seq.groupBy fst
-            |> Seq.map (fun (x, y) -> (x, y |> List.ofSeq |> List.map snd))
-            |> ImmutableMap.ofSeq
+            let phiPredBlocks =
+                phis
+                |> Seq.choose
+                    (fun x ->
+                        !x
+                        |> Value.parentBlock
+                        |> Option.map ((!) >> BasicBlock.predecessors)
+                        |> Option.map (List.map (associateValue x)))
+                |> Seq.concat
+                |> Seq.groupBy fst
+                |> Seq.map (fun (x, y) -> (x, y |> List.ofSeq |> List.map snd))
+                |> ImmutableMap.ofSeq
 
-        let mutable alreadyVisited = ImmutableSet.empty
+            let mutable alreadyVisited = ImmutableSet.empty
 
-        let rec rename replacement blockValue =
-            if ImmutableSet.contains blockValue alreadyVisited then
-                ()
-            else
-                alreadyVisited <- ImmutableSet.add blockValue alreadyVisited
+            let rec rename replacement blockValue =
+                if ImmutableSet.contains blockValue alreadyVisited then
+                    ()
+                else
+                    alreadyVisited <- ImmutableSet.add blockValue alreadyVisited
 
-                let replacement =
-                    !blockValue
-                    |> Value.asBasicBlock
-                    |> BasicBlock.instructions
-                    |> List.fold (fun replacement x ->
-                        match x with
-                        | StoreOp (passThrough, _) when loadStores |> ImmutableSet.contains x ->
-                            x |> Value.destroy
-                            passThrough
-                        | LoadOp _ when loadStores |> ImmutableSet.contains x ->
-                            x |> Value.replaceWith replacement
+                    let replacement =
+                        !blockValue
+                        |> Value.asBasicBlock
+                        |> BasicBlock.instructions
+                        |> List.fold
+                            (fun replacement x ->
+                                match x with
+                                | StoreOp (passThrough, _) when loadStores |> ImmutableSet.contains x ->
+                                    x |> Value.destroy
+                                    passThrough
+                                | LoadOp _ when loadStores |> ImmutableSet.contains x ->
+                                    x |> Value.replaceWith replacement
+                                    replacement
+                                | PhiOp _ when phis |> ImmutableSet.contains x -> x
+                                | _ -> replacement)
                             replacement
-                        | PhiOp _ when phis |> ImmutableSet.contains x -> x
-                        | _ -> replacement) replacement
 
-                phiPredBlocks
-                |> ImmutableMap.tryFind blockValue
-                |> Option.iter
-                    (List.iter (fun phiValue ->
-                        !phiValue
-                        |> Value.operands
-                        |> List.indexed
-                        |> List.pairwise
-                        |> List.filter (fun (_, (_, bb)) -> bb = blockValue)
-                        |> List.iter (fun ((i, _), _) -> phiValue |> Value.setOperand i replacement)))
+                    phiPredBlocks
+                    |> ImmutableMap.tryFind blockValue
+                    |> Option.iter (
+                        List.iter
+                            (fun phiValue ->
+                                !phiValue
+                                |> Value.operands
+                                |> List.indexed
+                                |> List.pairwise
+                                |> List.filter (fun (_, (_, bb)) -> bb = blockValue)
+                                |> List.iter (fun ((i, _), _) -> phiValue |> Value.setOperand i replacement))
+                    )
 
-                !blockValue
-                |> BasicBlock.successors
-                |> List.iter (rename replacement)
+                    !blockValue
+                    |> BasicBlock.successors
+                    |> List.iter (rename replacement)
 
-        !irModule
-        |> Module.entryBlock
-        |> Option.map (rename Value.UndefValue)
-        |> ignore
+            !irModule
+            |> Module.entryBlock
+            |> Option.map (rename Value.UndefValue)
+            |> ignore
 
-        alloca |> Value.destroy)
+            alloca |> Value.destroy)
 
     irModule
 
@@ -1196,48 +1262,57 @@ let analyzeLiveness _ irModule =
             let liveIn =
                 block
                 |> BasicBlock.revInstructions
-                |> List.fold (fun set instr ->
+                |> List.fold
+                    (fun set instr ->
 
-                    let set, upwardsExposed =
-                        match instr with
-                        | PhiOp _ -> (set, [ instr ])
-                        | _ ->
-                            let set =
-                                if !instr |> Value.producesValue then set |> ImmutableSet.remove instr else set
+                        let set, upwardsExposed =
+                            match instr with
+                            | PhiOp _ -> (set, [ instr ])
+                            | _ ->
+                                let set =
+                                    if !instr |> Value.producesValue then
+                                        set |> ImmutableSet.remove instr
+                                    else
+                                        set
 
-                            (set,
-                             !instr
-                             |> Value.operands
-                             |> List.filter ((!) >> Value.isInstruction))
+                                (set,
+                                 !instr
+                                 |> Value.operands
+                                 |> List.filter ((!) >> Value.isInstruction))
 
-                    set
-                    |> ImmutableSet.union (ImmutableSet.ofList upwardsExposed)) liveOut
+                        set
+                        |> ImmutableSet.union (ImmutableSet.ofList upwardsExposed))
+                    liveOut
 
             result <-
                 result
                 |> ImmutableMap.add blockValue { LiveIn = liveIn; LiveOut = liveOut }
 
             liveIn)
-           (fun b succ ->
-               succ
-               |> Seq.map (fun (bb, liveIn) ->
-                   liveIn
-                   |> Option.defaultValue ImmutableSet.empty
-                   |> ImmutableSet.fold (fun result instr ->
-                       match instr with
-                       | Ref { Content = PhiInstruction { Incoming = list }
-                               ParentBlock = Some block } when bb = block ->
-                           list
-                           |> List.tryFind (snd >> (=) b)
-                           |> Option.filter (fst >> (!) >> Value.isInstruction)
-                           |> Option.map
-                               (fst
-                                >> Seq.singleton
-                                >> ImmutableSet
-                                >> ImmutableSet.union result)
-                           |> Option.defaultValue result
-                       | instr -> result |> ImmutableSet.add instr) ImmutableSet.empty)
-               |> ImmutableSet.unionMany)
+        (fun b succ ->
+            succ
+            |> Seq.map
+                (fun (bb, liveIn) ->
+                    liveIn
+                    |> Option.defaultValue ImmutableSet.empty
+                    |> ImmutableSet.fold
+                        (fun result instr ->
+                            match instr with
+                            | Ref { Content = PhiInstruction { Incoming = list }
+                                    ParentBlock = Some block } when bb = block ->
+                                list
+                                |> List.tryFind (snd >> (=) b)
+                                |> Option.filter (fst >> (!) >> Value.isInstruction)
+                                |> Option.map (
+                                    fst
+                                    >> Seq.singleton
+                                    >> ImmutableSet
+                                    >> ImmutableSet.union result
+                                )
+                                |> Option.defaultValue result
+                            | instr -> result |> ImmutableSet.add instr)
+                        ImmutableSet.empty)
+            |> ImmutableSet.unionMany)
     |> ignore
 
     result
@@ -1246,36 +1321,40 @@ let private reorderBasicBlocks _ irModule =
 
     !irModule
     |> Module.revBasicBlocks
-    |> List.choose
-        ((!)
-         >> Value.asBasicBlock
-         >> BasicBlock.tryTerminator
-         >> Option.filter ((!) >> Value.isUnconditional >> not))
-    |> List.iter (fun terminator ->
-        let successors =
-            !terminator |> Value.operands |> List.tail
+    |> List.choose (
+        (!)
+        >> Value.asBasicBlock
+        >> BasicBlock.tryTerminator
+        >> Option.filter ((!) >> Value.isUnconditional >> not)
+    )
+    |> List.iter
+        (fun terminator ->
+            let successors =
+                !terminator |> Value.operands |> List.tail
 
-        // Only handling diamonds for now
-        let mergeCount =
-            successors
-            |> List.map
-                ((!)
-                 >> BasicBlock.successors
-                 >> ImmutableSet.ofList)
-            |> ImmutableSet.unionMany
-            |> ImmutableSet.count
+            // Only handling diamonds for now
+            let mergeCount =
+                successors
+                |> List.map (
+                    (!)
+                    >> BasicBlock.successors
+                    >> ImmutableSet.ofList
+                )
+                |> ImmutableSet.unionMany
+                |> ImmutableSet.count
 
-        if mergeCount <= 1
-           && successors
-              |> List.forall
-                  ((!)
-                   >> Value.asBasicBlock
-                   >> BasicBlock.tryTerminator
-                   >> Option.map ((!) >> Value.isUnconditional)
-                   >> Option.defaultValue false)
-           && (successors.[1] |> BasicBlock.index) > (successors.[0] |> BasicBlock.index) then
-            irModule
-            |> Module.swapBlocks successors.[0] successors.[1])
+            if mergeCount <= 1
+               && successors
+                  |> List.forall (
+                      (!)
+                      >> Value.asBasicBlock
+                      >> BasicBlock.tryTerminator
+                      >> Option.map ((!) >> Value.isUnconditional)
+                      >> Option.defaultValue false
+                  )
+               && (successors.[1] |> BasicBlock.index) > (successors.[0] |> BasicBlock.index) then
+                irModule
+                |> Module.swapBlocks successors.[0] successors.[1])
 
     irModule
 
@@ -1300,169 +1379,192 @@ let private constantPropagation _ irModule =
     let rewrites =
         !irModule
         |> Module.entryBlock
-        |> Option.map
-            (Graphs.dataFlowAnalysis
+        |> Option.map (
+            Graphs.dataFlowAnalysis
                 (fun replacements current ->
                     !current
                     |> Value.asBasicBlock
                     |> BasicBlock.nonPhiInstructions
-                    |> Seq.fold (fun replacements instr ->
-                        let operands =
-                            !instr
-                            |> Value.operands
-                            |> List.map (function
-                                | ConstOp c -> Constant c
-                                | instr when !instr |> Value.producesValue -> replacements |> ImmutableMap.find instr
-                                | _ -> Bottom)
-                            |> Array.ofSeq
+                    |> Seq.fold
+                        (fun replacements instr ->
+                            let operands =
+                                !instr
+                                |> Value.operands
+                                |> List.map
+                                    (function
+                                    | ConstOp c -> Constant c
+                                    | instr when !instr |> Value.producesValue ->
+                                        replacements |> ImmutableMap.find instr
+                                    | _ -> Bottom)
+                                |> Array.ofSeq
 
-                        let result =
-                            match instr, operands with
-                            | BinOp And _, [| Constant c1; Constant c2 |] -> c1 &&& c2 |> Constant |> Some
-                            | BinOp Add _, [| Constant c1; Constant c2 |] -> c1 + c2 |> Constant |> Some
-                            | BinOp Or _, [| Constant c1; Constant c2 |] -> c1 ||| c2 |> Constant |> Some
-                            | BinOp Xor _, [| Constant c1; Constant c2 |] -> c1 ^^^ c2 |> Constant |> Some
-                            | BinOp Sub _, [| Constant c1; Constant c2 |] -> c1 - c2 |> Constant |> Some
-                            | BinOp Mul _, [| Constant c1; Constant c2 |] -> c1 * c2 |> Constant |> Some
-                            | BinOp SDiv _, [| Constant c1; Constant c2 |] -> c1 / c2 |> Constant |> Some
-                            | BinOp SRem _, [| Constant c1; Constant c2 |] -> c1 % c2 |> Constant |> Some
-                            | BinOp Shl _, [| Constant c1; Constant c2 |] -> c1 <<< (c2 |> int) |> Constant |> Some
-                            | BinOp AShr _, [| Constant c1; Constant c2 |] -> c1 >>> (c2 |> int) |> Constant |> Some
-                            | BinOp UDiv _, [| Constant c1; Constant c2 |] ->
-                                (c1 |> uint16) / (c2 |> uint16)
-                                |> int16
-                                |> Constant
-                                |> Some
-                            | BinOp URem _, [| Constant c1; Constant c2 |] ->
-                                (c1 |> uint16) % (c2 |> uint16)
-                                |> int16
-                                |> Constant
-                                |> Some
-                            | BinOp LShr _, [| Constant c1; Constant c2 |] ->
-                                (c1 |> uint16) >>> (c2 |> int)
-                                |> int16
-                                |> Constant
-                                |> Some
-                            | UnaryOp Negate _, [| Constant c |] -> -c |> Constant |> Some
-                            | UnaryOp Not _, [| Constant c |] -> ~~~c |> Constant |> Some
-                            | CondBrOp (Zero, _, trueBranch, falseBranch), [| Constant c; _; _ |] ->
-                                if c = 0s
-                                then executableEdges <- executableEdges |> addEdge current trueBranch
-                                else executableEdges <- executableEdges |> addEdge current falseBranch
+                            let result =
+                                match instr, operands with
+                                | BinOp And _, [| Constant c1; Constant c2 |] -> c1 &&& c2 |> Constant |> Some
+                                | BinOp Add _, [| Constant c1; Constant c2 |] -> c1 + c2 |> Constant |> Some
+                                | BinOp Or _, [| Constant c1; Constant c2 |] -> c1 ||| c2 |> Constant |> Some
+                                | BinOp Xor _, [| Constant c1; Constant c2 |] -> c1 ^^^ c2 |> Constant |> Some
+                                | BinOp Sub _, [| Constant c1; Constant c2 |] -> c1 - c2 |> Constant |> Some
+                                | BinOp Mul _, [| Constant c1; Constant c2 |] -> c1 * c2 |> Constant |> Some
+                                | BinOp SDiv _, [| Constant c1; Constant c2 |] -> c1 / c2 |> Constant |> Some
+                                | BinOp SRem _, [| Constant c1; Constant c2 |] -> c1 % c2 |> Constant |> Some
+                                | BinOp Shl _, [| Constant c1; Constant c2 |] -> c1 <<< (c2 |> int) |> Constant |> Some
+                                | BinOp AShr _, [| Constant c1; Constant c2 |] -> c1 >>> (c2 |> int) |> Constant |> Some
+                                | BinOp UDiv _, [| Constant c1; Constant c2 |] ->
+                                    (c1 |> uint16) / (c2 |> uint16)
+                                    |> int16
+                                    |> Constant
+                                    |> Some
+                                | BinOp URem _, [| Constant c1; Constant c2 |] ->
+                                    (c1 |> uint16) % (c2 |> uint16)
+                                    |> int16
+                                    |> Constant
+                                    |> Some
+                                | BinOp LShr _, [| Constant c1; Constant c2 |] ->
+                                    (c1 |> uint16) >>> (c2 |> int)
+                                    |> int16
+                                    |> Constant
+                                    |> Some
+                                | UnaryOp Negate _, [| Constant c |] -> -c |> Constant |> Some
+                                | UnaryOp Not _, [| Constant c |] -> ~~~c |> Constant |> Some
+                                | CondBrOp (Zero, _, trueBranch, falseBranch), [| Constant c; _; _ |] ->
+                                    if c = 0s then
+                                        executableEdges <- executableEdges |> addEdge current trueBranch
+                                    else
+                                        executableEdges <- executableEdges |> addEdge current falseBranch
 
-                                None
-                            | CondBrOp (Negative, _, trueBranch, falseBranch), [| Constant c; _; _ |] ->
-                                if c < 0s
-                                then executableEdges <- executableEdges |> addEdge current trueBranch
-                                else executableEdges <- executableEdges |> addEdge current falseBranch
+                                    None
+                                | CondBrOp (Negative, _, trueBranch, falseBranch), [| Constant c; _; _ |] ->
+                                    if c < 0s then
+                                        executableEdges <- executableEdges |> addEdge current trueBranch
+                                    else
+                                        executableEdges <- executableEdges |> addEdge current falseBranch
 
-                                None
-                            | CondBrOp (_, _, trueBranch, falseBranch), _ ->
-                                executableEdges <- executableEdges |> addEdge current trueBranch
-                                executableEdges <- executableEdges |> addEdge current falseBranch
-                                None
-                            | GotoOp destination, _ ->
-                                executableEdges <- executableEdges |> addEdge current destination
-                                None
-                            | instr, _ when !instr |> Value.producesValue |> not -> None
-                            | _, _ -> Some Bottom
+                                    None
+                                | CondBrOp (_, _, trueBranch, falseBranch), _ ->
+                                    executableEdges <- executableEdges |> addEdge current trueBranch
+                                    executableEdges <- executableEdges |> addEdge current falseBranch
+                                    None
+                                | GotoOp destination, _ ->
+                                    executableEdges <- executableEdges |> addEdge current destination
+                                    None
+                                | instr, _ when !instr |> Value.producesValue |> not -> None
+                                | _, _ -> Some Bottom
 
-                        match result with
-                        | None -> replacements
-                        | Some result -> replacements |> ImmutableMap.add instr result) replacements)
-                 (fun current predecessors ->
-                     predecessors
-                     |> Seq.choose (fun (a, b) ->
-                         match b with
-                         | None -> None
-                         | Some b -> Some(a, b))
-                     |> Seq.map (fun (predecessor, replacement) ->
-                         !current
-                         |> Value.asBasicBlock
-                         |> BasicBlock.phis
-                         |> List.fold (fun replacement phi ->
-                             let phiOp =
-                                 !phi
-                                 |> Value.operands
-                                 |> List.pairwise
-                                 |> List.find (snd >> (=) predecessor)
-                                 |> fst
+                            match result with
+                            | None -> replacements
+                            | Some result -> replacements |> ImmutableMap.add instr result)
+                        replacements)
+                (fun current predecessors ->
+                    predecessors
+                    |> Seq.choose
+                        (fun (a, b) ->
+                            match b with
+                            | None -> None
+                            | Some b -> Some(a, b))
+                    |> Seq.map
+                        (fun (predecessor, replacement) ->
+                            !current
+                            |> Value.asBasicBlock
+                            |> BasicBlock.phis
+                            |> List.fold
+                                (fun replacement phi ->
+                                    let phiOp =
+                                        !phi
+                                        |> Value.operands
+                                        |> List.pairwise
+                                        |> List.find (snd >> (=) predecessor)
+                                        |> fst
 
-                             let phiRepl =
-                                 match phiOp with
-                                 | ConstOp c -> Constant c
-                                 | instr when !instr |> Value.producesValue ->
-                                     replacement
-                                     |> ImmutableMap.tryFind phiOp
-                                     |> Option.defaultValue Top
-                                 | UndefOp -> Top
-                                 | _ -> Bottom
+                                    let phiRepl =
+                                        match phiOp with
+                                        | ConstOp c -> Constant c
+                                        | instr when !instr |> Value.producesValue ->
+                                            replacement
+                                            |> ImmutableMap.tryFind phiOp
+                                            |> Option.defaultValue Top
+                                        | UndefOp -> Top
+                                        | _ -> Bottom
 
-                             replacement |> ImmutableMap.add phi phiRepl) replacement)
-                     |> List.ofSeq
-                     |> Some
-                     |> Option.filter (List.isEmpty >> not)
-                     |> Option.map
-                         (List.reduce (fun map1 map2 ->
-                             Seq.append map1 map2
-                             |> Seq.groupBy (fun kv -> kv.Key)
-                             |> Seq.map (fun (key, values) ->
-                                 (key,
-                                  values
-                                  |> Seq.map (fun kv -> kv.Value)
-                                  |> Seq.reduce (fun op1 op2 ->
-                                      match op1, op2 with
-                                      | Top, _ -> op2
-                                      | _, Top -> op1
-                                      | Constant c1, Constant c2 when c1 = c2 -> op1
-                                      | _, _ -> Bottom)))
-                             |> ImmutableMap.ofSeq))
-                     |> Option.defaultValue ImmutableMap.empty)
-                 ((!) >> BasicBlock.predecessors >> Seq.ofList)
-                 (fun x ->
-                     executableEdges
-                     |> ImmutableMap.tryFind x
-                     |> Option.defaultValue ImmutableSet.empty))
+                                    replacement |> ImmutableMap.add phi phiRepl)
+                                replacement)
+                    |> List.ofSeq
+                    |> Some
+                    |> Option.filter (List.isEmpty >> not)
+                    |> Option.map (
+                        List.reduce
+                            (fun map1 map2 ->
+                                Seq.append map1 map2
+                                |> Seq.groupBy (fun kv -> kv.Key)
+                                |> Seq.map
+                                    (fun (key, values) ->
+                                        (key,
+                                         values
+                                         |> Seq.map (fun kv -> kv.Value)
+                                         |> Seq.reduce
+                                             (fun op1 op2 ->
+                                                 match op1, op2 with
+                                                 | Top, _ -> op2
+                                                 | _, Top -> op1
+                                                 | Constant c1, Constant c2 when c1 = c2 -> op1
+                                                 | _, _ -> Bottom)))
+                                |> ImmutableMap.ofSeq)
+                    )
+                    |> Option.defaultValue ImmutableMap.empty)
+                ((!) >> BasicBlock.predecessors >> Seq.ofList)
+                (fun x ->
+                    executableEdges
+                    |> ImmutableMap.tryFind x
+                    |> Option.defaultValue ImmutableSet.empty)
+        )
         |> Option.defaultValue ImmutableMap.empty
 
     !irModule
     |> Module.exitBlock
     |> Option.bind (fun x -> rewrites |> ImmutableMap.tryFind x)
     |> Option.defaultValue ImmutableMap.empty
-    |> Seq.choose (fun kv ->
-        let value, latticeValue = kv.Deconstruct()
+    |> Seq.choose
+        (fun kv ->
+            let value, latticeValue = kv.Deconstruct()
 
-        match latticeValue with
-        | Constant c -> Some(value, c)
-        | _ -> None)
-    |> Seq.iter (fun (value, repl) ->
-        value
-        |> Value.replaceWith (Builder.createConstant repl))
+            match latticeValue with
+            | Constant c -> Some(value, c)
+            | _ -> None)
+    |> Seq.iter
+        (fun (value, repl) ->
+            value
+            |> Value.replaceWith (Builder.createConstant repl))
 
     let builder = Builder.fromModule irModule
 
     !irModule
     |> Module.revBasicBlocks
-    |> Seq.choose (fun bb ->
-        match executableEdges |> ImmutableMap.tryFind bb with
-        | Some successors when successors |> ImmutableSet.count = 1
-                               && !bb |> BasicBlock.successors |> List.length > 1 -> Some(bb, successors |> Seq.head)
-        | _ -> None)
-    |> Seq.iter (fun (bb, succ) ->
-        !bb
-        |> Value.asBasicBlock
-        |> BasicBlock.terminator
-        |> Value.replaceWith (builder |> Builder.createGoto succ |> fst))
+    |> Seq.choose
+        (fun bb ->
+            match executableEdges |> ImmutableMap.tryFind bb with
+            | Some successors when
+                successors |> ImmutableSet.count = 1
+                && !bb |> BasicBlock.successors |> List.length > 1
+                ->
+                Some(bb, successors |> Seq.head)
+            | _ -> None)
+    |> Seq.iter
+        (fun (bb, succ) ->
+            !bb
+            |> Value.asBasicBlock
+            |> BasicBlock.terminator
+            |> Value.replaceWith (builder |> Builder.createGoto succ |> fst))
 
     let reachable =
         executableEdges
         |> Seq.map (fun kv -> kv.Value)
         |> ImmutableSet.unionMany
-        |> ImmutableSet.union
-            (!irModule
-             |> Module.entryBlock
-             |> Option.toList
-             |> ImmutableSet.ofList)
+        |> ImmutableSet.union (
+            !irModule
+            |> Module.entryBlock
+            |> Option.toList
+            |> ImmutableSet.ofList
+        )
 
     !irModule
     |> Module.revBasicBlocks
@@ -1497,116 +1599,119 @@ let private analyzeBitsRead _ irModule =
             !current
             |> Value.asBasicBlock
             |> BasicBlock.revInstructions
-            |> List.fold (fun unusedBits instr ->
-                let operands =
-                    !instr
-                    |> Value.operands
-                    |> List.filter ((!) >> Value.isBasicBlock >> not)
-                    |> Array.ofList
+            |> List.fold
+                (fun unusedBits instr ->
+                    let operands =
+                        !instr
+                        |> Value.operands
+                        |> List.filter ((!) >> Value.isBasicBlock >> not)
+                        |> Array.ofList
 
-                let instrUsedBits =
-                    match unusedBits |> ImmutableMap.tryFind instr with
-                    | None -> 0xFFFFus
-                    | Some instrUsedBits -> instrUsedBits
+                    let instrUsedBits =
+                        match unusedBits |> ImmutableMap.tryFind instr with
+                        | None -> 0xFFFFus
+                        | Some instrUsedBits -> instrUsedBits
 
-                match instr with
-                | BinOp And (ConstOp c, _) ->
-                    unusedBits
-                    |> addMask (c |> uint16 &&& instrUsedBits) operands.[1]
-                | BinOp And (_, ConstOp c) ->
-                    unusedBits
-                    |> addMask (c |> uint16 &&& instrUsedBits) operands.[0]
-                | BinOp Or _
-                | BinOp And _
-                | BinOp Xor _ ->
-                    unusedBits
-                    |> addMask instrUsedBits operands.[0]
-                    |> addMask instrUsedBits operands.[1]
-                | BinOp SRem (ConstOp c, _) ->
-                    let newMask =
-                        (abs (c) |> uint16 |> nextPowerOf2) - 1us
+                    match instr with
+                    | BinOp And (ConstOp c, _) ->
+                        unusedBits
+                        |> addMask (c |> uint16 &&& instrUsedBits) operands.[1]
+                    | BinOp And (_, ConstOp c) ->
+                        unusedBits
+                        |> addMask (c |> uint16 &&& instrUsedBits) operands.[0]
+                    | BinOp Or _
+                    | BinOp And _
+                    | BinOp Xor _ ->
+                        unusedBits
+                        |> addMask instrUsedBits operands.[0]
+                        |> addMask instrUsedBits operands.[1]
+                    | BinOp SRem (ConstOp c, _) ->
+                        let newMask = (abs c |> uint16 |> nextPowerOf2) - 1us
 
-                    let newMask = newMask ||| 0x8000us
+                        let newMask = newMask ||| 0x8000us
 
-                    unusedBits
-                    |> addMask (instrUsedBits &&& newMask) operands.[0]
-                | BinOp URem (ConstOp c, _) ->
-                    let newMask = (c |> uint16 |> nextPowerOf2) - 1us
+                        unusedBits
+                        |> addMask (instrUsedBits &&& newMask) operands.[0]
+                    | BinOp URem (ConstOp c, _) ->
+                        let newMask = (c |> uint16 |> nextPowerOf2) - 1us
 
-                    unusedBits
-                    |> addMask (instrUsedBits &&& newMask) operands.[0]
-                | BinOp SRem (_, ConstOp c) ->
-                    let newMask =
-                        (abs (c) |> uint16 |> nextPowerOf2) - 1us
+                        unusedBits
+                        |> addMask (instrUsedBits &&& newMask) operands.[0]
+                    | BinOp SRem (_, ConstOp c) ->
+                        let newMask = (abs c |> uint16 |> nextPowerOf2) - 1us
 
-                    let newMask = newMask ||| 0x8000us
+                        let newMask = newMask ||| 0x8000us
 
-                    unusedBits
-                    |> addMask (instrUsedBits &&& newMask) operands.[0]
-                | BinOp URem (_, ConstOp c) ->
-                    let newMask = (c |> uint16 |> nextPowerOf2) - 1us
+                        unusedBits
+                        |> addMask (instrUsedBits &&& newMask) operands.[0]
+                    | BinOp URem (_, ConstOp c) ->
+                        let newMask = (c |> uint16 |> nextPowerOf2) - 1us
 
-                    unusedBits
-                    |> addMask (instrUsedBits &&& newMask) operands.[0]
-                | BinOp SRem (_, _) ->
-                    unusedBits
-                    |> addMask 0xFFFFus operands.[0]
-                    |> addMask 0xFFFFus operands.[1]
-                | BinOp URem (_, _) ->
-                    unusedBits
-                    |> addMask 0xFFFFus operands.[0]
-                    |> addMask 0xFFFFus operands.[1]
-                | BinOp LShr (_, ConstOp c) ->
-                    unusedBits
-                    |> addMask (instrUsedBits <<< (c |> int)) operands.[0]
-                | BinOp AShr (_, ConstOp c) ->
-                    unusedBits
-                    |> addMask (instrUsedBits <<< (c |> int)) operands.[0]
-                | BinOp Shl (_, ConstOp c) ->
-                    unusedBits
-                    |> addMask (instrUsedBits >>> (c |> int)) operands.[0]
-                | UnaryOp Negate _ -> unusedBits |> addMask 0xFFFFus operands.[0]
-                | UnaryOp Not _ -> unusedBits |> addMask instrUsedBits operands.[0]
-                | CondBrOp (Negative, _, _, _) -> unusedBits |> addMask 0x8000us operands.[0]
-                | CondBrOp (Zero, _, _, _) -> unusedBits |> addMask 0xFFFFus operands.[0]
-                | PhiOp _ ->
-                    operands
-                    |> Array.fold (fun unusedBits operand -> addMask instrUsedBits operand unusedBits) unusedBits
-                | LoadOp _ -> unusedBits |> addMask 0xFFFFus operands.[0]
-                | BinOp Mul (_, _)
-                | BinOp Add (_, _)
-                | BinOp Sub (_, _) ->
+                        unusedBits
+                        |> addMask (instrUsedBits &&& newMask) operands.[0]
+                    | BinOp SRem (_, _) ->
+                        unusedBits
+                        |> addMask 0xFFFFus operands.[0]
+                        |> addMask 0xFFFFus operands.[1]
+                    | BinOp URem (_, _) ->
+                        unusedBits
+                        |> addMask 0xFFFFus operands.[0]
+                        |> addMask 0xFFFFus operands.[1]
+                    | BinOp LShr (_, ConstOp c) ->
+                        unusedBits
+                        |> addMask (instrUsedBits <<< (c |> int)) operands.[0]
+                    | BinOp AShr (_, ConstOp c) ->
+                        unusedBits
+                        |> addMask (instrUsedBits <<< (c |> int)) operands.[0]
+                    | BinOp Shl (_, ConstOp c) ->
+                        unusedBits
+                        |> addMask (instrUsedBits >>> (c |> int)) operands.[0]
+                    | UnaryOp Negate _ -> unusedBits |> addMask 0xFFFFus operands.[0]
+                    | UnaryOp Not _ -> unusedBits |> addMask instrUsedBits operands.[0]
+                    | CondBrOp (Negative, _, _, _) -> unusedBits |> addMask 0x8000us operands.[0]
+                    | CondBrOp (Zero, _, _, _) -> unusedBits |> addMask 0xFFFFus operands.[0]
+                    | PhiOp _ ->
+                        operands
+                        |> Array.fold (fun unusedBits operand -> addMask instrUsedBits operand unusedBits) unusedBits
+                    | LoadOp _ -> unusedBits |> addMask 0xFFFFus operands.[0]
+                    | BinOp Mul (_, _)
+                    | BinOp Add (_, _)
+                    | BinOp Sub (_, _) ->
 
-                    let newMask =
-                        (instrUsedBits + 1us |> nextPowerOf2) - 1us
+                        let newMask =
+                            (instrUsedBits + 1us |> nextPowerOf2) - 1us
 
-                    unusedBits
-                    |> addMask newMask operands.[0]
-                    |> addMask newMask operands.[1]
-                | BinOp SDiv (_, _)
-                | BinOp UDiv (_, _)
-                | StoreOp _ ->
-                    unusedBits
-                    |> addMask 0xFFFFus operands.[0]
-                    |> addMask 0xFFFFus operands.[1]
-                | _ -> unusedBits) unusedBits)
-           (fun _ successors ->
-               successors
-               |> Seq.choose snd
-               |> List.ofSeq
-               |> Some
-               |> Option.filter (List.isEmpty >> not)
-               |> Option.map
-                   (List.reduce (fun map1 map2 ->
-                       Seq.append map1 map2
-                       |> Seq.groupBy (fun kv -> kv.Key)
-                       |> Seq.map (fun (key, values) ->
-                           (key,
-                            values
-                            |> Seq.map (fun kv -> kv.Value)
-                            |> Seq.reduce (|||)))
-                       |> ImmutableMap.ofSeq))
-               |> Option.defaultValue ImmutableMap.empty)
+                        unusedBits
+                        |> addMask newMask operands.[0]
+                        |> addMask newMask operands.[1]
+                    | BinOp SDiv (_, _)
+                    | BinOp UDiv (_, _)
+                    | StoreOp _ ->
+                        unusedBits
+                        |> addMask 0xFFFFus operands.[0]
+                        |> addMask 0xFFFFus operands.[1]
+                    | _ -> unusedBits)
+                unusedBits)
+        (fun _ successors ->
+            successors
+            |> Seq.choose snd
+            |> List.ofSeq
+            |> Some
+            |> Option.filter (List.isEmpty >> not)
+            |> Option.map (
+                List.reduce
+                    (fun map1 map2 ->
+                        Seq.append map1 map2
+                        |> Seq.groupBy (fun kv -> kv.Key)
+                        |> Seq.map
+                            (fun (key, values) ->
+                                (key,
+                                 values
+                                 |> Seq.map (fun kv -> kv.Value)
+                                 |> Seq.reduce (|||)))
+                        |> ImmutableMap.ofSeq)
+            )
+            |> Option.defaultValue ImmutableMap.empty)
     |> ImmutableMap.find (!irModule |> Module.entryBlock |> Option.get)
 
 let analyzeBitsReadPass =
@@ -1633,23 +1738,26 @@ let private deadBitElimination passManager irModule =
         |> List.ofSeq
 
     let adder initialCarry op1 op2 =
-        List.fold2 (fun (result, carry) op1 op2 ->
-            match carry, op1, op2 with
-            | None, Some false, Some false
-            | Some false, None, Some false
-            | Some false, Some false, None -> (None :: result, Some false)
-            | None, Some true, _
-            | None, _, Some true
-            | _, None, Some true
-            | Some true, None, _
-            | Some true, _, None
-            | _, Some true, None
-            | None, None, _
-            | None, _, None
-            | _, None, None -> (None :: result, None)
-            | Some b1, Some b2, Some b3 ->
-                (Some((b1 <> b2) <> b3) :: result, ((b1 && b2) || (b1 && b3) || (b2 && b3)) |> Some))
-            (List.empty, initialCarry) op1 op2
+        List.fold2
+            (fun (result, carry) op1 op2 ->
+                match carry, op1, op2 with
+                | None, Some false, Some false
+                | Some false, None, Some false
+                | Some false, Some false, None -> (None :: result, Some false)
+                | None, Some true, _
+                | None, _, Some true
+                | _, None, Some true
+                | Some true, None, _
+                | Some true, _, None
+                | _, Some true, None
+                | None, None, _
+                | None, _, None
+                | _, None, None -> (None :: result, None)
+                | Some b1, Some b2, Some b3 ->
+                    (Some((b1 <> b2) <> b3) :: result, ((b1 && b2) || (b1 && b3) || (b2 && b3)) |> Some))
+            (List.empty, initialCarry)
+            op1
+            op2
         |> fst
         |> List.rev
 
@@ -1662,158 +1770,180 @@ let private deadBitElimination passManager irModule =
     let rewrites =
         !irModule
         |> Module.entryBlock
-        |> Option.map
-            (Graphs.dataFlowAnalysis
+        |> Option.map (
+            Graphs.dataFlowAnalysis
                 (fun replacements current ->
 
                     !current
                     |> Value.asBasicBlock
                     |> BasicBlock.nonPhiInstructions
-                    |> Seq.fold (fun replacements instr ->
-                        let operands =
-                            !instr
-                            |> Value.operands
-                            |> List.map (function
-                                | ConstOp c -> constantToValue c
-                                | instr when !instr |> Value.producesValue -> replacements |> ImmutableMap.find instr
-                                | _ -> List.init 16 (fun _ -> None))
-                            |> Array.ofSeq
+                    |> Seq.fold
+                        (fun replacements instr ->
+                            let operands =
+                                !instr
+                                |> Value.operands
+                                |> List.map
+                                    (function
+                                    | ConstOp c -> constantToValue c
+                                    | instr when !instr |> Value.producesValue ->
+                                        replacements |> ImmutableMap.find instr
+                                    | _ -> List.init 16 (fun _ -> None))
+                                |> Array.ofSeq
 
-                        let result =
-                            match instr with
-                            | BinOp And _ ->
-                                List.map2 (fun op1 op2 ->
-                                    match op1, op2 with
-                                    | Some false, _
-                                    | _, Some false -> Some false
-                                    | None, _
-                                    | _, None -> None
-                                    | Some op1, Some op2 -> Some(op1 && op2)) operands.[0] operands.[1]
-                                |> Some
-                            | BinOp Or _ ->
-                                List.map2 (fun op1 op2 ->
-                                    match op1, op2 with
-                                    | Some true, _
-                                    | _, Some true -> Some true
-                                    | None, _
-                                    | _, None -> None
-                                    | Some op1, Some op2 -> Some(op1 || op2)) operands.[0] operands.[1]
-                                |> Some
-                            | BinOp Xor _ ->
-                                List.map2 (fun op1 op2 ->
-                                    match op1, op2 with
-                                    | None, _
-                                    | _, None -> None
-                                    | Some op1, Some op2 -> Some(op1 <> op2)) operands.[0] operands.[1]
-                                |> Some
-                            | BinOp Add _ -> addition operands.[0] operands.[1] |> Some
-                            | BinOp Sub _ -> subtraction operands.[0] operands.[1] |> Some
-                            | BinOp Mul _ -> List.init 16 (fun _ -> None) |> Some
-                            | BinOp SDiv _ -> List.init 16 (fun _ -> None) |> Some
-                            | BinOp SRem _ -> List.init 16 (fun _ -> None) |> Some
-                            | BinOp Shl (_, ConstOp c) ->
-                                operands.[0]
-                                |> List.rev
-                                |> List.skip (c |> int)
-                                |> List.rev
-                                |> List.append (List.init (c |> int) (fun _ -> Some false))
-                                |> Some
-                            | BinOp Shl _ -> List.init 16 (fun _ -> None) |> Some
-                            | BinOp LShr (_, ConstOp c) ->
-                                List.init (c |> int) (fun _ -> Some false)
-                                |> List.append (operands.[0] |> List.skip (c |> int))
-                                |> Some
-                            | BinOp AShr (_, ConstOp c) ->
-                                List.init (c |> int) (fun _ -> operands.[0].[15])
-                                |> List.append (operands.[0] |> List.skip (c |> int))
-                                |> Some
-                            | BinOp AShr _ -> List.init 16 (fun _ -> None) |> Some
-                            | BinOp UDiv _ -> List.init 16 (fun _ -> None) |> Some
-                            | BinOp URem _ -> List.init 16 (fun _ -> None) |> Some
-                            | BinOp LShr _ -> List.init 16 (fun _ -> None) |> Some
-                            | UnaryOp Negate _ ->
-                                operands.[0]
-                                |> negate
-                                |> addition (1s |> constantToValue)
-                                |> Some
-                            | UnaryOp Not _ -> operands.[0] |> negate |> Some
-                            | CondBrOp (Zero, _, trueBranch, falseBranch) ->
-                                if operands.[0] |> List.forall ((=) (Some false)) then
-                                    executableEdges <- executableEdges |> addEdge current trueBranch
-                                else if operands.[0] |> List.exists ((=) (Some true)) then
-                                    executableEdges <- executableEdges |> addEdge current falseBranch
-                                else
-                                    executableEdges <- executableEdges |> addEdge current trueBranch
-                                    executableEdges <- executableEdges |> addEdge current falseBranch
+                            let result =
+                                match instr with
+                                | BinOp And _ ->
+                                    List.map2
+                                        (fun op1 op2 ->
+                                            match op1, op2 with
+                                            | Some false, _
+                                            | _, Some false -> Some false
+                                            | None, _
+                                            | _, None -> None
+                                            | Some op1, Some op2 -> Some(op1 && op2))
+                                        operands.[0]
+                                        operands.[1]
+                                    |> Some
+                                | BinOp Or _ ->
+                                    List.map2
+                                        (fun op1 op2 ->
+                                            match op1, op2 with
+                                            | Some true, _
+                                            | _, Some true -> Some true
+                                            | None, _
+                                            | _, None -> None
+                                            | Some op1, Some op2 -> Some(op1 || op2))
+                                        operands.[0]
+                                        operands.[1]
+                                    |> Some
+                                | BinOp Xor _ ->
+                                    List.map2
+                                        (fun op1 op2 ->
+                                            match op1, op2 with
+                                            | None, _
+                                            | _, None -> None
+                                            | Some op1, Some op2 -> Some(op1 <> op2))
+                                        operands.[0]
+                                        operands.[1]
+                                    |> Some
+                                | BinOp Add _ -> addition operands.[0] operands.[1] |> Some
+                                | BinOp Sub _ -> subtraction operands.[0] operands.[1] |> Some
+                                | BinOp Mul _ -> List.init 16 (fun _ -> None) |> Some
+                                | BinOp SDiv _ -> List.init 16 (fun _ -> None) |> Some
+                                | BinOp SRem _ -> List.init 16 (fun _ -> None) |> Some
+                                | BinOp Shl (_, ConstOp c) ->
+                                    operands.[0]
+                                    |> List.rev
+                                    |> List.skip (c |> int)
+                                    |> List.rev
+                                    |> List.append (List.init (c |> int) (fun _ -> Some false))
+                                    |> Some
+                                | BinOp Shl _ -> List.init 16 (fun _ -> None) |> Some
+                                | BinOp LShr (_, ConstOp c) ->
+                                    List.init (c |> int) (fun _ -> Some false)
+                                    |> List.append (operands.[0] |> List.skip (c |> int))
+                                    |> Some
+                                | BinOp AShr (_, ConstOp c) ->
+                                    List.init (c |> int) (fun _ -> operands.[0].[15])
+                                    |> List.append (operands.[0] |> List.skip (c |> int))
+                                    |> Some
+                                | BinOp AShr _ -> List.init 16 (fun _ -> None) |> Some
+                                | BinOp UDiv _ -> List.init 16 (fun _ -> None) |> Some
+                                | BinOp URem _ -> List.init 16 (fun _ -> None) |> Some
+                                | BinOp LShr _ -> List.init 16 (fun _ -> None) |> Some
+                                | UnaryOp Negate _ ->
+                                    operands.[0]
+                                    |> negate
+                                    |> addition (1s |> constantToValue)
+                                    |> Some
+                                | UnaryOp Not _ -> operands.[0] |> negate |> Some
+                                | CondBrOp (Zero, _, trueBranch, falseBranch) ->
+                                    if operands.[0] |> List.forall ((=) (Some false)) then
+                                        executableEdges <- executableEdges |> addEdge current trueBranch
+                                    else if operands.[0] |> List.exists ((=) (Some true)) then
+                                        executableEdges <- executableEdges |> addEdge current falseBranch
+                                    else
+                                        executableEdges <- executableEdges |> addEdge current trueBranch
+                                        executableEdges <- executableEdges |> addEdge current falseBranch
 
-                                None
-                            | CondBrOp (Negative, _, trueBranch, falseBranch) ->
-                                match operands.[0].[15] with
-                                | Some true -> executableEdges <- executableEdges |> addEdge current trueBranch
-                                | Some false -> executableEdges <- executableEdges |> addEdge current falseBranch
-                                | None ->
-                                    executableEdges <- executableEdges |> addEdge current trueBranch
-                                    executableEdges <- executableEdges |> addEdge current falseBranch
+                                    None
+                                | CondBrOp (Negative, _, trueBranch, falseBranch) ->
+                                    match operands.[0].[15] with
+                                    | Some true -> executableEdges <- executableEdges |> addEdge current trueBranch
+                                    | Some false -> executableEdges <- executableEdges |> addEdge current falseBranch
+                                    | None ->
+                                        executableEdges <- executableEdges |> addEdge current trueBranch
+                                        executableEdges <- executableEdges |> addEdge current falseBranch
 
-                                None
-                            | GotoOp destination ->
-                                executableEdges <- executableEdges |> addEdge current destination
-                                None
-                            | instr when !instr |> Value.producesValue |> not -> None
-                            | _ -> List.init 16 (fun _ -> None) |> Some
+                                    None
+                                | GotoOp destination ->
+                                    executableEdges <- executableEdges |> addEdge current destination
+                                    None
+                                | instr when !instr |> Value.producesValue |> not -> None
+                                | _ -> List.init 16 (fun _ -> None) |> Some
 
-                        match result with
-                        | None -> replacements
-                        | Some result -> replacements |> ImmutableMap.add instr result) replacements)
-                 (fun current predecessors ->
-                     predecessors
-                     |> Seq.choose (fun (a, b) ->
-                         match b with
-                         | None -> None
-                         | Some b -> Some(a, b))
-                     |> Seq.map (fun (predecessor, replacement) ->
-                         !current
-                         |> Value.asBasicBlock
-                         |> BasicBlock.phis
-                         |> List.fold (fun replacement phi ->
-                             let phiOp =
-                                 !phi
-                                 |> Value.operands
-                                 |> List.pairwise
-                                 |> List.find (snd >> (=) predecessor)
-                                 |> fst
+                            match result with
+                            | None -> replacements
+                            | Some result -> replacements |> ImmutableMap.add instr result)
+                        replacements)
+                (fun current predecessors ->
+                    predecessors
+                    |> Seq.choose
+                        (fun (a, b) ->
+                            match b with
+                            | None -> None
+                            | Some b -> Some(a, b))
+                    |> Seq.map
+                        (fun (predecessor, replacement) ->
+                            !current
+                            |> Value.asBasicBlock
+                            |> BasicBlock.phis
+                            |> List.fold
+                                (fun replacement phi ->
+                                    let phiOp =
+                                        !phi
+                                        |> Value.operands
+                                        |> List.pairwise
+                                        |> List.find (snd >> (=) predecessor)
+                                        |> fst
 
-                             let phiRepl =
-                                 match phiOp with
-                                 | ConstOp c -> constantToValue c |> Some
-                                 | instr when !instr |> Value.producesValue -> replacement |> ImmutableMap.tryFind phiOp
-                                 | UndefOp -> constantToValue 0s |> Some
-                                 | _ -> None
+                                    let phiRepl =
+                                        match phiOp with
+                                        | ConstOp c -> constantToValue c |> Some
+                                        | instr when !instr |> Value.producesValue ->
+                                            replacement |> ImmutableMap.tryFind phiOp
+                                        | UndefOp -> constantToValue 0s |> Some
+                                        | _ -> None
 
-                             match phiRepl with
-                             | Some phiRepl -> replacement |> ImmutableMap.add phi phiRepl
-                             | None -> replacement
+                                    match phiRepl with
+                                    | Some phiRepl -> replacement |> ImmutableMap.add phi phiRepl
+                                    | None -> replacement
 
-                             ) replacement)
-                     |> List.ofSeq
-                     |> Some
-                     |> Option.filter (List.isEmpty >> not)
-                     |> Option.map
-                         (List.reduce (fun map1 map2 ->
-                             Seq.append map1 map2
-                             |> Seq.groupBy (fun kv -> kv.Key)
-                             |> Seq.map (fun (key, values) ->
-                                 (key,
-                                  values
-                                  |> Seq.map (fun kv -> kv.Value)
-                                  |> Seq.reduce (List.map2 (fun c1 c2 -> if c1 = c2 then c1 else None))))
-                             |> ImmutableMap.ofSeq))
-                     |> Option.defaultValue ImmutableMap.empty)
-                 ((!) >> BasicBlock.predecessors >> Seq.ofList)
-                 (fun x ->
-                     executableEdges
-                     |> ImmutableMap.tryFind x
-                     |> Option.defaultValue ImmutableSet.empty))
+                                    )
+                                replacement)
+                    |> List.ofSeq
+                    |> Some
+                    |> Option.filter (List.isEmpty >> not)
+                    |> Option.map (
+                        List.reduce
+                            (fun map1 map2 ->
+                                Seq.append map1 map2
+                                |> Seq.groupBy (fun kv -> kv.Key)
+                                |> Seq.map
+                                    (fun (key, values) ->
+                                        (key,
+                                         values
+                                         |> Seq.map (fun kv -> kv.Value)
+                                         |> Seq.reduce (List.map2 (fun c1 c2 -> if c1 = c2 then c1 else None))))
+                                |> ImmutableMap.ofSeq)
+                    )
+                    |> Option.defaultValue ImmutableMap.empty)
+                ((!) >> BasicBlock.predecessors >> Seq.ofList)
+                (fun x ->
+                    executableEdges
+                    |> ImmutableMap.tryFind x
+                    |> Option.defaultValue ImmutableSet.empty)
+        )
         |> Option.defaultValue ImmutableMap.empty
 
     let bitsRead =
@@ -1824,48 +1954,62 @@ let private deadBitElimination passManager irModule =
     |> Module.exitBlock
     |> Option.bind (fun x -> rewrites |> ImmutableMap.tryFind x)
     |> Option.defaultValue ImmutableMap.empty
-    |> Seq.choose (fun kv ->
-        let value, constants = kv.Deconstruct()
+    |> Seq.choose
+        (fun kv ->
+            let value, constants = kv.Deconstruct()
 
-        let mask = bitsRead.[value]
+            let mask = bitsRead.[value]
 
-        constants
-        |> Seq.indexed
-        |> Seq.fold (fun current (index, bit) ->
-            match current, bit with
-            | None, _ -> None
-            | Some current, None -> if (mask &&& (1us <<< index)) = 0us then Some current else None
-            | Some current, Some true -> (current <<< 1) ||| 1s |> Some
-            | Some current, Some false -> (current <<< 1) |> Some) (Some 0s)
-        |> Option.map (fun x -> (value, x)))
-    |> Seq.iter (fun (value, repl) ->
-        value
-        |> Value.replaceWith (Builder.createConstant repl))
+            constants
+            |> Seq.indexed
+            |> Seq.fold
+                (fun current (index, bit) ->
+                    match current, bit with
+                    | None, _ -> None
+                    | Some current, None ->
+                        if (mask &&& (1us <<< index)) = 0us then
+                            Some current
+                        else
+                            None
+                    | Some current, Some true -> (current <<< 1) ||| 1s |> Some
+                    | Some current, Some false -> (current <<< 1) |> Some)
+                (Some 0s)
+            |> Option.map (fun x -> (value, x)))
+    |> Seq.iter
+        (fun (value, repl) ->
+            value
+            |> Value.replaceWith (Builder.createConstant repl))
 
     let builder = Builder.fromModule irModule
 
     !irModule
     |> Module.revBasicBlocks
-    |> Seq.choose (fun bb ->
-        match executableEdges |> ImmutableMap.tryFind bb with
-        | Some successors when successors |> ImmutableSet.count = 1
-                               && !bb |> BasicBlock.successors |> List.length > 1 -> Some(bb, successors |> Seq.head)
-        | _ -> None)
-    |> Seq.iter (fun (bb, succ) ->
-        !bb
-        |> Value.asBasicBlock
-        |> BasicBlock.terminator
-        |> Value.replaceWith (builder |> Builder.createGoto succ |> fst))
+    |> Seq.choose
+        (fun bb ->
+            match executableEdges |> ImmutableMap.tryFind bb with
+            | Some successors when
+                successors |> ImmutableSet.count = 1
+                && !bb |> BasicBlock.successors |> List.length > 1
+                ->
+                Some(bb, successors |> Seq.head)
+            | _ -> None)
+    |> Seq.iter
+        (fun (bb, succ) ->
+            !bb
+            |> Value.asBasicBlock
+            |> BasicBlock.terminator
+            |> Value.replaceWith (builder |> Builder.createGoto succ |> fst))
 
     let reachable =
         executableEdges
         |> Seq.map (fun kv -> kv.Value)
         |> ImmutableSet.unionMany
-        |> ImmutableSet.union
-            (!irModule
-             |> Module.entryBlock
-             |> Option.toList
-             |> ImmutableSet.ofList)
+        |> ImmutableSet.union (
+            !irModule
+            |> Module.entryBlock
+            |> Option.toList
+            |> ImmutableSet.ofList
+        )
 
     !irModule
     |> Module.revBasicBlocks

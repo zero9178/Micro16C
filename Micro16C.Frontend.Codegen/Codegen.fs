@@ -96,11 +96,14 @@ module private Op =
         ||> Context.createUnary Not
         ||> Context.createBinary (Builder.createConstant 1s) Add
 
-    let plus lhs rhs context = Context.createBinary lhs Add rhs context
+    let plus lhs rhs context =
+        Context.createBinary lhs Add rhs context
 
-    let minus lhs rhs context = Context.createBinary lhs Sub rhs context
+    let minus lhs rhs context =
+        Context.createBinary lhs Sub rhs context
 
-    let bitAnd lhs rhs context = Context.createBinary lhs And rhs context
+    let bitAnd lhs rhs context =
+        Context.createBinary lhs And rhs context
 
     let bitNot value context =
         (value, context) ||> Context.createUnary Not
@@ -112,7 +115,8 @@ module private Op =
 
     let bitOr lhs rhs context = Context.createBinary lhs Or rhs context
 
-    let bitXor lhs rhs context = Context.createBinary lhs Xor rhs context
+    let bitXor lhs rhs context =
+        Context.createBinary lhs Xor rhs context
 
     let rem lhs rhs context =
         Context.createBinary lhs SRem rhs context
@@ -185,14 +189,16 @@ module private Op =
 
 let rec visitCompoundStatement (compoundItems: Sema.CompoundItem list) (context: Context) =
     compoundItems
-    |> List.fold (fun context x ->
-        match x with
-        | Sema.CompoundItemStatement statement -> context |> visitStatement statement
-        | Sema.CompoundItemDeclaration declaration ->
-            declaration
-            |> List.fold (fun context x -> visitDeclaration x context) context) context
+    |> List.fold
+        (fun context x ->
+            match x with
+            | Sema.CompoundItemStatement statement -> context |> visitStatement statement
+            | Sema.CompoundItemDeclaration declaration ->
+                declaration
+                |> List.fold (fun context x -> visitDeclaration x context) context)
+        context
 
-and visitStatement (statement: Sema.Statement) (context: Context): Context =
+and visitStatement (statement: Sema.Statement) (context: Context) : Context =
     match statement with
     | Sema.IfStatement (condition, trueStatement, falseStatement) ->
         let condition, context =
@@ -234,8 +240,8 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
                 (falseBranch, context |> Context.createGoto continueBranch)
 
         match (trueBranch, falseBranch) with
-        | (Some _, _)
-        | (_, Some _) ->
+        | Some _, _
+        | _, Some _ ->
             context
             |> Context.setInsertPoint (Some continueBranch)
         | _ -> context
@@ -332,15 +338,17 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
         |> visitStatement labelStatement
     | Sema.ContinueStatement statement ->
         context
-        |> Context.createGoto
-            (context.Continues
-             |> ImmutableMap.find (statement.Force() |> Option.get))
+        |> Context.createGoto (
+            context.Continues
+            |> ImmutableMap.find (statement.Force() |> Option.get)
+        )
         |> Context.setInsertPoint None
     | Sema.BreakStatement statement ->
         context
-        |> Context.createGoto
-            (context.Breaks
-             |> ImmutableMap.find (statement.Force() |> Option.get))
+        |> Context.createGoto (
+            context.Breaks
+            |> ImmutableMap.find (statement.Force() |> Option.get)
+        )
         |> Context.setInsertPoint None
     | Sema.ForStatement forStatement ->
         let context =
@@ -398,7 +406,7 @@ and visitStatement (statement: Sema.Statement) (context: Context): Context =
         |> Context.createGoto cond
         |> Context.setInsertPoint (Some cont)
 
-and visitDeclaration (declaration: Sema.Declaration) (context: Context): Context =
+and visitDeclaration (declaration: Sema.Declaration) (context: Context) : Context =
     let value, context =
         Context.createNamedAlloca (Token.identifier declaration.Name) context
 
@@ -415,7 +423,9 @@ and visitDeclaration (declaration: Sema.Declaration) (context: Context): Context
 
 and visitBinaryExpression (expression: Sema.Binary) (context: Context) =
     let lhs, context = visitExpression expression.Left context
-    let rhs, context = visitExpression expression.Right context
+
+    let rhs, context =
+        visitExpression expression.Right context
 
     match expression.Kind with
     | Sema.Plus -> Op.plus lhs rhs context
@@ -538,9 +548,11 @@ and visitExpression (expression: Sema.Expression) (context: Context) =
     | Sema.CommaExpression expression ->
         let values, context =
             expression.Expressions
-            |> List.fold (fun (result, context) x ->
-                let value, context = visitExpression x context
-                (value :: result, context)) ([], context)
+            |> List.fold
+                (fun (result, context) x ->
+                    let value, context = visitExpression x context
+                    (value :: result, context))
+                ([], context)
 
         (List.head values, context)
     | Sema.ConstantExpression constant -> (Builder.createConstant constant.Value, context)
@@ -577,7 +589,8 @@ let codegen (translationUnit: Sema.CompoundItem list) =
           Continues = ImmutableMap.empty
           Breaks = ImmutableMap.empty }
 
-    let entry, context = Context.createBasicBlock "entry" context
+    let entry, context =
+        Context.createBasicBlock "entry" context
 
     context
     |> Context.setInsertPoint (Some entry)

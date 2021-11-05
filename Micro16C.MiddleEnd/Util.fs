@@ -19,11 +19,11 @@ type ImmutableMap<'Key, 'Value when 'Key: not struct and 'Key: equality>(map: Im
 
     member this.Change(key, f) =
         match this.Dictionary.TryGetValue key with
-        | (false, _) ->
+        | false, _ ->
             f None
             |> Option.map (fun x -> this.Add(key, x))
             |> Option.defaultValue this
-        | (true, value) ->
+        | true, value ->
             value
             |> Some
             |> f
@@ -41,8 +41,8 @@ type ImmutableMap<'Key, 'Value when 'Key: not struct and 'Key: equality>(map: Im
 
     member this.TryFind key =
         match this.Dictionary.TryGetValue key with
-        | (false, _) -> None
-        | (true, value) -> Some value
+        | false, _ -> None
+        | true, value -> Some value
 
     member this.TryGetValue(key, value: byref<'Value>) =
         match this.TryFind key with
@@ -97,7 +97,7 @@ module ImmutableMap =
 
     let ofList (list: ('Key * 'Value) list) = ImmutableMap(list)
 
-    let ofSeq (seq: seq<('Key * 'Value)>) = ImmutableMap(seq)
+    let ofSeq (seq: seq<'Key * 'Value>) = ImmutableMap(seq)
 
     let empty<'Key, 'Value when 'Key: not struct and 'Key: equality> = ImmutableMap<'Key, 'Value>(Seq.empty)
 
@@ -134,7 +134,9 @@ type ImmutableSet<'Key when 'Key: equality and 'Key: not struct>(set: ImmutableH
     member this.Add value = this.HashSet.Add value |> ImmutableSet
 
     member this.Contains item = this.HashSet.Contains item
-    member this.IsProperSubsetOf enumerable = this.HashSet.IsProperSubsetOf enumerable
+
+    member this.IsProperSubsetOf enumerable =
+        this.HashSet.IsProperSubsetOf enumerable
 
     member this.IsProperSupersetOf enumerable =
         this.HashSet.IsProperSupersetOf enumerable
@@ -179,10 +181,10 @@ type ImmutableSet<'Key when 'Key: equality and 'Key: not struct>(set: ImmutableH
             (this :> IEquatable<ImmutableSet<'Key>>)
                 .Equals(other :?> ImmutableSet<'Key>)
 
-    override this.GetHashCode(): int =
+    override this.GetHashCode() : int =
         this.HashSet
         |> Seq.map (fun (x: 'Key) -> x.GetHashCode())
-        |> Seq.reduce ((^^^))
+        |> Seq.reduce (^^^)
 
     member this.Except other =
         this.HashSet.Except other |> ImmutableSet
@@ -190,7 +192,8 @@ type ImmutableSet<'Key when 'Key: equality and 'Key: not struct>(set: ImmutableH
     member this.Intersect other =
         this.HashSet.Intersect other |> ImmutableSet
 
-    member this.Union other = this.HashSet.Union other |> ImmutableSet
+    member this.Union other =
+        this.HashSet.Union other |> ImmutableSet
 
     member this.Remove value =
         this.HashSet.Remove value |> ImmutableSet
@@ -227,7 +230,10 @@ module ImmutableSet =
     let intersect (set1: ImmutableSet<'Key>) (set2: ImmutableSet<'Key>) = set1.Intersect set2
 
     let intersectMany (sets: seq<ImmutableSet<'Key>>) =
-        if sets |> Seq.isEmpty then empty else sets |> Seq.reduce intersect
+        if sets |> Seq.isEmpty then
+            empty
+        else
+            sets |> Seq.reduce intersect
 
     let isEmpty (set: ImmutableSet<'Key>) = set.IsEmpty
 
@@ -252,7 +258,10 @@ module ImmutableSet =
     let union (set1: ImmutableSet<'Key>) (set2: ImmutableSet<'Key>) = set1.Union set2
 
     let unionMany (sets: seq<ImmutableSet<'Key>>) =
-        if sets |> Seq.isEmpty then empty else sets |> Seq.reduce union
+        if sets |> Seq.isEmpty then
+            empty
+        else
+            sets |> Seq.reduce union
 
     let equal (set1: ImmutableSet<'Key>) (set2: ImmutableSet<'Key>) = set1.SetEquals set2
 

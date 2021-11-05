@@ -11,7 +11,7 @@ let private debugModulePasses title =
     { Pass =
           (fun _ irModule ->
 #if DEBUG
-              printf "%s\n%s\n" title ((!irModule) |> IR.Module.asText)
+              printf $"%s{title}\n%s{(!irModule) |> IR.Module.asText}\n"
 #endif
 
               irModule)
@@ -84,5 +84,5 @@ let main argv =
         match compile text |> Result.map Assembly.printAssembly with
         | Ok _ -> 0
         | Error s ->
-            eprintfn "%s" s
+            eprintfn $"%s{s}"
             -1

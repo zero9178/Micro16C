@@ -13,166 +13,179 @@ let private legalizeConstants _ irModule =
         !instr
         |> Value.operands
         |> List.indexed
-        |> List.choose (fun (i, x) ->
-            match x with
-            | ConstOp c when c <> 0s && c <> 1s && c <> -1s -> Some(i, c)
-            | _ -> None)
-        |> List.iter (fun (i, c) ->
+        |> List.choose
+            (fun (i, x) ->
+                match x with
+                | ConstOp c when c <> 0s && c <> 1s && c <> -1s -> Some(i, c)
+                | _ -> None)
+        |> List.iter
+            (fun (i, c) ->
 
-            // If the constant is an operand of the phi we can't place it in front of the phi; phis need to be
-            // at the start of a basic block before any non phi instructions. Instead we'll check the predecessor
-            // where the constant comes from and put the instructions before it's terminating instruction
-            let builder =
-                match instr with
-                | PhiOp _ ->
-                    let pred =
-                        !instr |> Value.operands |> List.item (i + 1)
+                // If the constant is an operand of the phi we can't place it in front of the phi; phis need to be
+                // at the start of a basic block before any non phi instructions. Instead we'll check the predecessor
+                // where the constant comes from and put the instructions before it's terminating instruction
+                let builder =
+                    match instr with
+                    | PhiOp _ ->
+                        let pred =
+                            !instr |> Value.operands |> List.item (i + 1)
 
-                    builder
-                    |> Builder.setInsertBlock (Some pred)
-                    |> Builder.setInsertPoint
-                        ((!pred)
-                         |> Value.asBasicBlock
-                         |> BasicBlock.terminator
-                         |> Before)
-                | _ ->
-                    builder
-                    |> Builder.setInsertBlock (!instr |> Value.parentBlock)
-                    |> Builder.setInsertPoint (Before instr)
+                        builder
+                        |> Builder.setInsertBlock (Some pred)
+                        |> Builder.setInsertPoint (
+                            (!pred)
+                            |> Value.asBasicBlock
+                            |> BasicBlock.terminator
+                            |> Before
+                        )
+                    | _ ->
+                        builder
+                        |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                        |> Builder.setInsertPoint (Before instr)
 
-            let allBits =
-                Seq.unfold (fun c -> Some(c &&& 0x8000us <> 0us, c <<< 1)) (c |> uint16)
-                |> Seq.take 16
+                let allBits =
+                    Seq.unfold (fun c -> Some(c &&& 0x8000us <> 0us, c <<< 1)) (c |> uint16)
+                    |> Seq.take 16
 
-            let splitIndex =
-                1
-                + (allBits
-                   |> Seq.windowed 2
-                   |> Seq.findIndex (fun l -> l.[0] <> l.[1]))
+                let splitIndex =
+                    1
+                    + (allBits
+                       |> Seq.windowed 2
+                       |> Seq.findIndex (fun l -> l.[0] <> l.[1]))
 
-            let (first, second) =
-                allBits |> List.ofSeq |> List.splitAt splitIndex
+                let first, second =
+                    allBits |> List.ofSeq |> List.splitAt splitIndex
 
-            let perfectSplit =
-                (List.forall id first
-                 && List.forall (id >> not) second)
-                || (List.forall (id >> not) first
-                    && List.forall id second)
+                let perfectSplit =
+                    (List.forall id first
+                     && List.forall (id >> not) second)
+                    || (List.forall (id >> not) first
+                        && List.forall id second)
 
-            if (perfectSplit
-                && List.length first < List.length second) then
+                if (perfectSplit
+                    && List.length first < List.length second) then
 
-                let pattern =
-                    Seq.unfold (fun c ->
-                        let c =
-                            Builder.createBinary c LShr (Builder.createConstant 1s) builder
-                            |> fst
+                    let pattern =
+                        Seq.unfold
+                            (fun c ->
+                                let c =
+                                    Builder.createBinary c LShr (Builder.createConstant 1s) builder
+                                    |> fst
 
-                        Some(c, c)) (Builder.createConstant -1s)
-                    |> Seq.take (List.length first)
-                    |> Seq.last
+                                Some(c, c))
+                            (Builder.createConstant -1s)
+                        |> Seq.take (List.length first)
+                        |> Seq.last
 
-                if not first.[0] then
-                    instr |> Value.setOperand i pattern
+                    if not first.[0] then
+                        instr |> Value.setOperand i pattern
+                    else
+                        instr
+                        |> Value.setOperand i (Builder.createUnary Not pattern builder |> fst)
                 else
-                    instr
-                    |> Value.setOperand i (Builder.createUnary Not pattern builder |> fst)
-            else
-            // if the number is of the form 00..00 11..11 and there are fewer 1s then 0s
-            // it is only faster to use left shifts on -1 if the amounts of 1s are higher than 3.
-            // Otherwise it's faster to build up the whole number using 1 constants instead
-            if perfectSplit
-               && (first.[0] || List.length second > 3) then
-                let pattern =
-                    Seq.unfold (fun c ->
-                        let c =
-                            Builder.createBinary c Shl (Builder.createConstant 1s) builder
-                            |> fst
+                // if the number is of the form 00..00 11..11 and there are fewer 1s then 0s
+                // it is only faster to use left shifts on -1 if the amounts of 1s are higher than 3.
+                // Otherwise it's faster to build up the whole number using 1 constants instead
+                if perfectSplit
+                   && (first.[0] || List.length second > 3) then
+                    let pattern =
+                        Seq.unfold
+                            (fun c ->
+                                let c =
+                                    Builder.createBinary c Shl (Builder.createConstant 1s) builder
+                                    |> fst
 
-                        Some(c, c)) (Builder.createConstant -1s)
-                    |> Seq.take (List.length second)
-                    |> Seq.last
+                                Some(c, c))
+                            (Builder.createConstant -1s)
+                        |> Seq.take (List.length second)
+                        |> Seq.last
 
-                if first.[0] then
-                    instr |> Value.setOperand i pattern
+                    if first.[0] then
+                        instr |> Value.setOperand i pattern
+                    else
+                        instr
+                        |> Value.setOperand i (Builder.createUnary Not pattern builder |> fst)
                 else
-                    instr
-                    |> Value.setOperand i (Builder.createUnary Not pattern builder |> fst)
-            else
-                let hasMore1s =
-                    allBits
-                    |> Seq.fold (fun res b -> if b then res + 1 else res) 0 > 8
+                    let hasMore1s =
+                        allBits
+                        |> Seq.fold (fun res b -> if b then res + 1 else res) 0 > 8
 
-                let c = if hasMore1s then ~~~c else c
+                    let c = if hasMore1s then ~~~c else c
 
-                let bitPairs =
-                    Seq.unfold (fun c ->
-                        if c = 0s then
-                            None
+                    let bitPairs =
+                        Seq.unfold
+                            (fun c ->
+                                if c = 0s then
+                                    None
+                                else
+                                    let lower2 = c &&& 0b11s
+                                    // Logical right shift needed, not an arithmetic shift
+                                    Some(lower2, ((c |> uint16) >>> 2) |> int16))
+                            c
+                        |> Seq.rev
+
+                    // If the number were to consist of an uneven amount of active bits, then the very first value in the
+                    // sequence is 1. The fold below does not account for bitPairs that are actually not pairs but a single
+                    // bit so we need to set the start value to 1 instead of 0 instead
+                    let start, bitPairs =
+                        match Seq.head bitPairs with
+                        | 0b01s -> (1s, Seq.tail bitPairs)
+                        | _ -> (0s, bitPairs)
+
+                    let shiftLeft value builder =
+                        Builder.createBinary value Shl (Builder.createConstant 1s) builder
+
+                    let c =
+                        bitPairs
+                        |> Seq.fold
+                            (fun (op, builder) bitPair ->
+                                match bitPair with
+                                | 0b00s ->
+                                    match op with
+                                    | ConstOp 0s -> (op, builder)
+                                    | _ ->
+                                        builder
+                                        |> Builder.createBinary op Add op
+                                        ||> shiftLeft
+                                | 0b01s ->
+                                    match op with
+                                    | ConstOp 0s -> (Builder.createConstant 1s, builder)
+                                    | _ ->
+                                        (op, builder)
+                                        ||> shiftLeft
+                                        ||> shiftLeft
+                                        ||> Builder.createBinary (Builder.createConstant 1s) Add
+                                | 0b10s ->
+                                    match op with
+                                    | ConstOp 0s -> (Builder.createConstant 1s, builder) ||> shiftLeft
+                                    | _ ->
+                                        (op, builder)
+                                        ||> shiftLeft
+                                        ||> Builder.createBinary (Builder.createConstant 1s) Add
+                                        ||> shiftLeft
+                                | 0b11s ->
+                                    match op with
+                                    | ConstOp 0s ->
+                                        (Builder.createConstant 1s, builder)
+                                        ||> shiftLeft
+                                        ||> Builder.createBinary (Builder.createConstant 1s) Add
+                                    | _ ->
+                                        (op, builder)
+                                        ||> shiftLeft
+                                        ||> Builder.createBinary (Builder.createConstant 1s) Add
+                                        ||> shiftLeft
+                                        ||> Builder.createBinary (Builder.createConstant 1s) Add
+                                | _ -> failwithf $"Internal Compiler Error: Invalid bit pair %d{bitPair}")
+                            (Builder.createConstant start, builder)
+                        |> fst
+
+                    let c =
+                        if hasMore1s then
+                            Builder.createUnary Not c builder |> fst
                         else
-                            let lower2 = c &&& 0b11s
-                            // Logical right shift needed, not an arithmetic shift
-                            Some(lower2, ((c |> uint16) >>> 2) |> int16)) c
-                    |> Seq.rev
+                            c
 
-                // If the number were to consist of an uneven amount of active bits, then the very first value in the
-                // sequence is 1. The fold below does not account for bitPairs that are actually not pairs but a single
-                // bit so we need to set the start value to 1 instead of 0 instead
-                let (start, bitPairs) =
-                    match Seq.head bitPairs with
-                    | 0b01s -> (1s, Seq.tail bitPairs)
-                    | _ -> (0s, bitPairs)
-
-                let shiftLeft value builder =
-                    Builder.createBinary value Shl (Builder.createConstant 1s) builder
-
-                let c =
-                    bitPairs
-                    |> Seq.fold (fun (op, builder) bitPair ->
-                        match bitPair with
-                        | 0b00s ->
-                            match op with
-                            | ConstOp 0s -> (op, builder)
-                            | _ ->
-                                builder
-                                |> Builder.createBinary op Add op
-                                ||> shiftLeft
-                        | 0b01s ->
-                            match op with
-                            | ConstOp 0s -> (Builder.createConstant 1s, builder)
-                            | _ ->
-                                (op, builder)
-                                ||> shiftLeft
-                                ||> shiftLeft
-                                ||> Builder.createBinary (Builder.createConstant 1s) Add
-                        | 0b10s ->
-                            match op with
-                            | ConstOp 0s -> (Builder.createConstant 1s, builder) ||> shiftLeft
-                            | _ ->
-                                (op, builder)
-                                ||> shiftLeft
-                                ||> Builder.createBinary (Builder.createConstant 1s) Add
-                                ||> shiftLeft
-                        | 0b11s ->
-                            match op with
-                            | ConstOp 0s ->
-                                (Builder.createConstant 1s, builder)
-                                ||> shiftLeft
-                                ||> Builder.createBinary (Builder.createConstant 1s) Add
-                            | _ ->
-                                (op, builder)
-                                ||> shiftLeft
-                                ||> Builder.createBinary (Builder.createConstant 1s) Add
-                                ||> shiftLeft
-                                ||> Builder.createBinary (Builder.createConstant 1s) Add
-                        | _ -> failwithf "Internal Compiler Error: Invalid bit pair %d" bitPair)
-                           (Builder.createConstant start, builder)
-                    |> fst
-
-                let c =
-                    if hasMore1s then Builder.createUnary Not c builder |> fst else c
-
-                instr |> Value.setOperand i c)
+                    instr |> Value.setOperand i c)
 
     !irModule
     |> Module.instructions
@@ -184,41 +197,44 @@ let private breakPhiCriticalEdges _ irModule =
 
     !irModule
     |> Module.basicBlocks
-    |> List.filter
-        ((!)
-         >> Value.asBasicBlock
-         >> BasicBlock.phis
-         >> List.length
-         >> (<>) 0)
+    |> List.filter (
+        (!)
+        >> Value.asBasicBlock
+        >> BasicBlock.phis
+        >> List.length
+        >> (<>) 0
+    )
     |> List.map (associateWith ((!) >> BasicBlock.predecessors))
-    |> List.iter (fun (currBlock, preds) ->
-        preds
-        |> List.iter (fun pred ->
-            if preds |> List.length > 1
-               && !pred |> BasicBlock.successors |> List.length > 1 then
-                // Destroy critical edges by inserting a block in between, in which we'll be able to place our
-                // copy operations
+    |> List.iter
+        (fun (currBlock, preds) ->
+            preds
+            |> List.iter
+                (fun pred ->
+                    if preds |> List.length > 1
+                       && !pred |> BasicBlock.successors |> List.length > 1 then
+                        // Destroy critical edges by inserting a block in between, in which we'll be able to place our
+                        // copy operations
 
-                let builder = Builder.fromModule irModule
+                        let builder = Builder.fromModule irModule
 
-                let block, builder =
-                    builder
-                    |> Builder.createBasicBlockAt (After pred) ""
+                        let block, builder =
+                            builder
+                            |> Builder.createBasicBlockAt (After pred) ""
 
-                !pred
-                |> Value.asBasicBlock
-                |> BasicBlock.terminator
-                |> Value.replaceOperand currBlock block
+                        !pred
+                        |> Value.asBasicBlock
+                        |> BasicBlock.terminator
+                        |> Value.replaceOperand currBlock block
 
-                !currBlock
-                |> Value.asBasicBlock
-                |> BasicBlock.phis
-                |> List.iter (Value.replaceOperand pred block)
+                        !currBlock
+                        |> Value.asBasicBlock
+                        |> BasicBlock.phis
+                        |> List.iter (Value.replaceOperand pred block)
 
-                builder
-                |> Builder.setInsertBlock (Some block)
-                |> Builder.createGoto currBlock
-                |> ignore))
+                        builder
+                        |> Builder.setInsertBlock (Some block)
+                        |> Builder.createGoto currBlock
+                        |> ignore))
 
     irModule
 
@@ -228,78 +244,79 @@ let private legalizeInstructions _ irModule =
 
     !irModule
     |> Module.instructions
-    |> Seq.iter (fun instr ->
-        match instr with
-        | UnaryOp Negate op ->
-            let replacement =
-                builder
-                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
-                |> Builder.setInsertPoint (Before instr)
-                |> Builder.createUnary Not op
-                ||> Builder.createBinary (Builder.createConstant 1s) Add
-                |> fst
+    |> Seq.iter
+        (fun instr ->
+            match instr with
+            | UnaryOp Negate op ->
+                let replacement =
+                    builder
+                    |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                    |> Builder.setInsertPoint (Before instr)
+                    |> Builder.createUnary Not op
+                    ||> Builder.createBinary (Builder.createConstant 1s) Add
+                    |> fst
 
-            instr |> Value.replaceWith replacement
-        | BinOp Sub (lhs, rhs) ->
+                instr |> Value.replaceWith replacement
+            | BinOp Sub (lhs, rhs) ->
 
-            let replacement =
-                builder
-                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
-                |> Builder.setInsertPoint (Before instr)
-                |> Builder.createUnary Not rhs
-                ||> Builder.createBinary (Builder.createConstant 1s) Add
-                ||> Builder.createBinary lhs Add
-                |> fst
+                let replacement =
+                    builder
+                    |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                    |> Builder.setInsertPoint (Before instr)
+                    |> Builder.createUnary Not rhs
+                    ||> Builder.createBinary (Builder.createConstant 1s) Add
+                    ||> Builder.createBinary lhs Add
+                    |> fst
 
-            instr |> Value.replaceWith replacement
-        | BinOp Or (lhs, rhs) ->
+                instr |> Value.replaceWith replacement
+            | BinOp Or (lhs, rhs) ->
 
-            // R0 | R1 = ~(~R0 & ~R1)
+                // R0 | R1 = ~(~R0 & ~R1)
 
-            let builder =
-                builder
-                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
-                |> Builder.setInsertPoint (Before instr)
+                let builder =
+                    builder
+                    |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                    |> Builder.setInsertPoint (Before instr)
 
-            let lhs =
-                builder |> Builder.createUnary Not lhs |> fst
+                let lhs =
+                    builder |> Builder.createUnary Not lhs |> fst
 
-            let replacement =
-                builder
-                |> Builder.createUnary Not rhs
-                ||> Builder.createBinary lhs And
-                |> fst
+                let replacement =
+                    builder
+                    |> Builder.createUnary Not rhs
+                    ||> Builder.createBinary lhs And
+                    |> fst
 
-            instr |> Value.replaceWith replacement
-        | BinOp Xor (lhs, rhs) ->
+                instr |> Value.replaceWith replacement
+            | BinOp Xor (lhs, rhs) ->
 
-            // R0 ^ R1 = (R1 & ~R2) + (~R1 & R2)
+                // R0 ^ R1 = (R1 & ~R2) + (~R1 & R2)
 
-            let builder =
-                builder
-                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
-                |> Builder.setInsertPoint (Before instr)
+                let builder =
+                    builder
+                    |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                    |> Builder.setInsertPoint (Before instr)
 
-            let lhsNew =
-                (rhs, builder)
-                ||> Builder.createUnary Not
-                ||> Builder.createBinary lhs And
-                |> fst
+                let lhsNew =
+                    (rhs, builder)
+                    ||> Builder.createUnary Not
+                    ||> Builder.createBinary lhs And
+                    |> fst
 
-            let rhsNew =
-                (lhs, builder)
-                ||> Builder.createUnary Not
-                ||> Builder.createBinary rhs And
-                |> fst
+                let rhsNew =
+                    (lhs, builder)
+                    ||> Builder.createUnary Not
+                    ||> Builder.createBinary rhs And
+                    |> fst
 
-            let replacement =
-                builder
-                |> Builder.createBinary lhsNew Add rhsNew
-                |> fst
+                let replacement =
+                    builder
+                    |> Builder.createBinary lhsNew Add rhsNew
+                    |> fst
 
-            instr |> Value.replaceWith replacement
-        | BinOp Mul (lhs, rhs) ->
-            (*
+                instr |> Value.replaceWith replacement
+            | BinOp Mul (lhs, rhs) ->
+                (*
             int mul(int l,int r)
             {
                 int sum = 0;
@@ -317,321 +334,327 @@ let private legalizeInstructions _ irModule =
             }
             *)
 
-            let beforeBlock, instrBlock, builder =
-                builder |> Builder.splitBlockAt (Before instr)
+                let beforeBlock, instrBlock, builder =
+                    builder |> Builder.splitBlockAt (Before instr)
 
-            let loop, builder =
-                builder
-                |> Builder.createBasicBlockAt (After beforeBlock) ""
-
-            !beforeBlock
-            |> Value.asBasicBlock
-            |> BasicBlock.terminator
-            |> Value.replaceOperand instrBlock loop
-
-            let builder =
-                builder |> Builder.setInsertBlock (Some loop)
-
-            let sum =
-                builder
-                |> Builder.createPhi [ (Builder.createConstant 0s, beforeBlock)
-                                       (Value.UndefValue, Value.UndefValue) ]
-                |> fst
-
-            let lhs =
-                builder
-                |> Builder.createPhi [ (lhs, beforeBlock)
-                                       (Value.UndefValue, Value.UndefValue) ]
-                |> fst
-
-            let rhs =
-                builder
-                |> Builder.createPhi [ (rhs, beforeBlock)
-                                       (Value.UndefValue, Value.UndefValue) ]
-                |> fst
-
-            let body, builder =
-                builder
-                |> Builder.createBasicBlockAt (After loop) ""
-
-            builder
-            |> Builder.createCondBr Zero lhs instrBlock body
-            |> ignore
-
-            let builder =
-                builder |> Builder.setInsertBlock (Some body)
-
-            let bitSet =
-                builder
-                |> Builder.createBinary lhs And (Builder.createConstant 1s)
-                |> fst
-
-            let bitSetBlock, builder =
-                builder
-                |> Builder.createBasicBlockAt (After body) ""
-
-            let continueBlock, builder =
-                builder
-                |> Builder.createBasicBlockAt (After bitSetBlock) ""
-
-            builder
-            |> Builder.createCondBr Zero bitSet continueBlock bitSetBlock
-            |> ignore
-
-            let builder =
-                builder
-                |> Builder.setInsertBlock (Some bitSetBlock)
-
-            let sumWithAdd =
-                builder |> Builder.createBinary sum Add rhs |> fst
-
-            let sumWithAdd, builder =
-                builder
-                |> Builder.createGoto continueBlock
-                |> snd
-                |> Builder.setInsertBlock (Some continueBlock)
-                |> Builder.createPhi [ (sumWithAdd, bitSetBlock)
-                                       (sum, body) ]
-
-            sum |> Value.setOperand 2 sumWithAdd
-            sum |> Value.setOperand 3 continueBlock
-
-            let newLhs =
-                builder
-                |> Builder.createBinary lhs LShr (Builder.createConstant 1s)
-                |> fst
-
-            lhs |> Value.setOperand 2 newLhs
-            lhs |> Value.setOperand 3 continueBlock
-
-            let newRhs =
-                builder
-                |> Builder.createBinary rhs Shl (Builder.createConstant 1s)
-                |> fst
-
-            rhs |> Value.setOperand 2 newRhs
-            rhs |> Value.setOperand 3 continueBlock
-
-            builder |> Builder.createGoto loop |> ignore
-
-            instr |> Value.replaceWith sum
-
-        | BinOp SRem (lhs, ConstOp c)
-        | BinOp URem (lhs, ConstOp c) when (c &&& (c - 1s)) = 0s ->
-            // lhs mod power of two can be lowered to a simple and
-            let builder = builder |> Builder.setInsertBlock None
-
-            instr
-            |> Value.replaceWith
-                (builder
-                 |> Builder.createBinary lhs And (Builder.createConstant (c - 1s))
-                 |> fst)
-        | BinOp SRem (lhs, rhs)
-        | BinOp URem (lhs, rhs) ->
-
-            let kind =
-                match instr with
-                | BinOp SRem _ -> SRem
-                | BinOp URem _ -> URem
-                | _ -> failwith "Internal Compiler Error"
-
-            let beforeBlock, instrBlock, builder =
-                builder |> Builder.splitBlockAt (Before instr)
-
-            let cont, lhs, builder =
-                if kind = SRem then
-                    let neg, builder =
-                        builder
-                        |> Builder.createBasicBlockAt (After beforeBlock) "modNeg"
-
-                    let cont, builder =
-                        builder
-                        |> Builder.createBasicBlockAt (After neg) "cont"
-
-                    let builder = builder |> Builder.setInsertBlock None
-
-                    !beforeBlock
-                    |> Value.asBasicBlock
-                    |> BasicBlock.terminator
-                    |> Value.replaceWith
-                        (builder
-                         |> Builder.createCondBr Negative lhs neg cont
-                         |> fst)
-
-                    let negated, builder =
-                        builder
-                        |> Builder.setInsertBlock (Some neg)
-                        |> Builder.createUnary Not lhs
-                        ||> Builder.createBinary (Builder.createConstant 1s) Add
-
-
-                    let phi, builder =
-                        builder
-                        |> Builder.createGoto cont
-                        |> snd
-                        |> Builder.setInsertBlock (Some cont)
-                        |> Builder.createPhi [ (negated, neg)
-                                               (lhs, beforeBlock) ]
-
-                    (cont, phi, builder)
-                else
-                    let cont, builder =
-                        builder
-                        |> Builder.createBasicBlockAt (After beforeBlock) "cont"
-
-                    let builder =
-                        builder |> Builder.setInsertBlock (Some cont)
-
-                    !beforeBlock
-                    |> Value.asBasicBlock
-                    |> BasicBlock.terminator
-                    |> Value.replaceOperand instrBlock cont
-
-                    (cont, lhs, builder)
-
-            let rhs =
-                builder
-                |> Builder.createUnary Not rhs
-                ||> Builder.createBinary (Builder.createConstant 1s) Add
-                |> fst
-
-            let body, builder =
-                builder
-                |> Builder.createBasicBlockAt (After cont) "modBody"
-
-            let modCont, builder =
-                builder
-                |> Builder.createBasicBlockAt (After body) "modCont"
-
-            let acc, builder =
-                builder
-                |> Builder.createGoto body
-                |> snd
-                |> Builder.setInsertBlock (Some body)
-                |> Builder.createPhi [ (lhs, cont)
-                                       (Value.UndefValue, modCont) ]
-
-            let nextValue =
-                builder |> Builder.createBinary acc Add rhs |> fst
-
-            acc |> Value.setOperand 2 nextValue
-
-            builder
-            |> Builder.createCondBr Negative nextValue instrBlock modCont
-            |> snd
-            |> Builder.setInsertBlock (Some modCont)
-            |> Builder.createGoto body
-            |> ignore
-
-            instr |> Value.replaceWith acc
-        | BinOp Shl (_, ConstOp 1s) -> ()
-        | BinOp LShr (_, ConstOp 1s) -> ()
-        | BinOp LShr (lhs, ConstOp c)
-        | BinOp Shl (lhs, ConstOp c) ->
-
-            let kind =
-                match instr with
-                | BinOp Shl _ -> Shl
-                | BinOp LShr _ -> LShr
-                | _ -> failwith "Internal Compiler Error"
-
-            let builder =
-                builder
-                |> Builder.setInsertBlock (!instr |> Value.parentBlock)
-                |> Builder.setInsertPoint (Before instr)
-
-            let repl =
-                [ 1s .. c ]
-                |> Seq.fold (fun current _ ->
+                let loop, builder =
                     builder
-                    |> Builder.createBinary current kind (Builder.createConstant 1s)
-                    |> fst) lhs
+                    |> Builder.createBasicBlockAt (After beforeBlock) ""
 
-            instr |> Value.replaceWith repl
-        | BinOp LShr (lhs, rhs)
-        | BinOp Shl (lhs, rhs) ->
+                !beforeBlock
+                |> Value.asBasicBlock
+                |> BasicBlock.terminator
+                |> Value.replaceOperand instrBlock loop
 
-            let kind =
-                match instr with
-                | BinOp Shl _ -> Shl
-                | BinOp LShr _ -> LShr
-                | _ -> failwith "Internal Compiler Error"
+                let builder =
+                    builder |> Builder.setInsertBlock (Some loop)
 
-            let beforeBlock, instrBlock, builder =
-                builder |> Builder.splitBlockAt (Before instr)
+                let sum =
+                    builder
+                    |> Builder.createPhi [ (Builder.createConstant 0s, beforeBlock)
+                                           (Value.UndefValue, Value.UndefValue) ]
+                    |> fst
 
-            let builder =
+                let lhs =
+                    builder
+                    |> Builder.createPhi [ (lhs, beforeBlock)
+                                           (Value.UndefValue, Value.UndefValue) ]
+                    |> fst
+
+                let rhs =
+                    builder
+                    |> Builder.createPhi [ (rhs, beforeBlock)
+                                           (Value.UndefValue, Value.UndefValue) ]
+                    |> fst
+
+                let body, builder =
+                    builder
+                    |> Builder.createBasicBlockAt (After loop) ""
+
                 builder
-                |> Builder.setInsertBlock (Some beforeBlock)
-                |> Builder.setInsertPoint
-                    (Before
-                        (!beforeBlock
-                         |> Value.asBasicBlock
-                         |> BasicBlock.terminator))
+                |> Builder.createCondBr Zero lhs instrBlock body
+                |> ignore
 
-            let negRhs =
-                (rhs, builder)
-                ||> Builder.createUnary Not
-                ||> Builder.createBinary (Builder.createConstant 1s) Add
-                |> fst
+                let builder =
+                    builder |> Builder.setInsertBlock (Some body)
 
-            let cond, builder =
+                let bitSet =
+                    builder
+                    |> Builder.createBinary lhs And (Builder.createConstant 1s)
+                    |> fst
+
+                let bitSetBlock, builder =
+                    builder
+                    |> Builder.createBasicBlockAt (After body) ""
+
+                let continueBlock, builder =
+                    builder
+                    |> Builder.createBasicBlockAt (After bitSetBlock) ""
+
                 builder
-                |> Builder.createBasicBlockAt (After beforeBlock) "shCond"
+                |> Builder.createCondBr Zero bitSet continueBlock bitSetBlock
+                |> ignore
 
-            let body, builder =
+                let builder =
+                    builder
+                    |> Builder.setInsertBlock (Some bitSetBlock)
+
+                let sumWithAdd =
+                    builder |> Builder.createBinary sum Add rhs |> fst
+
+                let sumWithAdd, builder =
+                    builder
+                    |> Builder.createGoto continueBlock
+                    |> snd
+                    |> Builder.setInsertBlock (Some continueBlock)
+                    |> Builder.createPhi [ (sumWithAdd, bitSetBlock)
+                                           (sum, body) ]
+
+                sum |> Value.setOperand 2 sumWithAdd
+                sum |> Value.setOperand 3 continueBlock
+
+                let newLhs =
+                    builder
+                    |> Builder.createBinary lhs LShr (Builder.createConstant 1s)
+                    |> fst
+
+                lhs |> Value.setOperand 2 newLhs
+                lhs |> Value.setOperand 3 continueBlock
+
+                let newRhs =
+                    builder
+                    |> Builder.createBinary rhs Shl (Builder.createConstant 1s)
+                    |> fst
+
+                rhs |> Value.setOperand 2 newRhs
+                rhs |> Value.setOperand 3 continueBlock
+
+                builder |> Builder.createGoto loop |> ignore
+
+                instr |> Value.replaceWith sum
+
+            | BinOp SRem (lhs, ConstOp c)
+            | BinOp URem (lhs, ConstOp c) when (c &&& (c - 1s)) = 0s ->
+                // lhs mod power of two can be lowered to a simple and
+                let builder = builder |> Builder.setInsertBlock None
+
+                instr
+                |> Value.replaceWith (
+                    builder
+                    |> Builder.createBinary lhs And (Builder.createConstant (c - 1s))
+                    |> fst
+                )
+            | BinOp SRem (lhs, rhs)
+            | BinOp URem (lhs, rhs) ->
+
+                let kind =
+                    match instr with
+                    | BinOp SRem _ -> SRem
+                    | BinOp URem _ -> URem
+                    | _ -> failwith "Internal Compiler Error"
+
+                let beforeBlock, instrBlock, builder =
+                    builder |> Builder.splitBlockAt (Before instr)
+
+                let cont, lhs, builder =
+                    if kind = SRem then
+                        let neg, builder =
+                            builder
+                            |> Builder.createBasicBlockAt (After beforeBlock) "modNeg"
+
+                        let cont, builder =
+                            builder
+                            |> Builder.createBasicBlockAt (After neg) "cont"
+
+                        let builder = builder |> Builder.setInsertBlock None
+
+                        !beforeBlock
+                        |> Value.asBasicBlock
+                        |> BasicBlock.terminator
+                        |> Value.replaceWith (
+                            builder
+                            |> Builder.createCondBr Negative lhs neg cont
+                            |> fst
+                        )
+
+                        let negated, builder =
+                            builder
+                            |> Builder.setInsertBlock (Some neg)
+                            |> Builder.createUnary Not lhs
+                            ||> Builder.createBinary (Builder.createConstant 1s) Add
+
+
+                        let phi, builder =
+                            builder
+                            |> Builder.createGoto cont
+                            |> snd
+                            |> Builder.setInsertBlock (Some cont)
+                            |> Builder.createPhi [ (negated, neg)
+                                                   (lhs, beforeBlock) ]
+
+                        (cont, phi, builder)
+                    else
+                        let cont, builder =
+                            builder
+                            |> Builder.createBasicBlockAt (After beforeBlock) "cont"
+
+                        let builder =
+                            builder |> Builder.setInsertBlock (Some cont)
+
+                        !beforeBlock
+                        |> Value.asBasicBlock
+                        |> BasicBlock.terminator
+                        |> Value.replaceOperand instrBlock cont
+
+                        (cont, lhs, builder)
+
+                let rhs =
+                    builder
+                    |> Builder.createUnary Not rhs
+                    ||> Builder.createBinary (Builder.createConstant 1s) Add
+                    |> fst
+
+                let body, builder =
+                    builder
+                    |> Builder.createBasicBlockAt (After cont) "modBody"
+
+                let modCont, builder =
+                    builder
+                    |> Builder.createBasicBlockAt (After body) "modCont"
+
+                let acc, builder =
+                    builder
+                    |> Builder.createGoto body
+                    |> snd
+                    |> Builder.setInsertBlock (Some body)
+                    |> Builder.createPhi [ (lhs, cont)
+                                           (Value.UndefValue, modCont) ]
+
+                let nextValue =
+                    builder |> Builder.createBinary acc Add rhs |> fst
+
+                acc |> Value.setOperand 2 nextValue
+
                 builder
-                |> Builder.createBasicBlockAt (After cond) "shBody"
+                |> Builder.createCondBr Negative nextValue instrBlock modCont
+                |> snd
+                |> Builder.setInsertBlock (Some modCont)
+                |> Builder.createGoto body
+                |> ignore
 
-            !beforeBlock
-            |> Value.asBasicBlock
-            |> BasicBlock.terminator
-            |> Value.replaceOperand instrBlock cond
+                instr |> Value.replaceWith acc
+            | BinOp Shl (_, ConstOp 1s) -> ()
+            | BinOp LShr (_, ConstOp 1s) -> ()
+            | BinOp LShr (lhs, ConstOp c)
+            | BinOp Shl (lhs, ConstOp c) ->
 
-            let builder =
-                builder |> Builder.setInsertBlock (Some cond)
+                let kind =
+                    match instr with
+                    | BinOp Shl _ -> Shl
+                    | BinOp LShr _ -> LShr
+                    | _ -> failwith "Internal Compiler Error"
 
-            let i =
+                let builder =
+                    builder
+                    |> Builder.setInsertBlock (!instr |> Value.parentBlock)
+                    |> Builder.setInsertPoint (Before instr)
+
+                let repl =
+                    [ 1s .. c ]
+                    |> Seq.fold
+                        (fun current _ ->
+                            builder
+                            |> Builder.createBinary current kind (Builder.createConstant 1s)
+                            |> fst)
+                        lhs
+
+                instr |> Value.replaceWith repl
+            | BinOp LShr (lhs, rhs)
+            | BinOp Shl (lhs, rhs) ->
+
+                let kind =
+                    match instr with
+                    | BinOp Shl _ -> Shl
+                    | BinOp LShr _ -> LShr
+                    | _ -> failwith "Internal Compiler Error"
+
+                let beforeBlock, instrBlock, builder =
+                    builder |> Builder.splitBlockAt (Before instr)
+
+                let builder =
+                    builder
+                    |> Builder.setInsertBlock (Some beforeBlock)
+                    |> Builder.setInsertPoint (
+                        Before(
+                            !beforeBlock
+                            |> Value.asBasicBlock
+                            |> BasicBlock.terminator
+                        )
+                    )
+
+                let negRhs =
+                    (rhs, builder)
+                    ||> Builder.createUnary Not
+                    ||> Builder.createBinary (Builder.createConstant 1s) Add
+                    |> fst
+
+                let cond, builder =
+                    builder
+                    |> Builder.createBasicBlockAt (After beforeBlock) "shCond"
+
+                let body, builder =
+                    builder
+                    |> Builder.createBasicBlockAt (After cond) "shBody"
+
+                !beforeBlock
+                |> Value.asBasicBlock
+                |> BasicBlock.terminator
+                |> Value.replaceOperand instrBlock cond
+
+                let builder =
+                    builder |> Builder.setInsertBlock (Some cond)
+
+                let i =
+                    builder
+                    |> Builder.createPhi [ (Builder.createConstant 0s, beforeBlock)
+                                           (Value.UndefValue, body) ]
+                    |> fst
+
+                let acc =
+                    builder
+                    |> Builder.createPhi [ (lhs, beforeBlock)
+                                           (Value.UndefValue, body) ]
+                    |> fst
+
+                let diff =
+                    builder
+                    |> Builder.createBinary i Add negRhs
+                    |> fst
+
                 builder
-                |> Builder.createPhi [ (Builder.createConstant 0s, beforeBlock)
-                                       (Value.UndefValue, body) ]
-                |> fst
+                |> Builder.createCondBr Negative diff body instrBlock
+                |> ignore
 
-            let acc =
-                builder
-                |> Builder.createPhi [ (lhs, beforeBlock)
-                                       (Value.UndefValue, body) ]
-                |> fst
+                let builder =
+                    builder |> Builder.setInsertBlock (Some body)
 
-            let diff =
-                builder
-                |> Builder.createBinary i Add negRhs
-                |> fst
+                let newAcc =
+                    builder
+                    |> Builder.createBinary acc kind (Builder.createConstant 1s)
+                    |> fst
 
-            builder
-            |> Builder.createCondBr Negative diff body instrBlock
-            |> ignore
+                acc |> Value.setOperand 2 newAcc
 
-            let builder =
-                builder |> Builder.setInsertBlock (Some body)
+                let newI =
+                    builder
+                    |> Builder.createBinary i Add (Builder.createConstant 1s)
+                    |> fst
 
-            let newAcc =
-                builder
-                |> Builder.createBinary acc kind (Builder.createConstant 1s)
-                |> fst
+                i |> Value.setOperand 2 newI
 
-            acc |> Value.setOperand 2 newAcc
-
-            let newI =
-                builder
-                |> Builder.createBinary i Add (Builder.createConstant 1s)
-                |> fst
-
-            i |> Value.setOperand 2 newI
-
-            builder |> Builder.createGoto cond |> ignore
-            instr |> Value.replaceWith acc
-        | _ -> ())
+                builder |> Builder.createGoto cond |> ignore
+                instr |> Value.replaceWith acc
+            | _ -> ())
 
     irModule
 

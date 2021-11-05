@@ -3,10 +3,10 @@ module Micro16C.MiddleEnd.PassManager
 open Micro16C.MiddleEnd.Util
 
 type IAnalysis =
-    abstract DependsOn: IAnalysis list
+    abstract DependsOn : IAnalysis list
 
 type IPassManager =
-    abstract AnalysisData: ImmutableMap<IAnalysis, obj>
+    abstract AnalysisData : ImmutableMap<IAnalysis, obj>
 
 [<ReferenceEquality>]
 type Analysis<'In, 'Out> =
@@ -16,8 +16,8 @@ type Analysis<'In, 'Out> =
         member this.DependsOn = this.DependsOn
 
 type ITransformation =
-    abstract DependsOn: IAnalysis list
-    abstract Invalidates: IAnalysis list
+    abstract DependsOn : IAnalysis list
+    abstract Invalidates : IAnalysis list
 
 and [<NoEquality; NoComparison>] Transformation<'In, 'Out> =
     { Pass: IPassManager -> 'In -> 'Out
@@ -32,19 +32,20 @@ and [<NoEquality; NoComparison>] PassManager<'In, 'Out> =
         { TransformPasses: (ITransformation * (ITransformation -> IPassManager -> obj -> obj)) list
           AnalysisPasses: ImmutableMap<IAnalysis, IAnalysis -> IPassManager -> obj -> obj>
           AnalysisData: ImmutableMap<IAnalysis, obj> }
-        interface IPassManager with
-            member this.AnalysisData = this.AnalysisData
+    interface IPassManager with
+        member this.AnalysisData = this.AnalysisData
 
 module PassManager =
 
-    let Default (): PassManager<'In, 'Out> =
+    let Default () : PassManager<'In, 'Out> =
         { TransformPasses = []
           AnalysisPasses = ImmutableMap.empty
           AnalysisData = ImmutableMap.empty }
 
-    let queueTransform (pass: Transformation<'In, 'Out>)
-                       (passManager: PassManager<'Start, 'In>)
-                       : PassManager<'Start, 'Out> =
+    let queueTransform
+        (pass: Transformation<'In, 'Out>)
+        (passManager: PassManager<'Start, 'In>)
+        : PassManager<'Start, 'Out> =
         { TransformPasses =
               (pass :> ITransformation,
                (fun pass manager input -> ((pass :?> Transformation<'In, 'Out>).Pass manager (input :?> 'In)) :> obj))
@@ -56,8 +57,9 @@ module PassManager =
         { passManager with
               AnalysisPasses =
                   passManager.AnalysisPasses
-                  |> ImmutableMap.add (pass :> IAnalysis) (fun pass manager input ->
-                         ((pass :?> Analysis<'In, 'Out>).Pass manager (input :?> 'In)) :> obj) }
+                  |> ImmutableMap.add
+                      (pass :> IAnalysis)
+                      (fun pass manager input -> ((pass :?> Analysis<'In, 'Out>).Pass manager (input :?> 'In)) :> obj) }
 
     let tryAnalysisData (analysis: Analysis<_, 'T>) (passManager: IPassManager) =
         passManager.AnalysisData
@@ -67,7 +69,7 @@ module PassManager =
     let analysisData analysis passManager =
         tryAnalysisData analysis passManager |> Option.get
 
-    let run (input: 'In) (passManager: PassManager<'In, 'Out>): 'Out =
+    let run (input: 'In) (passManager: PassManager<'In, 'Out>) : 'Out =
 
         let rec ensureAnalysis analysis input passManager =
             if passManager.AnalysisData
@@ -83,25 +85,30 @@ module PassManager =
                           passManager.AnalysisData
                           |> ImmutableMap.add
                               analysis
-                                 (passManager.AnalysisPasses.[analysis] analysis (passManager :> IPassManager) input) }
+                              (passManager.AnalysisPasses.[analysis] analysis (passManager :> IPassManager) input) }
 
         passManager.TransformPasses
         |> List.rev
-        |> List.fold (fun (data, passManager) (pass, apply) ->
-            let passManager =
-                pass.DependsOn
-                |> List.fold (fun passManager analysis -> ensureAnalysis analysis data passManager) passManager
+        |> List.fold
+            (fun (data, passManager) (pass, apply) ->
+                let passManager =
+                    pass.DependsOn
+                    |> List.fold (fun passManager analysis -> ensureAnalysis analysis data passManager) passManager
 
-            let data =
-                apply pass (passManager :> IPassManager) data
+                let data =
+                    apply pass (passManager :> IPassManager) data
 
-            let passManager =
-                pass.Invalidates
-                |> List.fold (fun passManager analysis ->
-                    { passManager with
-                          AnalysisData =
-                              passManager.AnalysisData
-                              |> ImmutableMap.remove analysis }) passManager
+                let passManager =
+                    pass.Invalidates
+                    |> List.fold
+                        (fun passManager analysis ->
+                            { passManager with
+                                  AnalysisData =
+                                      passManager.AnalysisData
+                                      |> ImmutableMap.remove analysis })
+                        passManager
 
-            (data, passManager)) (input :> obj, passManager)
-        |> fst :?> 'Out
+                (data, passManager))
+            (input :> obj, passManager)
+        |> fst
+        :?> 'Out

@@ -32,20 +32,22 @@ let private prependOperation operation list =
                    ABus = Some input
                    BBus = None
                    AMux = Some AMux.ABus
-                   Condition = None } as op2) :: rest when sBus = aBus
-                                                           && Operation.canCombineExclusive
-                                                               { op1 with
-                                                                     Shifter = None
-                                                                     ALU = None
-                                                                     ABus = None
-                                                                     SBus = None
-                                                                     AMux = None }
-                                                                  { op2 with
-                                                                        Shifter = None
-                                                                        ALU = None
-                                                                        ABus = None
-                                                                        SBus = None
-                                                                        AMux = None } ->
+                   Condition = None } as op2) :: rest when
+        sBus = aBus
+        && Operation.canCombineExclusive
+            { op1 with
+                  Shifter = None
+                  ALU = None
+                  ABus = None
+                  SBus = None
+                  AMux = None }
+            { op2 with
+                  Shifter = None
+                  ALU = None
+                  ABus = None
+                  SBus = None
+                  AMux = None }
+        ->
         let op =
             Operation.combine
                 { op1 with
@@ -73,12 +75,11 @@ let private prependOperation operation list =
         AMux = Some AMux.ABus
         SBus = None
         Condition = Some _ } as op1,
-      Operation ({ Shifter = (None
-                   | Some Shifter.Noop)
-                   SBus = Some sBus } as op2) :: rest when aBus = sBus
-                                                           && Operation.canCombineExclusive
-                                                               { op1 with ALU = None; ABus = None }
-                                                                  op2 ->
+      Operation ({ Shifter = (None | Some Shifter.Noop)
+                   SBus = Some sBus } as op2) :: rest when
+        aBus = sBus
+        && Operation.canCombineExclusive { op1 with ALU = None; ABus = None } op2
+        ->
         let op =
             Operation.combine { op1 with ALU = None; ABus = None } op2
 
@@ -87,11 +88,10 @@ let private prependOperation operation list =
         AMux = Some AMux.MBR
         SBus = None
         Condition = Some _ } as op1,
-      Operation ({ Shifter = (None
-                   | Some Shifter.Noop)
-                   MBRWrite = Some true } as op2) :: rest when Operation.canCombineExclusive
-                                                                   { op1 with ALU = None; ABus = None }
-                                                                   op2 ->
+      Operation ({ Shifter = (None | Some Shifter.Noop)
+                   MBRWrite = Some true } as op2) :: rest when
+        Operation.canCombineExclusive { op1 with ALU = None; ABus = None } op2
+        ->
         let op =
             Operation.combine { op1 with ALU = None; ABus = None } op2
 
@@ -125,116 +125,131 @@ let private genPhiMoves liveInfo registers block list =
     |> BasicBlock.successors
     |> Seq.tryExactlyOne
     |> Option.map ((!) >> Value.asBasicBlock >> BasicBlock.phis)
-    |> Option.map (fun phis ->
-        let transfers =
-            phis
-            |> Seq.fold (fun list phi ->
-                match !phi
-                      |> Value.operands
-                      |> Seq.pairwise
-                      |> Seq.find (snd >> (=) block)
-                      |> fst with
-                | UndefOp -> list
-                | source ->
-                    (source |> operandToBus registers |> Option.get, phi |> operandToBus registers |> Option.get)
-                    :: list) []
+    |> Option.map
+        (fun phis ->
+            let transfers =
+                phis
+                |> Seq.fold
+                    (fun list phi ->
+                        match !phi
+                              |> Value.operands
+                              |> Seq.pairwise
+                              |> Seq.find (snd >> (=) block)
+                              |> fst with
+                        | UndefOp -> list
+                        | source ->
+                            (source |> operandToBus registers |> Option.get, phi |> operandToBus registers |> Option.get)
+                            :: list)
+                    []
 
-        let assigned = Array.create 13 false
+            let assigned = Array.create 13 false
 
-        liveInfo
-        |> ImmutableMap.find block
-        |> LivenessInfo.liveOut
-        |> Seq.map
-            (fun x -> registers |> ImmutableMap.find x
-             >> RegisterAllocator.registerToIndex)
-        |> Seq.iter (fun i -> Array.set assigned i true)
+            liveInfo
+            |> ImmutableMap.find block
+            |> LivenessInfo.liveOut
+            |> Seq.map (
+                fun x -> registers |> ImmutableMap.find x
+                >> RegisterAllocator.registerToIndex
+            )
+            |> Seq.iter (fun i -> Array.set assigned i true)
 
-        let notZeroOutDegrees seq =
-            seq
-            |> Seq.filter (fun (x, y) -> x <> y)
-            |> Seq.countBy fst
-            |> Seq.map fst
+            let notZeroOutDegrees seq =
+                seq
+                |> Seq.filter (fun (x, y) -> x <> y)
+                |> Seq.countBy fst
+                |> Seq.map fst
 
-        let transfers, list =
-            Seq.unfold (fun (transfers, list) ->
-                let newTransfer, list =
-                    transfers
-                    |> List.fold (fun (transfers, list) (fromReg, toReg) ->
-                        if toReg = fromReg
-                           || notZeroOutDegrees transfers |> Seq.contains toReg then
-                            (transfers, list)
+            let transfers, list =
+                Seq.unfold
+                    (fun (transfers, list) ->
+                        let newTransfer, list =
+                            transfers
+                            |> List.fold
+                                (fun (transfers, list) (fromReg, toReg) ->
+                                    if toReg = fromReg
+                                       || notZeroOutDegrees transfers |> Seq.contains toReg then
+                                        (transfers, list)
+                                    else
+                                        let list = list |> prependMove fromReg toReg
+
+                                        fromReg
+                                        |> Bus.toRegister
+                                        |> Option.iter
+                                            (fun reg ->
+                                                Array.set assigned (reg |> RegisterAllocator.registerToIndex) false)
+
+                                        let transfers =
+                                            transfers
+                                            |> List.choose
+                                                (fun (a, b) ->
+                                                    if a = fromReg && b = toReg then None
+                                                    else if a = fromReg then Some(toReg, b)
+                                                    else Some(a, b))
+
+                                        (transfers, list))
+                                (transfers, list)
+
+                        if List.length newTransfer = List.length transfers then
+                            None
                         else
-                            let list = list |> prependMove fromReg toReg
+                            Some((newTransfer, list), (newTransfer, list)))
+                    (transfers, list)
+                |> Seq.append (Seq.singleton (transfers, list))
+                |> Seq.last
 
-                            fromReg
-                            |> Bus.toRegister
-                            |> Option.iter (fun reg ->
-                                Array.set assigned (reg |> RegisterAllocator.registerToIndex) false)
+            let maps =
+                transfers
+                |> List.filter (fun (x, y) -> x <> y)
+                |> List.map (fun (x, y) -> (y, x))
+                |> Map
 
-                            let transfers =
-                                transfers
-                                |> List.choose (fun (a, b) ->
-                                    if a = fromReg && b = toReg then None
-                                    else if a = fromReg then Some(toReg, b)
-                                    else Some(a, b))
+            let temp =
+                lazy
+                    (match assigned |> Array.tryFindIndex not with
+                     | None ->
+                         failwith
+                             "Too much register pressure to implement phi operation. Spilling is not yet implemented"
+                     | Some i ->
+                         Array.set assigned i true
 
-                            (transfers, list)) (transfers, list)
+                         i
+                         |> RegisterAllocator.indexToRegister
+                         |> Register.toBus)
 
-                if List.length newTransfer = List.length transfers
-                then None
-                else Some((newTransfer, list), (newTransfer, list))) (transfers, list)
-            |> Seq.append (Seq.singleton (transfers, list))
-            |> Seq.last
+            Seq.unfold
+                (fun (maps, list) ->
+                    if maps |> Map.isEmpty then
+                        None
+                    else
+                        let brokenOpen = maps |> Seq.head
+                        let maps = maps |> Map.remove brokenOpen.Key
 
-        let maps =
-            transfers
-            |> List.filter (fun (x, y) -> x <> y)
-            |> List.map (fun (x, y) -> (y, x))
-            |> Map
+                        let maps, list =
+                            Seq.unfold
+                                (fun (current, toReg, maps, list) ->
+                                    match current with
+                                    | None -> None
+                                    | Some current ->
+                                        let list = prependMove current toReg list
 
-        let temp =
-            lazy
-                (match assigned |> Array.tryFindIndex not with
-                 | None ->
-                     failwith "Too much register pressure to implement phi operation. Spilling is not yet implemented"
-                 | Some i ->
-                     Array.set assigned i true
+                                        match maps |> Map.tryFind current with
+                                        | None -> Some((maps, list), (None, current, maps, list))
+                                        | Some next ->
+                                            let maps = maps |> Map.remove current
+                                            Some((maps, list), (Some next, current, maps, list)))
+                                (Some brokenOpen.Value, temp.Force(), maps, list)
+                            |> Seq.last
 
-                     i
-                     |> RegisterAllocator.indexToRegister
-                     |> Register.toBus)
+                        let list =
+                            prependMove (temp.Force()) brokenOpen.Key list
 
-        Seq.unfold (fun (maps, list) ->
-            if maps |> Map.isEmpty then
-                None
-            else
-                let brokenOpen = maps |> Seq.head
-                let maps = maps |> Map.remove brokenOpen.Key
-
-                let maps, list =
-                    Seq.unfold (fun (current, toReg, maps, list) ->
-                        match current with
-                        | None -> None
-                        | Some current ->
-                            let list = prependMove current toReg list
-
-                            match maps |> Map.tryFind current with
-                            | None -> Some((maps, list), (None, current, maps, list))
-                            | Some next ->
-                                let maps = maps |> Map.remove current
-                                Some((maps, list), (Some next, current, maps, list)))
-                        (Some brokenOpen.Value, temp.Force(), maps, list)
-                    |> Seq.last
-
-                let list =
-                    prependMove (temp.Force()) brokenOpen.Key list
-
-                Some(list, (maps, list))) (maps, list)
-        |> Seq.tryLast
-        |> Option.defaultValue list)
+                        Some(list, (maps, list)))
+                (maps, list)
+            |> Seq.tryLast
+            |> Option.defaultValue list)
     |> Option.defaultValue list
 
-let private genAssembly passManager irModule: AssemblyLine list =
+let private genAssembly passManager irModule : AssemblyLine list =
 
     let registers =
         passManager
@@ -301,157 +316,169 @@ let private genAssembly passManager irModule: AssemblyLine list =
 
     basicBlocks
     |> Array.indexed
-    |> Array.fold (fun list (bbIndex, bbValue) ->
-        let bb = !bbValue |> Value.asBasicBlock
+    |> Array.fold
+        (fun list (bbIndex, bbValue) ->
+            let bb = !bbValue |> Value.asBasicBlock
 
-        let list = (bbValue |> getName |> Label) :: list
+            let list = (bbValue |> getName |> Label) :: list
 
-        bb
-        |> BasicBlock.instructions
-        |> List.fold (fun list instr ->
+            bb
+            |> BasicBlock.instructions
+            |> List.fold
+                (fun list instr ->
 
-            let list =
-                if Value.isTerminating !instr
-                then genPhiMoves liveInfo registers (!instr |> Value.parentBlock |> Option.get) list
-                else list
+                    let list =
+                        if Value.isTerminating !instr then
+                            genPhiMoves liveInfo registers (!instr |> Value.parentBlock |> Option.get) list
+                        else
+                            list
 
-            match instr with
-            | LoadOp (RegisterOp _ as op) ->
-                prependMove (operandToBus op |> Option.get) (operandToBus instr |> Option.get) list
-            | StoreOp (op, (RegisterOp _ as instr)) ->
-                prependMove (operandToBus op |> Option.get) (operandToBus instr |> Option.get) list
-            | BinOp Add (lhs, rhs)
-            | BinOp And (lhs, rhs) ->
-                let kind =
                     match instr with
-                    | BinOp Add _ -> ALU.Add
-                    | BinOp And _ -> ALU.And
-                    | _ -> failwith "Internal Compiler Error"
+                    | LoadOp (RegisterOp _ as op) ->
+                        prependMove (operandToBus op |> Option.get) (operandToBus instr |> Option.get) list
+                    | StoreOp (op, (RegisterOp _ as instr)) ->
+                        prependMove (operandToBus op |> Option.get) (operandToBus instr |> Option.get) list
+                    | BinOp Add (lhs, rhs)
+                    | BinOp And (lhs, rhs) ->
+                        let kind =
+                            match instr with
+                            | BinOp Add _ -> ALU.Add
+                            | BinOp And _ -> ALU.And
+                            | _ -> failwith "Internal Compiler Error"
 
-                prependOperation
-                    { Operation.Default with
-                          AMux = Some AMux.ABus
-                          SBus = instr |> operandToBus
-                          ABus = lhs |> operandToBus
-                          BBus = rhs |> operandToBus
-                          ALU = kind |> Some
-                          Shifter = Some Shifter.Noop }
-                    list
-            | UnaryOp Not value ->
-                prependOperation
-                    { Operation.Default with
-                          AMux = Some AMux.ABus
-                          SBus = instr |> operandToBus
-                          ABus = value |> operandToBus
-                          ALU = Some ALU.Neg
-                          Shifter = Some Shifter.Noop }
-                    list
-            | BinOp Shl (value, ConstOp 1s) ->
-                prependOperation
-                    { Operation.Default with
-                          AMux = Some AMux.ABus
-                          SBus = instr |> operandToBus
-                          ABus = value |> operandToBus
-                          ALU = Some ALU.ABus
-                          Shifter = Some Shifter.Left }
-                    list
-            | BinOp LShr (value, ConstOp 1s) ->
-                prependOperation
-                    { Operation.Default with
-                          AMux = Some AMux.ABus
-                          SBus = instr |> operandToBus
-                          ABus = value |> operandToBus
-                          ALU = Some ALU.ABus
-                          Shifter = Some Shifter.Right }
-                    list
-            | GotoOp branch ->
+                        prependOperation
+                            { Operation.Default with
+                                  AMux = Some AMux.ABus
+                                  SBus = instr |> operandToBus
+                                  ABus = lhs |> operandToBus
+                                  BBus = rhs |> operandToBus
+                                  ALU = kind |> Some
+                                  Shifter = Some Shifter.Noop }
+                            list
+                    | UnaryOp Not value ->
+                        prependOperation
+                            { Operation.Default with
+                                  AMux = Some AMux.ABus
+                                  SBus = instr |> operandToBus
+                                  ABus = value |> operandToBus
+                                  ALU = Some ALU.Neg
+                                  Shifter = Some Shifter.Noop }
+                            list
+                    | BinOp Shl (value, ConstOp 1s) ->
+                        prependOperation
+                            { Operation.Default with
+                                  AMux = Some AMux.ABus
+                                  SBus = instr |> operandToBus
+                                  ABus = value |> operandToBus
+                                  ALU = Some ALU.ABus
+                                  Shifter = Some Shifter.Left }
+                            list
+                    | BinOp LShr (value, ConstOp 1s) ->
+                        prependOperation
+                            { Operation.Default with
+                                  AMux = Some AMux.ABus
+                                  SBus = instr |> operandToBus
+                                  ABus = value |> operandToBus
+                                  ALU = Some ALU.ABus
+                                  Shifter = Some Shifter.Right }
+                            list
+                    | GotoOp branch ->
 
-                if Some branch
-                   <> Array.tryItem (bbIndex + 1) basicBlocks then
-                    prependOperation
-                        { Operation.Default with
-                              Address = branch |> getName |> Some
-                              Condition = Some Cond.None }
-                        list
-                else
-                    list
-            | CondBrOp (kind, value, trueBranch, falseBranch) ->
-                let list =
-                    prependOperation
-                        { Operation.Default with
-                              Address = trueBranch |> getName |> Some
-                              AMux = Some AMux.ABus
-                              Condition = if kind = Negative then Some Cond.Neg else Some Cond.Zero
-                              ABus = value |> operandToBus
-                              ALU = Some ALU.ABus
-                              Shifter = None }
-                        list
+                        if Some branch
+                           <> Array.tryItem (bbIndex + 1) basicBlocks then
+                            prependOperation
+                                { Operation.Default with
+                                      Address = branch |> getName |> Some
+                                      Condition = Some Cond.None }
+                                list
+                        else
+                            list
+                    | CondBrOp (kind, value, trueBranch, falseBranch) ->
+                        let list =
+                            prependOperation
+                                { Operation.Default with
+                                      Address = trueBranch |> getName |> Some
+                                      AMux = Some AMux.ABus
+                                      Condition =
+                                          if kind = Negative then
+                                              Some Cond.Neg
+                                          else
+                                              Some Cond.Zero
+                                      ABus = value |> operandToBus
+                                      ALU = Some ALU.ABus
+                                      Shifter = None }
+                                list
 
-                if Some falseBranch = Array.tryItem (bbIndex + 1) basicBlocks then
-                    list
-                else
-                    prependOperation
-                        { Operation.Default with
-                              Address = falseBranch |> getName |> Some
-                              Condition = Some Cond.None }
-                        list
-            | LoadOp value ->
-                let list =
-                    prependOperation
-                        { Operation.Default with
-                              MemoryAccess = Some MemoryAccess.Read
-                              MARWrite = Some true
-                              BBus = value |> operandToBus }
-                        list
+                        if Some falseBranch = Array.tryItem (bbIndex + 1) basicBlocks then
+                            list
+                        else
+                            prependOperation
+                                { Operation.Default with
+                                      Address = falseBranch |> getName |> Some
+                                      Condition = Some Cond.None }
+                                list
+                    | LoadOp value ->
+                        let list =
+                            prependOperation
+                                { Operation.Default with
+                                      MemoryAccess = Some MemoryAccess.Read
+                                      MARWrite = Some true
+                                      BBus = value |> operandToBus }
+                                list
 
-                let list =
-                    prependOperation
-                        { Operation.Default with
-                              MemoryAccess = Some MemoryAccess.Read
-                              MARWrite = Some false }
-                        list
+                        let list =
+                            prependOperation
+                                { Operation.Default with
+                                      MemoryAccess = Some MemoryAccess.Read
+                                      MARWrite = Some false }
+                                list
 
-                prependOperation
-                    { Operation.Default with
-                          SBus = operandToBus instr
-                          AMux = Some AMux.MBR
-                          ALU = Some ALU.ABus
-                          Shifter = Some Shifter.Noop }
-                    list
-            | StoreOp (value, destination) ->
-                let list =
-                    prependOperation
-                        { Operation.Default with
-                              MemoryAccess = Some MemoryAccess.Write
-                              MARWrite = Some true
-                              MBRWrite = Some true
-                              BBus = destination |> operandToBus
-                              ABus = value |> operandToBus
-                              ALU = Some ALU.ABus
-                              AMux = Some AMux.ABus
-                              Shifter = Some Shifter.Noop }
-                        list
+                        prependOperation
+                            { Operation.Default with
+                                  SBus = operandToBus instr
+                                  AMux = Some AMux.MBR
+                                  ALU = Some ALU.ABus
+                                  Shifter = Some Shifter.Noop }
+                            list
+                    | StoreOp (value, destination) ->
+                        let list =
+                            prependOperation
+                                { Operation.Default with
+                                      MemoryAccess = Some MemoryAccess.Write
+                                      MARWrite = Some true
+                                      MBRWrite = Some true
+                                      BBus = destination |> operandToBus
+                                      ABus = value |> operandToBus
+                                      ALU = Some ALU.ABus
+                                      AMux = Some AMux.ABus
+                                      Shifter = Some Shifter.Noop }
+                                list
 
-                prependOperation
-                    { Operation.Default with
-                          MemoryAccess = Some MemoryAccess.Write
-                          MBRWrite = Some false
-                          MARWrite = Some false }
-                    list
-            | PhiOp _ -> list
-            | _ -> failwith "Internal Compiler Error: Can't compile IR instruction to assembly") list) []
+                        prependOperation
+                            { Operation.Default with
+                                  MemoryAccess = Some MemoryAccess.Write
+                                  MBRWrite = Some false
+                                  MARWrite = Some false }
+                            list
+                    | PhiOp _ -> list
+                    | _ -> failwith "Internal Compiler Error: Can't compile IR instruction to assembly")
+                list)
+        []
     |> List.rev
 
 let private removeUnusedLabels _ assemblyList =
     let usedLabels =
         assemblyList
-        |> Seq.fold (fun set assembly ->
-            match assembly with
-            | Operation { Address = Some s } -> Set.add s set
-            | _ -> set) (Set([]))
+        |> Seq.fold
+            (fun set assembly ->
+                match assembly with
+                | Operation { Address = Some s } -> Set.add s set
+                | _ -> set)
+            (Set([]))
 
     assemblyList
-    |> Seq.filter (function
+    |> Seq.filter
+        (function
         | Label s -> usedLabels |> Set.contains s
         | _ -> true)
 
@@ -459,43 +486,50 @@ let removeRedundantLabels _ assemblyList =
     let replacements =
         assemblyList
         |> Seq.windowed 2
-        |> Seq.fold (fun replaced assembly ->
-            match assembly with
-            | [| Label first; Label second |] ->
-                match replaced |> Map.tryFind first with
-                | Some found -> replaced |> Map.add second found
-                | None -> replaced |> Map.add second first
-            | _ -> replaced) (Map.empty)
+        |> Seq.fold
+            (fun replaced assembly ->
+                match assembly with
+                | [| Label first; Label second |] ->
+                    match replaced |> Map.tryFind first with
+                    | Some found -> replaced |> Map.add second found
+                    | None -> replaced |> Map.add second first
+                | _ -> replaced)
+            Map.empty
 
     assemblyList
-    |> Seq.choose (fun assembly ->
-        match assembly with
-        | Operation ({ Address = Some s } as op) ->
-            match replacements |> Map.tryFind s with
-            | Some s -> Operation { op with Address = Some s } |> Some
-            | None -> Some assembly
-        | Label s when replacements |> Map.containsKey s -> None
-        | _ -> assembly |> Some)
+    |> Seq.choose
+        (fun assembly ->
+            match assembly with
+            | Operation ({ Address = Some s } as op) ->
+                match replacements |> Map.tryFind s with
+                | Some s -> Operation { op with Address = Some s } |> Some
+                | None -> Some assembly
+            | Label s when replacements |> Map.containsKey s -> None
+            | _ -> assembly |> Some)
 
 let genMachineCode _ assemblyList =
     let machineCode, symbolTable =
         assemblyList
-        |> Seq.fold (fun (result, symbolTable) assembly ->
-            match assembly with
-            | Label s ->
-                (result,
-                 symbolTable
-                 |> Map.add s (List.length result |> uint8))
-            | Operation ({ Address = Some s } as op) -> ((op |> Operation.asMachineCode, Some s) :: result, symbolTable)
-            | Operation op -> ((op |> Operation.asMachineCode, None) :: result, symbolTable)) ([], Map.empty)
+        |> Seq.fold
+            (fun (result, symbolTable) assembly ->
+                match assembly with
+                | Label s ->
+                    (result,
+                     symbolTable
+                     |> Map.add s (List.length result |> uint8))
+                | Operation ({ Address = Some s } as op) ->
+                    ((op |> Operation.asMachineCode, Some s) :: result, symbolTable)
+                | Operation op -> ((op |> Operation.asMachineCode, None) :: result, symbolTable))
+            ([], Map.empty)
 
     machineCode
-    |> Seq.map (fun (instr, address) ->
-        match address with
-        | None -> instr
-        | Some s ->
-            let address = symbolTable |> Map.find s
-            instr ||| (address |> int))
+    |> Seq.map
+        (fun (instr, address) ->
+            match address with
+            | None -> instr
+            | Some s ->
+                let address = symbolTable |> Map.find s
+                instr ||| (address |> int))
     |> Seq.rev
 
 let genAssemblyPass =

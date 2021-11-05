@@ -36,47 +36,50 @@ type private TokenType =
     | Plus
 
 let private tokenize chars =
-    Seq.unfold (fun chars ->
-
-        let chars =
-            chars |> List.skipWhile Char.IsWhiteSpace
-
-        let chars =
-            match chars with
-            | '#' :: chars ->
-                chars
-                |> List.skipWhile ((<>) '\n')
-                |> List.skipWhile Char.IsWhiteSpace
-            | _ -> chars
-
-        match chars with
-        | [] -> None
-        | '<' :: '-' :: chars -> Some(Arrow, chars)
-        | '1' :: chars -> Some(One, chars)
-        | '0' :: chars -> Some(Zero, chars)
-        | '-' :: chars -> Some(Minus, chars)
-        | '~' :: chars -> Some(Not, chars)
-        | '(' :: chars -> Some(OpenParentheses, chars)
-        | ')' :: chars -> Some(CloseParentheses, chars)
-        | ';' :: chars -> Some(SemiColon, chars)
-        | ':' :: chars -> Some(Colon, chars)
-        | '.' :: chars -> Some(Dot, chars)
-        | '&' :: chars -> Some(And, chars)
-        | '+' :: chars -> Some(Plus, chars)
-        | (c :: _) as chars when Char.IsLetter c || c = '_' || c = '$' ->
-            let identifier =
-                chars
-                |> List.takeWhile (fun c ->
-                    Char.IsLetterOrDigit c
-                    || c = '_'
-                    || c = '$'
-                    || c = '.')
+    Seq.unfold
+        (fun chars ->
 
             let chars =
-                chars |> List.skip (List.length identifier)
+                chars |> List.skipWhile Char.IsWhiteSpace
 
-            Some(identifier |> Array.ofList |> String |> Identifier, chars)
-        | c :: _ -> failwithf "Invalid character '%c'" c) chars
+            let chars =
+                match chars with
+                | '#' :: chars ->
+                    chars
+                    |> List.skipWhile ((<>) '\n')
+                    |> List.skipWhile Char.IsWhiteSpace
+                | _ -> chars
+
+            match chars with
+            | [] -> None
+            | '<' :: '-' :: chars -> Some(Arrow, chars)
+            | '1' :: chars -> Some(One, chars)
+            | '0' :: chars -> Some(Zero, chars)
+            | '-' :: chars -> Some(Minus, chars)
+            | '~' :: chars -> Some(Not, chars)
+            | '(' :: chars -> Some(OpenParentheses, chars)
+            | ')' :: chars -> Some(CloseParentheses, chars)
+            | ';' :: chars -> Some(SemiColon, chars)
+            | ':' :: chars -> Some(Colon, chars)
+            | '.' :: chars -> Some(Dot, chars)
+            | '&' :: chars -> Some(And, chars)
+            | '+' :: chars -> Some(Plus, chars)
+            | c :: _ as chars when Char.IsLetter c || c = '_' || c = '$' ->
+                let identifier =
+                    chars
+                    |> List.takeWhile
+                        (fun c ->
+                            Char.IsLetterOrDigit c
+                            || c = '_'
+                            || c = '$'
+                            || c = '.')
+
+                let chars =
+                    chars |> List.skip (List.length identifier)
+
+                Some(identifier |> Array.ofList |> String |> Identifier, chars)
+            | c :: _ -> failwithf $"Invalid character '%c{c}'")
+        chars
     |> Seq.cache
 
 (*
@@ -152,14 +155,20 @@ let private lookAhead n (seq: seq<_>) =
     use e = seq.GetEnumerator()
 
     [ 1 .. n ]
-    |> List.fold (fun result _ -> if e.MoveNext() then e.Current :: result else result) []
+    |> List.fold
+        (fun result _ ->
+            if e.MoveNext() then
+                e.Current :: result
+            else
+                result)
+        []
     |> List.rev
 
 let private require tokenType tokens =
     match Seq.tryHead tokens with
-    | None -> failwithf "Expected '%A'" tokenType
+    | None -> failwithf $"Expected '%A{tokenType}'"
     | Some t when t = tokenType -> (t, Seq.tail tokens)
-    | Some t -> failwithf "Expected '%A' instead of '%A'" tokenType t
+    | Some t -> failwithf $"Expected '%A{tokenType}' instead of '%A{t}'"
 
 let private parseRegister tokens =
     match Seq.tryHead tokens with
@@ -179,7 +188,7 @@ let private parseRegister tokens =
     | Some (Identifier "PC") -> (PC, Seq.tail tokens)
     | Some (Identifier "MAR") -> (MAR, Seq.tail tokens)
     | Some (Identifier "MBR") -> (MBR, Seq.tail tokens)
-    | Some t -> failwithf "Expected Register instead of '%A'" t
+    | Some t -> failwithf $"Expected Register instead of '%A{t}'"
 
 let rec private parseOperand tokens =
     match Seq.tryHead tokens with
@@ -209,7 +218,10 @@ and private parseOperation tokens =
         let tokens =
             tokens |> require CloseParentheses |> snd
 
-        if s = "lsh" then (LeftShift operation, tokens) else (RightShift operation, tokens)
+        if s = "lsh" then
+            (LeftShift operation, tokens)
+        else
+            (RightShift operation, tokens)
     | Some TokenType.Not ->
         let tokens = tokens |> Seq.tail
         let operand, tokens = parseOperand tokens
@@ -221,7 +233,11 @@ and private parseOperation tokens =
         | Some (Plus
         | TokenType.And as op) ->
             let other, tokens = tokens |> Seq.tail |> parseOperand
-            if op = Plus then (Add(operand, other), tokens) else (And(operand, other), tokens)
+
+            if op = Plus then
+                (Add(operand, other), tokens)
+            else
+                (And(operand, other), tokens)
         | _ -> (Read operand, tokens)
 
 let rec private parseInstruction tokens =
@@ -268,28 +284,30 @@ let rec private parseInstruction tokens =
 
 let private parseFile tokens =
     { Lines =
-          Seq.unfold (fun tokens ->
-              match Seq.tryHead tokens with
-              | None -> None
-              | Some Colon ->
-                  let tokens = tokens |> Seq.tail
+          Seq.unfold
+              (fun tokens ->
+                  match Seq.tryHead tokens with
+                  | None -> None
+                  | Some Colon ->
+                      let tokens = tokens |> Seq.tail
 
-                  match tokens |> Seq.tryHead with
-                  | Some (Identifier s) -> Some(LabelLine s, tokens |> Seq.tail)
-                  | _ -> failwith "Expected identifier after ':'"
-              | _ ->
-                  let result, tokens = parseInstruction tokens
-
-                  let rec parseInstructionList tokens =
                       match tokens |> Seq.tryHead with
-                      | Some SemiColon ->
-                          let result, tokens = tokens |> Seq.tail |> parseInstruction
-                          let list, tokens = parseInstructionList tokens
-                          (result :: list, tokens)
-                      | _ -> ([], tokens)
+                      | Some (Identifier s) -> Some(LabelLine s, tokens |> Seq.tail)
+                      | _ -> failwith "Expected identifier after ':'"
+                  | _ ->
+                      let result, tokens = parseInstruction tokens
 
-                  let list, tokens = parseInstructionList tokens
-                  Some(InstructionLine(result :: list), tokens)) tokens
+                      let rec parseInstructionList tokens =
+                          match tokens |> Seq.tryHead with
+                          | Some SemiColon ->
+                              let result, tokens = tokens |> Seq.tail |> parseInstruction
+                              let list, tokens = parseInstructionList tokens
+                              (result :: list, tokens)
+                          | _ -> ([], tokens)
+
+                      let list, tokens = parseInstructionList tokens
+                      Some(InstructionLine(result :: list), tokens))
+              tokens
           |> List.ofSeq }
 
 let rec private visitOperand operand =
@@ -376,15 +394,13 @@ and private visitOperation operation =
         let op = visitOperation operation
 
         match op with
-        | { Shifter = (None
-            | Some Shifter.Noop) } -> { op with Shifter = Some Shifter.Left }
+        | { Shifter = (None | Some Shifter.Noop) } -> { op with Shifter = Some Shifter.Left }
         | _ -> failwith "Operation can't use the shifter twice"
     | RightShift operation ->
         let op = visitOperation operation
 
         match op with
-        | { Shifter = (None
-            | Some Shifter.Noop) } -> { op with Shifter = Some Shifter.Right }
+        | { Shifter = (None | Some Shifter.Noop) } -> { op with Shifter = Some Shifter.Right }
         | _ -> failwith "Operation can't use the shifter twice"
     | Add (lhs, rhs)
     | And (lhs, rhs) ->
@@ -478,58 +494,58 @@ let private visitInstructions instr =
         | _ when Operation.canCombine op current -> Operation.combine op current
         | { ABus = aBus
             BBus = bBus
-            ALU = (None
-            | Some ALU.And
-            | Some ALU.Add)
-            MARWrite = (None
-            | Some false) },
-          _ when { op with BBus = aBus; ABus = bBus }
-                 |> Operation.canCombine current ->
+            ALU = (None | Some ALU.And | Some ALU.Add)
+            MARWrite = (None | Some false) },
+          _ when
+            { op with BBus = aBus; ABus = bBus }
+            |> Operation.canCombine current
+            ->
             { op with BBus = aBus; ABus = bBus }
             |> Operation.combine current
         | _,
           { ABus = aBus
             BBus = bBus
-            ALU = (None
-            | Some ALU.And
-            | Some ALU.Add)
-            MARWrite = (None
-            | Some false) } when { current with
-                                       BBus = aBus
-                                       ABus = bBus }
-                                 |> Operation.canCombine op ->
+            ALU = (None | Some ALU.And | Some ALU.Add)
+            MARWrite = (None | Some false) } when
+            { current with
+                  BBus = aBus
+                  ABus = bBus }
+            |> Operation.canCombine op
+            ->
             { current with
                   BBus = aBus
                   ABus = bBus }
             |> Operation.combine op
-        | _ -> failwithf "Failed to combine '%s' and '%s'" (op.ToString()) (current.ToString())
+        | _ -> failwithf $"Failed to combine '%s{op.ToString()}' and '%s{current.ToString()}'"
 
 
     instr
-    |> List.fold (fun current instr ->
-        match instr with
-        | Operation (maybeDest, operation) -> visitOperation current maybeDest operation
-        | Control (condition, address) ->
-            match (current, condition) with
-            | { Condition = Some _ }, _ -> failwith "Can't apply jumps to an instruction more than once"
-            | _, None ->
-                { current with
-                      Condition = Some Cond.None
-                      Address = Some address }
-            | _, Some CondZero ->
-                { current with
-                      Condition = Some Cond.Zero
-                      Address = Some address }
-            | _, Some CondNegative ->
-                { current with
-                      Condition = Some Cond.Neg
-                      Address = Some address }
-        | MemoryAccess memoryAccess ->
-            if current.MemoryAccess |> Option.isSome then
-                failwith "Can't apply memory access twice"
-            else
-                { current with
-                      MemoryAccess = Some memoryAccess }) op
+    |> List.fold
+        (fun current instr ->
+            match instr with
+            | Operation (maybeDest, operation) -> visitOperation current maybeDest operation
+            | Control (condition, address) ->
+                match (current, condition) with
+                | { Condition = Some _ }, _ -> failwith "Can't apply jumps to an instruction more than once"
+                | _, None ->
+                    { current with
+                          Condition = Some Cond.None
+                          Address = Some address }
+                | _, Some CondZero ->
+                    { current with
+                          Condition = Some Cond.Zero
+                          Address = Some address }
+                | _, Some CondNegative ->
+                    { current with
+                          Condition = Some Cond.Neg
+                          Address = Some address }
+            | MemoryAccess memoryAccess ->
+                if current.MemoryAccess |> Option.isSome then
+                    failwith "Can't apply memory access twice"
+                else
+                    { current with
+                          MemoryAccess = Some memoryAccess })
+        op
 
 
 

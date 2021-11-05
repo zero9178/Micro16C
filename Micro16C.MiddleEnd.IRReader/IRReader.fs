@@ -51,11 +51,12 @@ let rec private tokenize chars =
     | c :: _ when Char.IsLetter c || c = '_' || c = '$' || c = '.' ->
         let identifier =
             chars
-            |> List.takeWhile (fun c ->
-                Char.IsLetterOrDigit c
-                || c = '_'
-                || c = '$'
-                || c = '.')
+            |> List.takeWhile
+                (fun c ->
+                    Char.IsLetterOrDigit c
+                    || c = '_'
+                    || c = '$'
+                    || c = '.')
 
         let chars =
             chars |> List.skip (List.length identifier)
@@ -73,7 +74,7 @@ let rec private tokenize chars =
     | ',' :: rest -> Comma :: tokenize rest
     | ';' :: rest -> rest |> List.skipWhile ((<>) '\n') |> tokenize
     | c :: rest when Char.IsWhiteSpace c -> tokenize rest
-    | c :: _ -> failwithf "Invalid character '%c'" c
+    | c :: _ -> failwithf $"Invalid character '%c{c}'"
 
 (*
 Grammar:
@@ -153,9 +154,9 @@ type private BasicBlock =
 
 let private require tokenType =
     function
-    | [] -> failwithf "Expected '%A'" tokenType
+    | [] -> failwithf $"Expected '%A{tokenType}'"
     | t :: rest when t = tokenType -> (t, rest)
-    | t :: _ -> failwithf "Expected '%A' instead of '%A'" tokenType t
+    | t :: _ -> failwithf $"Expected '%A{tokenType}' instead of '%A{t}'"
 
 let private parseValue tokens =
     match tokens |> require Percent |> snd with
@@ -184,7 +185,7 @@ let private parseOperand =
     | Identifier "R10" :: tokens -> (R10, tokens)
     | Identifier "AC" :: tokens -> (AC, tokens)
     | Identifier "PC" :: tokens -> (PC, tokens)
-    | t :: _ -> failwithf "Expected Operand instead of %A" t
+    | t :: _ -> failwithf $"Expected Operand instead of %A{t}"
     | _ -> failwith "Expected Operand"
 
 let private parseBasicBlock tokens =
@@ -273,16 +274,18 @@ let private parseBasicBlock tokens =
                 let _, tokens = require CloseParentheses tokens
 
                 let list =
-                    Seq.unfold (fun tokens ->
-                        if tokens |> List.tryHead <> Some OpenParentheses then
-                            None
-                        else
-                            let tokens = tokens |> List.tail
-                            let op, tokens = parseOperand tokens
-                            let _, tokens = require Comma tokens
-                            let value, tokens = parseValue tokens
-                            let _, tokens = require CloseParentheses tokens
-                            Some(((op, value), tokens), tokens)) tokens
+                    Seq.unfold
+                        (fun tokens ->
+                            if tokens |> List.tryHead <> Some OpenParentheses then
+                                None
+                            else
+                                let tokens = tokens |> List.tail
+                                let op, tokens = parseOperand tokens
+                                let _, tokens = require Comma tokens
+                                let value, tokens = parseValue tokens
+                                let _, tokens = require CloseParentheses tokens
+                                Some(((op, value), tokens), tokens))
+                        tokens
                     |> List.ofSeq
 
                 let incoming, tokens =
@@ -297,7 +300,7 @@ let private parseBasicBlock tokens =
                 (Phi(value, (fstOp, fstValue) :: incoming)
                  :: result,
                  tokens)
-            | t :: _ -> failwithf "Expected instruction instead of %A after '='" t
+            | t :: _ -> failwithf $"Expected instruction instead of %A{t} after '='"
             | [] -> failwith "Expected instruction after '='"
         | Identifier "goto" :: tokens ->
             let value, tokens = parseValue tokens
@@ -310,7 +313,7 @@ let private parseBasicBlock tokens =
                 match tokens with
                 | LessThan :: tokens -> (CondBrKind.Negative, tokens)
                 | Equals :: tokens -> (CondBrKind.Zero, tokens)
-                | t :: _ -> failwithf "Expected '=' or '<' instead of %A" t
+                | t :: _ -> failwithf $"Expected '=' or '<' instead of %A{t}"
                 | [] -> failwith "Expected '=' or '<'"
 
             let _, tokens = require (TokenType.Constant 0) tokens
@@ -327,7 +330,7 @@ let private parseBasicBlock tokens =
             let destination, tokens = parseOperand tokens
             let result, tokens = parseInstruction tokens
             (Store(value, destination) :: result, tokens)
-        | t :: _ -> failwithf "Unexpected token %A" t
+        | t :: _ -> failwithf $"Unexpected token %A{t}"
         | [] -> ([], [])
 
     let instructions, tokens = parseInstruction tokens
@@ -338,13 +341,18 @@ let private parseBasicBlock tokens =
 
 
 let private parseModule =
-    Seq.unfold (fun tokens -> if List.isEmpty tokens then None else parseBasicBlock tokens |> Some)
+    Seq.unfold
+        (fun tokens ->
+            if List.isEmpty tokens then
+                None
+            else
+                parseBasicBlock tokens |> Some)
 
 type private ValueState =
     | Found of IR.Value ref
     | Pending of (IR.Value ref * int) list
 
-let fromString text: Module ref =
+let fromString text : Module ref =
 
     let irModule = ref Module.Default
     let builder = Builder.fromModule irModule
@@ -357,7 +365,7 @@ let fromString text: Module ref =
     let defineValue valueAst value map =
         match map |> Map.tryFind valueAst with
         | None -> map |> Map.add valueAst (Found value)
-        | Some (Found _) -> failwithf "Redefinition of %A" valueAst
+        | Some (Found _) -> failwithf $"Redefinition of %A{valueAst}"
         | Some (Pending waiting) ->
             waiting
             |> List.iter (fun (ref, index) -> Value.setOperand index value ref)
@@ -439,7 +447,7 @@ let fromString text: Module ref =
             map
         | ValueOperand valueAst ->
             match map |> Map.tryFind valueAst with
-            | (Some (Found ref)) ->
+            | Some (Found ref) ->
                 value |> Value.setOperand index ref
                 map
             | None ->
@@ -454,147 +462,155 @@ let fromString text: Module ref =
     |> List.ofSeq
     |> tokenize
     |> parseModule
-    |> Seq.fold (fun map bb ->
-        let block, builder =
-            builder
-            |> Builder.createBasicBlock (valueToName bb.Label)
+    |> Seq.fold
+        (fun map bb ->
+            let block, builder =
+                builder
+                |> Builder.createBasicBlock (valueToName bb.Label)
 
-        let builder =
-            builder |> Builder.setInsertBlock (Some block)
+            let builder =
+                builder |> Builder.setInsertBlock (Some block)
 
-        let map = defineValue bb.Label block map
+            let map = defineValue bb.Label block map
 
-        bb.Instructions
-        |> List.fold (fun map instr ->
-            match instr with
-            | Alloca value ->
-                let alloca =
-                    builder
-                    |> Builder.createNamedAlloca (valueToName value)
-                    |> fst
-
-                defineValue value alloca map
-            | Goto value ->
-                let goto =
-                    builder
-                    |> Builder.createGoto Value.UndefValue
-                    |> fst
-
-                assignOperand goto 0 (ValueOperand value) map
-            | And (value, lhs, rhs)
-            | Shl (value, lhs, rhs)
-            | LShr (value, lhs, rhs)
-            | AShr (value, lhs, rhs)
-            | Mul (value, lhs, rhs)
-            | SDiv (value, lhs, rhs)
-            | UDiv (value, lhs, rhs)
-            | SRem (value, lhs, rhs)
-            | URem (value, lhs, rhs)
-            | Add (value, lhs, rhs) ->
-
-                let kind =
+            bb.Instructions
+            |> List.fold
+                (fun map instr ->
                     match instr with
-                    | And _ -> BinaryKind.And
-                    | Add _ -> BinaryKind.Add
-                    | Shl _ -> BinaryKind.Shl
-                    | LShr _ -> BinaryKind.LShr
-                    | AShr _ -> BinaryKind.AShr
-                    | Mul _ -> BinaryKind.Mul
-                    | SDiv _ -> BinaryKind.SDiv
-                    | UDiv _ -> BinaryKind.UDiv
-                    | URem _ -> BinaryKind.URem
-                    | SRem _ -> BinaryKind.SRem
-                    | _ -> failwith "Not possible"
+                    | Alloca value ->
+                        let alloca =
+                            builder
+                            |> Builder.createNamedAlloca (valueToName value)
+                            |> fst
 
-                let bin =
-                    builder
-                    |> Builder.createNamedBinary (valueToName value) Value.UndefValue kind Value.UndefValue
-                    |> fst
+                        defineValue value alloca map
+                    | Goto value ->
+                        let goto =
+                            builder
+                            |> Builder.createGoto Value.UndefValue
+                            |> fst
 
-                let map = assignOperand bin 0 lhs map
-                let map = assignOperand bin 1 rhs map
-                defineValue value bin map
-            | Neg (value, operand)
-            | Not (value, operand) ->
-                let kind =
-                    match instr with
-                    | Not _ -> UnaryKind.Not
-                    | Neg _ -> UnaryKind.Negate
-                    | _ -> failwith "Not possible"
+                        assignOperand goto 0 (ValueOperand value) map
+                    | And (value, lhs, rhs)
+                    | Shl (value, lhs, rhs)
+                    | LShr (value, lhs, rhs)
+                    | AShr (value, lhs, rhs)
+                    | Mul (value, lhs, rhs)
+                    | SDiv (value, lhs, rhs)
+                    | UDiv (value, lhs, rhs)
+                    | SRem (value, lhs, rhs)
+                    | URem (value, lhs, rhs)
+                    | Add (value, lhs, rhs) ->
 
-                let unary =
-                    builder
-                    |> Builder.createNamedUnary (valueToName value) kind Value.UndefValue
-                    |> fst
+                        let kind =
+                            match instr with
+                            | And _ -> BinaryKind.And
+                            | Add _ -> BinaryKind.Add
+                            | Shl _ -> BinaryKind.Shl
+                            | LShr _ -> BinaryKind.LShr
+                            | AShr _ -> BinaryKind.AShr
+                            | Mul _ -> BinaryKind.Mul
+                            | SDiv _ -> BinaryKind.SDiv
+                            | UDiv _ -> BinaryKind.UDiv
+                            | URem _ -> BinaryKind.URem
+                            | SRem _ -> BinaryKind.SRem
+                            | _ -> failwith "Not possible"
 
-                let map = assignOperand unary 0 operand map
-                defineValue value unary map
-            | Load (value, operand) ->
-                let load =
-                    builder
-                    |> Builder.createNamedLoad (valueToName value) Value.UndefValue
-                    |> fst
+                        let bin =
+                            builder
+                            |> Builder.createNamedBinary (valueToName value) Value.UndefValue kind Value.UndefValue
+                            |> fst
 
-                let map = assignOperand load 0 operand map
-                defineValue value load map
-            | BrZero (cond, trueBranch, falseBranch)
-            | BrNeg (cond, trueBranch, falseBranch) ->
-                let kind =
-                    match instr with
-                    | BrZero _ -> CondBrKind.Zero
-                    | BrNeg _ -> CondBrKind.Negative
-                    | _ -> failwith "Not possible"
+                        let map = assignOperand bin 0 lhs map
+                        let map = assignOperand bin 1 rhs map
+                        defineValue value bin map
+                    | Neg (value, operand)
+                    | Not (value, operand) ->
+                        let kind =
+                            match instr with
+                            | Not _ -> UnaryKind.Not
+                            | Neg _ -> UnaryKind.Negate
+                            | _ -> failwith "Not possible"
 
-                let condBr =
-                    builder
-                    |> Builder.createCondBr kind Value.UndefValue Value.UndefValue Value.UndefValue
-                    |> fst
+                        let unary =
+                            builder
+                            |> Builder.createNamedUnary (valueToName value) kind Value.UndefValue
+                            |> fst
 
-                let map = assignOperand condBr 0 cond map
+                        let map = assignOperand unary 0 operand map
+                        defineValue value unary map
+                    | Load (value, operand) ->
+                        let load =
+                            builder
+                            |> Builder.createNamedLoad (valueToName value) Value.UndefValue
+                            |> fst
 
-                let map =
-                    assignOperand condBr 1 (ValueOperand trueBranch) map
+                        let map = assignOperand load 0 operand map
+                        defineValue value load map
+                    | BrZero (cond, trueBranch, falseBranch)
+                    | BrNeg (cond, trueBranch, falseBranch) ->
+                        let kind =
+                            match instr with
+                            | BrZero _ -> CondBrKind.Zero
+                            | BrNeg _ -> CondBrKind.Negative
+                            | _ -> failwith "Not possible"
 
-                assignOperand condBr 2 (ValueOperand falseBranch) map
-            | Store (value, destination) ->
-                let store =
-                    builder
-                    |> Builder.createStore Value.UndefValue Value.UndefValue
-                    |> fst
+                        let condBr =
+                            builder
+                            |> Builder.createCondBr kind Value.UndefValue Value.UndefValue Value.UndefValue
+                            |> fst
 
-                let map = assignOperand store 1 value map
-                assignOperand store 0 destination map
-            | Phi (value, list) ->
-                let phi =
-                    builder
-                    |> Builder.createNamedPhi
-                        (valueToName value)
-                           (List.init (List.length list) (fun _ -> (Value.UndefValue, Value.UndefValue)))
-                    |> fst
-
-                let map =
-                    list
-                    |> List.fold (fun (map, i) (operand, value) ->
-                        let map = assignOperand phi (2 * i) operand map
+                        let map = assignOperand condBr 0 cond map
 
                         let map =
-                            assignOperand phi (2 * i + 1) (ValueOperand value) map
+                            assignOperand condBr 1 (ValueOperand trueBranch) map
 
-                        (map, i + 1)) (map, 0)
-                    |> fst
+                        assignOperand condBr 2 (ValueOperand falseBranch) map
+                    | Store (value, destination) ->
+                        let store =
+                            builder
+                            |> Builder.createStore Value.UndefValue Value.UndefValue
+                            |> fst
 
-                defineValue value phi map) map) Map.empty
-    |> Map.filter (fun _ ->
-        function
-        | Found _ -> false
-        | _ -> true)
+                        let map = assignOperand store 1 value map
+                        assignOperand store 0 destination map
+                    | Phi (value, list) ->
+                        let phi =
+                            builder
+                            |> Builder.createNamedPhi
+                                (valueToName value)
+                                (List.init (List.length list) (fun _ -> (Value.UndefValue, Value.UndefValue)))
+                            |> fst
+
+                        let map =
+                            list
+                            |> List.fold
+                                (fun (map, i) (operand, value) ->
+                                    let map = assignOperand phi (2 * i) operand map
+
+                                    let map =
+                                        assignOperand phi (2 * i + 1) (ValueOperand value) map
+
+                                    (map, i + 1))
+                                (map, 0)
+                            |> fst
+
+                        defineValue value phi map)
+                map)
+        Map.empty
+    |> Map.filter
+        (fun _ ->
+            function
+            | Found _ -> false
+            | _ -> true)
     |> Some
     |> Option.filter (Map.isEmpty >> not)
-    |> Option.iter (fun x ->
-        x
-        |> Map.iter (fun _ -> (eprintfn "Undefined reference to %A"))
+    |> Option.iter
+        (fun x ->
+            x
+            |> Map.iter (fun _ -> (eprintfn "Undefined reference to %A"))
 
-        failwith "Linkage failed")
+            failwith "Linkage failed")
 
 
     irModule

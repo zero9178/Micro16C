@@ -109,13 +109,15 @@ type SourceObject =
             | ErrorTypeEnd -> String.length this.Source
 
         let i =
-            match this.Newlines
-                  |> List.tryFindBack (snd >> (>) offset) with
+            match
+                this.Newlines
+                |> List.tryFindBack (snd >> (>) offset)
+                with
             | None -> (-1, -1)
             | Some i -> i
 
         let prefix =
-            sprintf "%d:%d: %s\n" (fst i + 2) (offset - snd i) message
+            $"%d{fst i + 2}:%d{offset - snd i}: %s{message}\n"
 
         let endOffset =
             match this.Source.IndexOf(value = '\n', startIndex = snd i + 1) with
@@ -123,7 +125,7 @@ type SourceObject =
             | value -> value
 
         prefix
-        + sprintf "%4d | %s\n" (fst i + 2) this.Source.[(snd i + 1)..endOffset]
+        + $"%4d{fst i + 2} | %s{this.Source.[(snd i + 1)..endOffset]}\n"
 
 let createSourceObject (input: string) =
     let newLines =
@@ -147,7 +149,7 @@ let tokenize (input: string) =
 
     let readNumber offset input =
 
-        let (numberChars, numBase, skip) =
+        let numberChars, numBase, skip =
             match input with
             | '0' :: 'x' :: numberChars
             | '0' :: 'X' :: numberChars -> (numberChars, 16, 2)
@@ -157,52 +159,49 @@ let tokenize (input: string) =
         let set =
             match numBase with
             | 8 ->
-                Set
-                    ([ '0'
-                       '1'
-                       '2'
-                       '3'
-                       '4'
-                       '5'
-                       '6'
-                       '7' ])
+                Set [ '0'
+                      '1'
+                      '2'
+                      '3'
+                      '4'
+                      '5'
+                      '6'
+                      '7' ]
             | 10 ->
-                Set
-                    ([ '0'
-                       '1'
-                       '2'
-                       '3'
-                       '4'
-                       '5'
-                       '6'
-                       '7'
-                       '8'
-                       '9' ])
+                Set [ '0'
+                      '1'
+                      '2'
+                      '3'
+                      '4'
+                      '5'
+                      '6'
+                      '7'
+                      '8'
+                      '9' ]
             | 16 ->
-                Set
-                    ([ '0'
-                       '1'
-                       '2'
-                       '3'
-                       '4'
-                       '5'
-                       '6'
-                       '7'
-                       '8'
-                       '9'
-                       'a'
-                       'A'
-                       'b'
-                       'B'
-                       'c'
-                       'C'
-                       'd'
-                       'D'
-                       'e'
-                       'E'
-                       'f'
-                       'F' ])
-            | _ -> failwithf "Internal Compiler Error: Invalid base %d" numBase
+                Set [ '0'
+                      '1'
+                      '2'
+                      '3'
+                      '4'
+                      '5'
+                      '6'
+                      '7'
+                      '8'
+                      '9'
+                      'a'
+                      'A'
+                      'b'
+                      'B'
+                      'c'
+                      'C'
+                      'd'
+                      'D'
+                      'e'
+                      'E'
+                      'f'
+                      'F' ]
+            | _ -> failwithf $"Internal Compiler Error: Invalid base %d{numBase}"
 
         let numberChars =
             numberChars
@@ -230,8 +229,9 @@ let tokenize (input: string) =
         | _ ->
             try
                 (conversion numBase s |> Ok, rest)
-            with :? OverflowException ->
-                (sprintf "Integer literal '%s' too large for type int" spelling
+            with
+            | :? OverflowException ->
+                ($"Integer literal '%s{spelling}' too large for type int"
                  |> error offset,
                  rest)
 
@@ -258,31 +258,30 @@ let tokenize (input: string) =
                 Convert.ToInt16(s, 16) |> Ok
             with
             | :? OverflowException ->
-                sprintf "Hex literal '\x%s' does not fit into type int" s
+                $"Hex literal '\x%s{s}' does not fit into type int"
                 |> error offset
-            | _ ->
-                sprintf "Invalid hex literal '%s'" s
-                |> error offset
+            | _ -> $"Invalid hex literal '%s{s}'" |> error offset
 
-        | '\\' :: rest when List.length rest > 0
-                            && List.length rest <= 3
-                            && List.forall Char.IsDigit rest ->
+        | '\\' :: rest when
+            List.length rest > 0
+            && List.length rest <= 3
+            && List.forall Char.IsDigit rest
+            ->
             match rest with
             | [ c; _; _ ]
             | [ c; _ ]
             | [ c ]
             | [ _; c; _ ]
             | [ _; c ]
-            | [ _; _; c ] when c >= '8' ->
-                sprintf "Invalid octal character '%c'" c
-                |> error offset
+            | [ _; _; c ] when c >= '8' -> $"Invalid octal character '%c{c}'" |> error offset
             | _ ->
                 let s = rest |> Array.ofList |> String
 
                 try
                     Convert.ToInt16(s, 8) |> Ok
-                with :? OverflowException ->
-                    sprintf "Octal literal '\%s' does not fit into type int" s
+                with
+                | :? OverflowException ->
+                    $"Octal literal '\%s{s}' does not fit into type int"
                     |> error offset
         | [ '\\'; c ] ->
             match c with
@@ -298,7 +297,7 @@ let tokenize (input: string) =
             | 't' -> '\t' |> int16 |> Ok
             | 'v' -> '\v' |> int16 |> Ok
             | _ ->
-                sprintf "Unknown escape character '%c'" c
+                $"Unknown escape character '%c{c}'"
                 |> error offset
         | _ -> "Invalid character literal" |> error offset
 
@@ -329,10 +328,11 @@ let tokenize (input: string) =
 
             let num =
                 num
-                |> Result.map (fun num ->
-                    { Offset = offset
-                      Length = length
-                      Type = Literal num })
+                |> Result.map
+                    (fun num ->
+                        { Offset = offset
+                          Length = length
+                          Type = Literal num })
 
             (Some num, rest, offset + length)
         | c :: _ when Char.IsLetter c || c = '_' ->
@@ -381,17 +381,18 @@ let tokenize (input: string) =
 
             let character =
                 character
-                |> Result.map (fun c ->
-                    { Offset = offset
-                      Length = length
-                      Type = Literal c })
+                |> Result.map
+                    (fun c ->
+                        { Offset = offset
+                          Length = length
+                          Type = Literal c })
 
             (Some character, rest, offset + length)
         | '/' :: '/' :: rest ->
             let skipped = rest |> List.skipWhile ((<>) '\n')
             (None, skipped, offset + skipped.Length)
         | '/' :: '*' :: rest ->
-            let (error, skipped) = readBlockComment offset rest
+            let error, skipped = readBlockComment offset rest
 
             match error with
             | Ok _ -> (None, skipped, offset + skipped.Length)
@@ -737,22 +738,23 @@ let tokenize (input: string) =
              offset + 1)
         | c :: rest ->
             let err =
-                sprintf "Unexpected character '%c'" c
-                |> error offset
+                $"Unexpected character '%c{c}'" |> error offset
 
             (err |> Some, rest, offset + 1)
 
     input
     |> List.ofSeq
     |> (fun x -> (x, 0))
-    |> Seq.unfold (fun (chars, offset) ->
-        if chars |> List.isEmpty then
-            None
-        else
-            let token, chars, offset = tokenizeFirst offset chars
-            Some(token, (chars, offset)))
+    |> Seq.unfold
+        (fun (chars, offset) ->
+            if chars |> List.isEmpty then
+                None
+            else
+                let token, chars, offset = tokenizeFirst offset chars
+                Some(token, (chars, offset)))
     |> Seq.choose id
     |> ErrorHandling.foldResults
-    |> Result.map (fun tokens ->
-        { sourceObject with
-              Tokens = tokens |> List.rev })
+    |> Result.map
+        (fun tokens ->
+            { sourceObject with
+                  Tokens = tokens |> List.rev })
