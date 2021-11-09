@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net5.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Main.fs" />
+    <Compile Include="Startup.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Bolero" Version="0.*" />
+    <PackageReference Include="Bolero.Build" Version="0.*" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="5.0.*" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Micro16C.Backend\Micro16C.Backend.fsproj" />
+    <ProjectReference Include="..\..\..\Micro16C.Frontend.Codegen\Micro16C.Frontend.Codegen.fsproj" />
+    <ProjectReference Include="..\..\..\Micro16C.Frontend\Micro16C.Frontend.fsproj" />
+    <ProjectReference Include="..\..\..\Micro16C.MiddleEnd.IRReader\Micro16C.MiddleEnd.IRReader.fsproj" />
+    <ProjectReference Include="..\..\..\Micro16C.MiddleEnd\Micro16C.MiddleEnd.fsproj" />
+    <ProjectReference Include="..\..\..\Micro16C.Simulator\Micro16C.Simulator.fsproj" />
+  </ItemGroup>
+</Project>
