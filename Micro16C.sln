@@ -31,6 +31,8 @@ Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.Simulator.Tests", 
 EndProject
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.Web.Client", "Micro16C.Web\src\Micro16C.Web.Client\Micro16C.Web.Client.fsproj", "{EA1BC9CC-A12B-490A-A960-2B80AFAE9A68}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.CompileCode", "..\Micro16C.CompileCode\Micro16C.CompileCode.fsproj", "{946F3F13-F8E1-4230-B15E-DEAFF83C237F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -93,6 +95,10 @@ Global
 		{EA1BC9CC-A12B-490A-A960-2B80AFAE9A68}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EA1BC9CC-A12B-490A-A960-2B80AFAE9A68}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EA1BC9CC-A12B-490A-A960-2B80AFAE9A68}.Release|Any CPU.Build.0 = Release|Any CPU
+		{946F3F13-F8E1-4230-B15E-DEAFF83C237F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{946F3F13-F8E1-4230-B15E-DEAFF83C237F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{946F3F13-F8E1-4230-B15E-DEAFF83C237F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{946F3F13-F8E1-4230-B15E-DEAFF83C237F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
