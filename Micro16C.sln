@@ -1,30 +1,37 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C", "Micro16C.fsproj", "{7F5D8FE7-7744-468E-AD9D-14E04FDA44C3}"
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.31727.386
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C", "Micro16C.fsproj", "{7F5D8FE7-7744-468E-AD9D-14E04FDA44C3}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Frontend", "Micro16C.Frontend\Micro16C.Frontend.fsproj", "{23D8E6FD-BC4C-4301-9BD0-3D28BCAF5F11}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.Frontend", "Micro16C.Frontend\Micro16C.Frontend.fsproj", "{23D8E6FD-BC4C-4301-9BD0-3D28BCAF5F11}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Frontend.Tests", "Micro16C.Frontend.Tests\Micro16C.Frontend.Tests.fsproj", "{432C895D-DEB7-433F-B23A-744E332DCD14}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.Frontend.Tests", "Micro16C.Frontend.Tests\Micro16C.Frontend.Tests.fsproj", "{432C895D-DEB7-433F-B23A-744E332DCD14}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Backend", "Micro16C.Backend\Micro16C.Backend.fsproj", "{A486D8A6-4E04-4ADD-A94A-491E35C5012B}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.Backend", "Micro16C.Backend\Micro16C.Backend.fsproj", "{A486D8A6-4E04-4ADD-A94A-491E35C5012B}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.MiddleEnd", "Micro16C.MiddleEnd\Micro16C.MiddleEnd.fsproj", "{485FFD09-1514-4627-9895-772A12940B01}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.MiddleEnd", "Micro16C.MiddleEnd\Micro16C.MiddleEnd.fsproj", "{485FFD09-1514-4627-9895-772A12940B01}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.MiddleEnd.IRReader", "Micro16C.MiddleEnd.IRReader\Micro16C.MiddleEnd.IRReader.fsproj", "{8B90F6C1-93FC-46CE-BFAB-B44A4D608A7F}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.MiddleEnd.IRReader", "Micro16C.MiddleEnd.IRReader\Micro16C.MiddleEnd.IRReader.fsproj", "{8B90F6C1-93FC-46CE-BFAB-B44A4D608A7F}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.MiddleEnd.Tests", "Micro16C.MiddleEnd.Tests\Micro16C.MiddleEnd.Tests.fsproj", "{F7A4462C-B91A-47E9-9429-B88F9A78EBA1}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.MiddleEnd.Tests", "Micro16C.MiddleEnd.Tests\Micro16C.MiddleEnd.Tests.fsproj", "{F7A4462C-B91A-47E9-9429-B88F9A78EBA1}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Tests", "Micro16C.Tests\Micro16C.Tests.fsproj", "{3ED3370E-35AF-47E0-B7F0-FDA6EBFEEF01}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.Tests", "Micro16C.Tests\Micro16C.Tests.fsproj", "{3ED3370E-35AF-47E0-B7F0-FDA6EBFEEF01}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Backend.Tests", "Micro16C.Backend.Tests\Micro16C.Backend.Tests.fsproj", "{FAC2CFBC-755E-4DE2-A295-B4A357969C1D}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.Backend.Tests", "Micro16C.Backend.Tests\Micro16C.Backend.Tests.fsproj", "{FAC2CFBC-755E-4DE2-A295-B4A357969C1D}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C-as", "Micro16C-as\Micro16C-as.fsproj", "{4C4828F2-9F0D-4F37-9A8C-5094D98E8C5D}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C-as", "Micro16C-as\Micro16C-as.fsproj", "{4C4828F2-9F0D-4F37-9A8C-5094D98E8C5D}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Frontend.Codegen", "Micro16C.Frontend.Codegen\Micro16C.Frontend.Codegen.fsproj", "{66CB3E17-F5EE-43F0-914B-3CDDD8EDFCD9}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.Frontend.Codegen", "Micro16C.Frontend.Codegen\Micro16C.Frontend.Codegen.fsproj", "{66CB3E17-F5EE-43F0-914B-3CDDD8EDFCD9}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Simulator", "Micro16C.Simulator\Micro16C.Simulator.fsproj", "{4F840C4D-0BF2-4F92-A2AD-8681F6FC5046}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.Simulator", "Micro16C.Simulator\Micro16C.Simulator.fsproj", "{4F840C4D-0BF2-4F92-A2AD-8681F6FC5046}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.Simulator.Tests", "Micro16C.Simulator.Tests\Micro16C.Simulator.Tests.fsproj", "{206F97D0-4C4E-488E-9D6A-AF25D107C8E9}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.Simulator.Tests", "Micro16C.Simulator.Tests\Micro16C.Simulator.Tests.fsproj", "{206F97D0-4C4E-488E-9D6A-AF25D107C8E9}"
+EndProject
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Micro16C.Web.Client", "Micro16C.Web\src\Micro16C.Web.Client\Micro16C.Web.Client.fsproj", "{EA1BC9CC-A12B-490A-A960-2B80AFAE9A68}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Micro16C.CompileCode", "Micro16C.CompileCode\Micro16C.CompileCode.fsproj", "{946F3F13-F8E1-4230-B15E-DEAFF83C237F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -84,5 +91,19 @@ Global
 		{206F97D0-4C4E-488E-9D6A-AF25D107C8E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{206F97D0-4C4E-488E-9D6A-AF25D107C8E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{206F97D0-4C4E-488E-9D6A-AF25D107C8E9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EA1BC9CC-A12B-490A-A960-2B80AFAE9A68}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EA1BC9CC-A12B-490A-A960-2B80AFAE9A68}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EA1BC9CC-A12B-490A-A960-2B80AFAE9A68}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EA1BC9CC-A12B-490A-A960-2B80AFAE9A68}.Release|Any CPU.Build.0 = Release|Any CPU
+		{946F3F13-F8E1-4230-B15E-DEAFF83C237F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{946F3F13-F8E1-4230-B15E-DEAFF83C237F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{946F3F13-F8E1-4230-B15E-DEAFF83C237F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{946F3F13-F8E1-4230-B15E-DEAFF83C237F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {BDACE89B-E2D7-4F55-9038-5F23918B702A}
 	EndGlobalSection
 EndGlobal

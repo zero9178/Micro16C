@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net5.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <WarnOn>3390;$(WarnOn)</WarnOn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Library.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Micro16C.Backend\Micro16C.Backend.fsproj" />
+    <ProjectReference Include="..\Micro16C.Frontend.Codegen\Micro16C.Frontend.Codegen.fsproj" />
+    <ProjectReference Include="..\Micro16C.Frontend\Micro16C.Frontend.fsproj" />
+    <ProjectReference Include="..\Micro16C.MiddleEnd.IRReader\Micro16C.MiddleEnd.IRReader.fsproj" />
+    <ProjectReference Include="..\Micro16C.MiddleEnd\Micro16C.MiddleEnd.fsproj" />
+  </ItemGroup>
+
+</Project>

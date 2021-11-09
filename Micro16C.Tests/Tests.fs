@@ -2,6 +2,7 @@ module Tests
 
 open Micro16C.Backend
 open Micro16C.Simulator
+open Micro16C.CompileCode
 open Xunit
 open FsUnit.Xunit
 open FsUnit.CustomMatchers
@@ -17,7 +18,7 @@ let ``For loop`` () =
         }
         R1 = n;
         """
-        |> Micro16C.compile
+        |> compile
         |> Result.map
             (GenAssembly.genMachineCode ()
              >> Simulator.simulate
@@ -47,7 +48,7 @@ let ``Break and continue`` () =
         }
         R1 = n;
         """
-        |> Micro16C.compile
+        |> compile
         |> Result.map
             (GenAssembly.genMachineCode ()
              >> Simulator.simulate
@@ -70,7 +71,7 @@ let ``Break and continue`` () =
         }
         R1 = n;
         """
-        |> Micro16C.compile
+        |> compile
         |> Result.map
             (GenAssembly.genMachineCode ()
              >> Simulator.simulate
