@@ -137,7 +137,7 @@ type Main = Template<"wwwroot/main.html">
 
 let homePage model dispatch =
     Main.Home()
-      .CodeToCompile(model.codeToCompile, fun v -> dispatch (CompileCode v))
+      .CodeToCompile(model.codeToCompile, CompileCode >> dispatch)
       .GeneratedCode(model.generatedCode)
       .Elt()
 
