@@ -13,7 +13,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="5.0.*" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\Micro16C.CompileCode\Micro16C.CompileCode.fsproj" />
+    <ProjectReference Include="..\..\..\Micro16C.CompileCode\Micro16C.CompileCode.fsproj" />
     <ProjectReference Include="..\..\..\Micro16C.Backend\Micro16C.Backend.fsproj" />
     <ProjectReference Include="..\..\..\Micro16C.Simulator\Micro16C.Simulator.fsproj" />
   </ItemGroup>
